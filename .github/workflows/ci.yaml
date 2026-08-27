@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go: ['1.23.x', '1.24.x']
+        go: ['1.25.x']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -24,7 +24,7 @@ jobs:
           cache: true
       - run: go test ./...
       - run: go vet ./...
-      - run: go install honnef.co/go/tools/cmd/staticcheck@v0.6.1
+      - run: go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
       - run: staticcheck ./...
       - run: make build
       - run: ./bin/mksrv validate examples/workspace --json
@@ -45,9 +45,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
       - uses: hashicorp/setup-terraform@v3
         with:
+          # Must match internal/tf.Version. terraform_wrapper: false is required
+          # so hashicorp/terraform-exec can read Terraform's real stdout.
           terraform_version: 1.9.8
+          terraform_wrapper: false
       - run: terraform fmt -check -recursive infra
       - name: Validate Terraform roots
         shell: bash
@@ -57,6 +64,8 @@ jobs:
             terraform -chdir="$dir" init -backend=false -input=false
             terraform -chdir="$dir" validate
           done
+      - name: internal/tf integration tests
+        run: go test -tags=integration ./internal/tf/...
 
   snapshot:
     runs-on: ubuntu-latest
@@ -66,7 +75,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23.x'
+          go-version: '1.25.x'
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser

@@ -26,4 +26,25 @@ status, logs, or destroy behavior exists yet.
 Closed on 2026-08-27. The temporary M0 dependency-free CLI, YAML, and schema
 adapters were replaced with Cobra, `sigs.k8s.io/yaml`, and
 `santhosh-tekuri/jsonschema/v6`; the existing black-box tests passed unchanged.
-See ADR 0007 (which supersedes ADR 0006). M1 infrastructure work may now begin.
+See ADR 0007 (which supersedes ADR 0006).
+
+## M1 — in progress
+
+Design decisions recorded:
+
+- ADR 0008 — Terraform execution wrapper (`hashicorp/terraform-exec` +
+  `hashicorp/hc-install`), Terraform pinned to `1.9.8` via `internal/tf.Version`.
+  Go baseline raised to 1.25.
+- ADR 0009 — `mksrv init` generates a private workspace scaffold.
+
+Implemented:
+
+- `internal/tf` — `Version`, `CacheDir`, `Locate` (MKSRV_TERRAFORM → cache → PATH
+  → download), and `Runner` (`Init`, `Validate`, `Plan`, `Apply`, `Output`).
+  Unit-tested offline; `init`/`plan`/`apply`/`output` covered by an
+  `integration`-tagged test run in CI.
+- `version` now reports the real pinned Terraform version.
+
+Not yet implemented in M1: state-backend bootstrap, tfvars generation from
+`deployment.yaml`, the `aws-host` / `existing-host` / `dns` module contents,
+`mksrv init`, and the `plan --infra-only` / `apply --infra-only` commands.

@@ -31,12 +31,14 @@ data.
 
 ## M0 quick start
 
-Requirements: Go 1.23 or newer. The fleet host requirement for later milestones
+Requirements: Go 1.25 or newer. The fleet host requirement for later milestones
 is Rocky Linux 9 with systemd, SELinux enforcing, and Podman Quadlet support.
 
 The CLI is built on `spf13/cobra`; workspace YAML is parsed with
 `sigs.k8s.io/yaml` and validated with `santhosh-tekuri/jsonschema/v6`. The IANA
-timezone database is embedded via `time/tzdata`.
+timezone database is embedded via `time/tzdata`. From M1, Terraform is executed
+through `hashicorp/terraform-exec` and located or downloaded (version pinned by
+`internal/tf.Version`) with `hashicorp/hc-install`.
 
 ```bash
 make build

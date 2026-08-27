@@ -16,6 +16,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/fenandosr/mksrv/internal/cli"
+	"github.com/fenandosr/mksrv/internal/tf"
 )
 
 var (
@@ -24,10 +25,7 @@ var (
 	date    = "unknown"
 )
 
-const (
-	modulePath       = "github.com/fenandosr/mksrv"
-	terraformVersion = "managed-from-M1"
-)
+const modulePath = "github.com/fenandosr/mksrv"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -35,7 +33,7 @@ func main() {
 
 	app := cli.New(cli.BuildInfo{
 		Version: version, Commit: commit, Date: date,
-		ModulePath: modulePath, TerraformVersion: terraformVersion,
+		ModulePath: modulePath, TerraformVersion: tf.Version,
 	}, os.Stdout, os.Stderr)
 	if err := app.Execute(ctx, os.Args[1:]); err != nil {
 		if !cli.AlreadyPrinted(err) {
