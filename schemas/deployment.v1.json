@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mksrv.invalid/schemas/deployment.v1.json",
+  "title": "mksrv deployment v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "engine", "env", "mgmt_cidr", "aws", "backend", "dns", "identity", "hosts"],
+  "properties": {
+    "version": {"const": 1},
+    "engine": {"type": "string", "pattern": "^(?:dev|v[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)$"},
+    "env": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,15}$"},
+    "timezone": {"type": "string", "minLength": 3, "maxLength": 64, "default": "Etc/UTC"},
+    "mgmt_cidr": {"type": "string", "pattern": "^[0-9A-Fa-f:.]+/[0-9]{1,3}$"},
+    "aws": {"$ref": "#/$defs/aws"},
+    "backend": {"$ref": "#/$defs/backend"},
+    "dns": {"$ref": "#/$defs/dns"},
+    "identity": {"$ref": "#/$defs/identity"},
+    "mail": {"$ref": "#/$defs/mail"},
+    "hosts": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z0-9][a-z0-9-]{1,31}$"},
+      "additionalProperties": {"$ref": "#/$defs/host"}
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"enabled": {"type": "boolean", "default": false}}
+    }
+  },
+  "$defs": {
+    "aws": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["region"],
+      "properties": {
+        "region": {"type": "string", "pattern": "^[a-z]{2}(?:-gov)?-[a-z]+-[0-9]+$"},
+        "profile": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "bucket", "dynamodb_table"],
+      "properties": {
+        "type": {"const": "s3"},
+        "bucket": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"},
+        "key": {"type": "string", "minLength": 1, "maxLength": 512, "default": "mksrv.tfstate"},
+        "dynamodb_table": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{3,255}$"},
+        "region": {"type": "string", "pattern": "^[a-z]{2}(?:-gov)?-[a-z]+-[0-9]+$"}
+      }
+    },
+    "dns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "root_domain"],
+      "properties": {
+        "provider": {"type": "string", "enum": ["route53", "cloudflare", "rfc2136", "manual"]},
+        "root_domain": {"type": "string", "format": "hostname"},
+        "route53": {"$ref": "#/$defs/route53"},
+        "cloudflare": {"$ref": "#/$defs/cloudflare"},
+        "rfc2136": {"$ref": "#/$defs/rfc2136"}
+      },
+      "allOf": [
+        {"if": {"required": ["provider"], "properties": {"provider": {"const": "route53"}}}, "then": {"required": ["route53"]}},
+        {"if": {"required": ["provider"], "properties": {"provider": {"const": "cloudflare"}}}, "then": {"required": ["cloudflare"]}},
+        {"if": {"required": ["provider"], "properties": {"provider": {"const": "rfc2136"}}}, "then": {"required": ["rfc2136"]}}
+      ]
+    },
+    "route53": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "zone_id": {"type": "string", "pattern": "^Z[A-Z0-9]{10,31}$"},
+        "zone_name": {"type": "string", "format": "hostname"}
+      },
+      "oneOf": [
+        {"required": ["zone_id"], "not": {"required": ["zone_name"]}},
+        {"required": ["zone_name"], "not": {"required": ["zone_id"]}}
+      ]
+    },
+    "cloudflare": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["zone_id", "api_token_ref"],
+      "properties": {
+        "zone_id": {"type": "string", "pattern": "^[A-Fa-f0-9]{32}$"},
+        "api_token_ref": {"type": "string", "pattern": "^[a-z0-9_.-]+$"}
+      }
+    },
+    "rfc2136": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server", "key_ref"],
+      "properties": {
+        "server": {"type": "string", "minLength": 1, "maxLength": 255},
+        "key_ref": {"type": "string", "pattern": "^[a-z0-9_.-]+$"}
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keycloak_domain", "headscale_domain", "acme_email"],
+      "properties": {
+        "keycloak_domain": {"type": "string", "format": "hostname"},
+        "headscale_domain": {"type": "string", "format": "hostname"},
+        "acme_email": {"type": "string", "format": "email"}
+      }
+    },
+    "mail": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"inbound": {"type": "boolean", "default": false}}
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "stacks"],
+      "properties": {
+        "provider": {"type": "string", "enum": ["aws", "existing"]},
+        "instance_type": {"type": "string", "pattern": "^[a-z][a-z0-9.]+$"},
+        "root_gb": {"type": "integer", "minimum": 8, "maximum": 16384, "default": 30},
+        "data_gb": {"type": "integer", "minimum": 8, "maximum": 16384, "default": 40},
+        "address": {"type": "string", "minLength": 1, "maxLength": 255},
+        "ssh_user": {"type": "string", "pattern": "^[a-z_][a-z0-9_-]{0,31}$"},
+        "ssh_port": {"type": "integer", "minimum": 1, "maximum": 65535, "default": 22},
+        "advertise_exitnode": {"type": "boolean", "default": false},
+        "stacks": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"}}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["provider"], "properties": {"provider": {"const": "existing"}}},
+          "then": {
+            "required": ["address", "ssh_user"],
+            "not": {"anyOf": [{"required": ["instance_type"]}, {"required": ["root_gb"]}, {"required": ["data_gb"]}]}
+          }
+        },
+        {
+          "if": {"required": ["provider"], "properties": {"provider": {"const": "aws"}}},
+          "then": {"not": {"required": ["address"]}}
+        }
+      ]
+    }
+  }
+}

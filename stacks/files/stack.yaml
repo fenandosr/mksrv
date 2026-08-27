@@ -1,0 +1,24 @@
+name: files
+title: Files
+description: "Samba and Nextcloud for tenant file services"
+targets: [cloud, local]
+per_tenant: true
+depends_on: [identity]
+apps:
+  - name: samba
+    image: ghcr.io/servercontainers/samba:4.20.6
+  - name: nextcloud
+    image: docker.io/library/nextcloud:30
+networks: [mksrv-files]
+secrets:
+  - /mksrv/{env}/files/nextcloud_admin_password
+tailnet_ports: [445, 8080]
+resources:
+  min_ram_mb: 2048
+  disk_gb: 100
+templates: []
+health:
+  - app: nextcloud
+    type: http
+    path: /status.php
+    port: 8080

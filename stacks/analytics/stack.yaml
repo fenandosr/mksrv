@@ -1,0 +1,26 @@
+name: analytics
+title: Analytics
+description: "Apache Superset, worker, and Redis"
+targets: [cloud, local]
+per_tenant: true
+depends_on: [database, identity]
+apps:
+  - name: superset
+    image: docker.io/apache/superset:4.1.1
+  - name: superset-worker
+    image: docker.io/apache/superset:4.1.1
+  - name: redis
+    image: docker.io/library/redis:7.4
+networks: [mksrv-analytics]
+secrets:
+  - /mksrv/{env}/analytics/secret_key
+tailnet_ports: [8088, 6379]
+resources:
+  min_ram_mb: 2048
+  disk_gb: 20
+templates: []
+health:
+  - app: superset
+    type: http
+    path: /health
+    port: 8088

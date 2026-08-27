@@ -1,0 +1,9 @@
+version: 1
+tenant: acme
+users:
+  - email: jane@acme.example.com
+    name: "Jane Doe"
+    groups: [apps]
+    enabled: true
+  - email: bob@acme.example.com
+    groups: [both]

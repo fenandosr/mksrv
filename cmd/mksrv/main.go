@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/fenandosr/mksrv/internal/cli"
+)
+
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
+
+const (
+	modulePath       = "github.com/fenandosr/mksrv"
+	terraformVersion = "managed-from-M1"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	app := cli.New(cli.BuildInfo{
+		Version: version, Commit: commit, Date: date,
+		ModulePath: modulePath, TerraformVersion: terraformVersion,
+	}, os.Stdout, os.Stderr)
+	if err := app.Execute(ctx, os.Args[1:]); err != nil {
+		if !cli.AlreadyPrinted(err) {
+			fmt.Fprintf(os.Stderr, "mksrv: %v\n", err)
+		}
+		os.Exit(cli.ExitCode(err))
+	}
+}

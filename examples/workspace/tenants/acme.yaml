@@ -1,0 +1,11 @@
+version: 1
+id: acme
+display_name: "ACME Corp"
+base_domain: acme.example.com
+keycloak:
+  realm: acme
+stacks: [database, files, analytics, monitor]
+device_limit: 60
+branding:
+  primary: "#0C6D77"
+  logo_data_uri: ""

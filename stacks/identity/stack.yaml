@@ -1,0 +1,31 @@
+name: identity
+title: Identity and mesh
+description: "Headscale, one Keycloak instance, and configd"
+targets: [cloud]
+per_tenant: true
+depends_on: [base]
+apps:
+  - name: headscale
+    image: ghcr.io/juanfont/headscale:0.26.0
+  - name: keycloak
+    image: quay.io/keycloak/keycloak:26.1
+  - name: configd
+    image: registry.invalid/mksrv/configd:0.0.0
+networks: [mksrv-identity]
+secrets:
+  - /mksrv/{env}/identity/keycloak_admin_password
+  - /mksrv/{env}/identity/keycloak_admin_client_secret
+tailnet_ports: [8080, 9090]
+resources:
+  min_ram_mb: 2048
+  disk_gb: 10
+templates: []
+health:
+  - app: headscale
+    type: http
+    path: /health
+    port: 8080
+  - app: keycloak
+    type: http
+    path: /health/ready
+    port: 9000

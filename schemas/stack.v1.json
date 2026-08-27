@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mksrv.invalid/schemas/stack.v1.json",
+  "title": "mksrv stack descriptor v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "title", "description", "targets", "per_tenant", "apps"],
+  "properties": {
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
+    "title": {"type": "string", "minLength": 1, "maxLength": 64},
+    "description": {"type": "string", "minLength": 1, "maxLength": 256},
+    "targets": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["cloud", "local"]}},
+    "per_tenant": {"type": "boolean"},
+    "depends_on": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"}},
+    "apps": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["name", "image"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+          "image": {"type": "string", "minLength": 3, "maxLength": 255}
+        }
+      }
+    },
+    "networks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^mksrv-[a-z0-9-]+$"}},
+    "secrets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^/mksrv/\\{env\\}/[a-z0-9_./{}-]+$"}},
+    "tailnet_ports": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 65535}},
+    "resources": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "min_ram_mb": {"type": "integer", "minimum": 0, "maximum": 1048576},
+        "disk_gb": {"type": "integer", "minimum": 0, "maximum": 1048576}
+      }
+    },
+    "templates": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["src", "dst", "scope"],
+        "properties": {
+          "src": {"type": "string", "pattern": "^(?:templates|init)/[A-Za-z0-9_./{}-]+\\.tmpl$"},
+          "dst": {"type": "string", "pattern": "^/[A-Za-z0-9_./{}-]+$"},
+          "scope": {"type": "string", "enum": ["shared", "per_tenant"]}
+        }
+      }
+    },
+    "hooks": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "post_deploy": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["run", "scope"],
+            "properties": {
+              "run": {"type": "string", "pattern": "^hooks/[A-Za-z0-9_./-]+\\.sh$"},
+              "scope": {"type": "string", "enum": ["shared", "per_tenant"]}
+            }
+          }
+        }
+      }
+    },
+    "health": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["app", "type"],
+        "properties": {
+          "app": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+          "type": {"type": "string", "enum": ["tcp", "http", "command"]},
+          "path": {"type": "string", "pattern": "^/"},
+          "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+        }
+      }
+    }
+  }
+}

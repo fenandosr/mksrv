@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mksrv.invalid/schemas/users.v1.json",
+  "title": "mksrv users v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "tenant", "users"],
+  "properties": {
+    "version": {"const": 1},
+    "tenant": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,31}$"},
+    "users": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["email"],
+        "properties": {
+          "email": {"type": "string", "format": "email"},
+          "name": {"type": "string", "minLength": 1, "maxLength": 128},
+          "groups": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_./-]{0,63}$"}},
+          "enabled": {"type": "boolean", "default": true}
+        }
+      }
+    }
+  }
+}

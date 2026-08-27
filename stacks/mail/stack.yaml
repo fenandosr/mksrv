@@ -1,0 +1,18 @@
+name: mail
+title: Mail
+description: "SES send-only by default, with optional docker-mailserver inbound service"
+targets: [cloud]
+per_tenant: false
+depends_on: [base]
+apps:
+  - name: mailserver
+    image: docker.io/mailserver/docker-mailserver:14.0
+networks: [mksrv-mail]
+secrets:
+  - /mksrv/{env}/mail/admin_password
+tailnet_ports: [25, 143, 465, 587, 993]
+resources:
+  min_ram_mb: 1024
+  disk_gb: 20
+templates: []
+health: []

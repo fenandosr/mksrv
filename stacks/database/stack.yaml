@@ -1,0 +1,30 @@
+name: database
+title: Database
+description: "PostgreSQL, pgAdmin, and PostgREST"
+targets: [cloud, local]
+per_tenant: true
+depends_on: [identity]
+apps:
+  - name: postgres
+    image: docker.io/library/postgres:16
+  - name: pgadmin
+    image: docker.io/dpage/pgadmin4:8
+  - name: postgrest
+    image: docker.io/postgrest/postgrest:v12
+networks: [mksrv-database]
+secrets:
+  - /mksrv/{env}/database/pg_superpass
+  - /mksrv/{env}/database/pgadmin_pass
+tailnet_ports: [5432, 5050, 3000]
+resources:
+  min_ram_mb: 1024
+  disk_gb: 20
+templates: []
+health:
+  - app: postgres
+    type: tcp
+    port: 5432
+  - app: pgadmin
+    type: http
+    path: /misc/ping
+    port: 5050

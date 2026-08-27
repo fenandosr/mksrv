@@ -1,0 +1,13 @@
+title = "mksrv public repository"
+
+[allowlist]
+description = "Synthetic examples and reserved values"
+paths = ['''examples/workspace/''', '''testdata/''']
+regexes = [
+  '''example\.(com|org)''',
+  '''[a-z0-9.-]+\.invalid''',
+  '''192\.0\.2\.[0-9]{1,3}''',
+  '''198\.51\.100\.[0-9]{1,3}''',
+  '''203\.0\.113\.[0-9]{1,3}''',
+  '''Z0{10,}'''
+]

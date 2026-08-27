@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mksrv.invalid/schemas/tenant.v1.json",
+  "title": "mksrv tenant v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "display_name", "base_domain", "stacks"],
+  "properties": {
+    "version": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,31}$"},
+    "display_name": {"type": "string", "minLength": 1, "maxLength": 128},
+    "base_domain": {"type": "string", "format": "hostname"},
+    "dns_override": {
+      "type": "object", "additionalProperties": false, "required": ["provider"],
+      "properties": {
+        "provider": {"type": "string", "enum": ["route53", "cloudflare", "rfc2136", "manual"]},
+        "zone_id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "server": {"type": "string", "minLength": 1, "maxLength": 255}
+      }
+    },
+    "keycloak": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"realm": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"}}
+    },
+    "stacks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"}},
+    "device_limit": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 50},
+    "branding": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "primary": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "default": "#0C6D77"},
+        "logo_data_uri": {"type": "string", "maxLength": 1048576, "pattern": "^(?:|data:image/(?:png|jpeg|webp|svg\\+xml);base64,[A-Za-z0-9+/=]+)$"}
+      }
+    }
+  }
+}

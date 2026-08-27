@@ -1,0 +1,23 @@
+name: base
+title: Base edge
+description: "Podman runtime, Caddy, cloudflared, and perimeter firewall"
+targets: [cloud]
+per_tenant: false
+depends_on: []
+apps:
+  - name: caddy
+    image: docker.io/library/caddy:2.8
+  - name: cloudflared
+    image: docker.io/cloudflare/cloudflared:2025.2.1
+networks: [mksrv-base]
+secrets: []
+tailnet_ports: []
+resources:
+  min_ram_mb: 512
+  disk_gb: 5
+templates: []
+health:
+  - app: caddy
+    type: http
+    path: /healthz
+    port: 80

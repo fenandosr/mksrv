@@ -1,0 +1,12 @@
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.2
+    hooks:
+      - id: gitleaks
+  - repo: local
+    hooks:
+      - id: mksrv-public-hygiene
+        name: mksrv public-repo hygiene
+        entry: scripts/public-hygiene.sh
+        language: system
+        pass_filenames: false

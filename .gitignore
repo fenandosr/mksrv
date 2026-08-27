@@ -1,0 +1,36 @@
+# Build output
+bin/
+dist/
+*.exe
+*.test
+coverage.out
+
+# Go tooling
+/vendor/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+crash.log
+
+# mksrv workspaces and generated state
+.mksrv/
+*.workspace/
+/deployment.yaml
+/tenants/
+/secrets.sops.yaml
+*.sops.yaml
+!examples/**/*.sops.yaml
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Local environment
+.env
+.envrc

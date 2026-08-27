@@ -1,0 +1,46 @@
+version: 1
+engine: v0.1.0
+env: prod
+timezone: America/Mexico_City
+mgmt_cidr: 192.0.2.4/32
+
+aws:
+  region: us-east-1
+  profile: mksrv-example
+
+backend:
+  type: s3
+  bucket: mksrv-example-tfstate
+  key: mksrv.tfstate
+  dynamodb_table: mksrv-example-lock
+  region: us-east-1
+
+dns:
+  provider: route53
+  root_domain: example.com
+  route53:
+    zone_id: Z00000000000000000000
+
+identity:
+  keycloak_domain: auth.example.com
+  headscale_domain: vpn.example.com
+  acme_email: ops@example.com
+
+mail:
+  inbound: false
+
+hosts:
+  edge:
+    provider: aws
+    instance_type: t4g.small
+    root_gb: 30
+    data_gb: 40
+    stacks: [base, identity, mail]
+  onprem-data:
+    provider: existing
+    address: 10.20.0.11
+    ssh_user: rocky
+    stacks: [database, files, analytics, monitor]
+
+telemetry:
+  enabled: false
