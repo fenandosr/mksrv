@@ -13,10 +13,11 @@ import (
 	"sort"
 	"strings"
 
+	"sigs.k8s.io/yaml"
+
 	"github.com/fenandosr/mksrv/internal/engine"
 	"github.com/fenandosr/mksrv/internal/model"
 	"github.com/fenandosr/mksrv/internal/schema"
-	"github.com/fenandosr/mksrv/internal/yamlmini"
 )
 
 // ErrNotFound means no workspace marker was found while walking upward.
@@ -266,7 +267,7 @@ func decodeYAMLFile(filename string, out any) error {
 	if err != nil {
 		return err
 	}
-	if err := yamlmini.Unmarshal(contents, out); err != nil {
+	if err := yaml.Unmarshal(contents, out); err != nil {
 		return fmt.Errorf("parse %s: %w", filepath.Base(filename), err)
 	}
 	return nil

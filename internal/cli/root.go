@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package cli implements the mksrv command line.
+// Package cli implements the mksrv command line on top of Cobra.
 package cli
 
 import (
@@ -9,7 +9,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
+
+	"github.com/spf13/cobra"
 
 	"github.com/fenandosr/mksrv/internal/ui"
 )
@@ -67,37 +68,107 @@ type globalOptions struct {
 	AllowDowngrade bool
 }
 
+const rootLong = `mksrv — Service stacks as code — deploy anywhere, wired by the mesh.
+
+Machine-readable results are written as JSON to stdout; human diagnostics stay on
+stderr. Commands for infrastructure, deploy, tenants, users, DNS, and secrets are
+added in milestones M1–M6.`
+
 // Execute parses args and runs one command.
 func (a *App) Execute(ctx context.Context, args []string) error {
-	globals, remaining, err := parseGlobals(args)
-	if err != nil {
-		return &ExitError{Code: 2, Err: err}
-	}
-	printer := ui.Printer{Data: a.stdout, Human: a.stderr, JSON: globals.JSON, Quiet: globals.Quiet, NoColor: globals.NoColor}
-	if len(remaining) == 0 {
-		a.printHelp(printer)
+	opts := &globalOptions{}
+	root := a.newRootCommand(opts)
+	root.SetArgs(args)
+	root.SetOut(a.stderr)
+	root.SetErr(a.stderr)
+
+	err := root.ExecuteContext(ctx)
+	if err == nil {
 		return nil
 	}
-	command := remaining[0]
-	commandArgs := remaining[1:]
-	if command == "help" || command == "--help" || command == "-h" {
-		a.printHelp(printer)
-		return nil
+	var exitErr *ExitError
+	if errors.As(err, &exitErr) {
+		return err
 	}
-	if containsHelp(commandArgs) {
-		a.printCommandHelp(printer, command)
-		return nil
+	return &ExitError{Code: 2, Err: err}
+}
+
+func (a *App) newRootCommand(opts *globalOptions) *cobra.Command {
+	root := &cobra.Command{
+		Use:               "mksrv",
+		Short:             "Service stacks as code — deploy anywhere, wired by the mesh.",
+		Long:              rootLong,
+		SilenceUsage:      true,
+		SilenceErrors:     true,
+		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if opts.Quiet && opts.Verbose > 0 {
+				return fmt.Errorf("--quiet and --verbose cannot be used together")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
 	}
 
-	switch command {
-	case "version":
-		return a.runVersion(ctx, printer, commandArgs)
-	case "validate":
-		return a.runValidate(ctx, printer, globals, commandArgs)
-	case "doctor":
-		return a.runDoctor(ctx, printer, globals, commandArgs)
-	default:
-		return &ExitError{Code: 2, Err: fmt.Errorf("unknown command %q", command)}
+	flags := root.PersistentFlags()
+	flags.StringVar(&opts.Workspace, "workspace", "", "Select a workspace")
+	flags.CountVarP(&opts.Verbose, "verbose", "v", "Increase diagnostic output")
+	flags.BoolVarP(&opts.Quiet, "quiet", "q", false, "Suppress successful human output")
+	flags.BoolVar(&opts.JSON, "json", false, "Emit machine-readable JSON on stdout")
+	flags.BoolVar(&opts.NoColor, "no-color", false, "Disable ANSI color")
+	flags.BoolVar(&opts.Yes, "yes", false, "Assume yes for non-destructive prompts")
+	flags.BoolVar(&opts.AllowDowngrade, "allow-downgrade", false, "Permit validation with an older binary")
+
+	root.AddCommand(
+		a.newVersionCommand(opts),
+		a.newValidateCommand(opts),
+		a.newDoctorCommand(opts),
+	)
+	return root
+}
+
+func (a *App) newVersionCommand(opts *globalOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print build and embedded-engine information",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runVersion(cmd.Context(), a.printer(opts))
+		},
+	}
+}
+
+func (a *App) newValidateCommand(opts *globalOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "validate [PATH]",
+		Short: "Validate a workspace (discovered by default)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runValidate(cmd.Context(), a.printer(opts), opts, args)
+		},
+	}
+}
+
+func (a *App) newDoctorCommand(opts *globalOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "doctor",
+		Short: "Check local prerequisites and workspace health",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runDoctor(cmd.Context(), a.printer(opts), opts)
+		},
+	}
+}
+
+func (a *App) printer(opts *globalOptions) ui.Printer {
+	return ui.Printer{
+		Data:    a.stdout,
+		Human:   a.stderr,
+		JSON:    opts.JSON,
+		Quiet:   opts.Quiet,
+		NoColor: opts.NoColor,
 	}
 }
 
@@ -117,108 +188,6 @@ func ExitCode(err error) int {
 func AlreadyPrinted(err error) bool {
 	var exitError *ExitError
 	return errors.As(err, &exitError) && exitError.Printed
-}
-
-func parseGlobals(args []string) (globalOptions, []string, error) {
-	var options globalOptions
-	remaining := make([]string, 0, len(args))
-	for index := 0; index < len(args); index++ {
-		arg := args[index]
-		switch {
-		case arg == "--workspace":
-			index++
-			if index >= len(args) {
-				return options, nil, fmt.Errorf("--workspace requires a path")
-			}
-			options.Workspace = args[index]
-		case strings.HasPrefix(arg, "--workspace="):
-			options.Workspace = strings.TrimPrefix(arg, "--workspace=")
-		case arg == "--verbose" || arg == "-v":
-			options.Verbose++
-		case strings.HasPrefix(arg, "-v") && arg != "-v" && !strings.HasPrefix(arg, "--"):
-			for _, flag := range strings.TrimPrefix(arg, "-") {
-				if flag != 'v' {
-					return options, nil, fmt.Errorf("unknown shorthand flag in %q", arg)
-				}
-				options.Verbose++
-			}
-		case arg == "--quiet" || arg == "-q":
-			options.Quiet = true
-		case arg == "--json":
-			options.JSON = true
-		case arg == "--no-color":
-			options.NoColor = true
-		case arg == "--yes":
-			options.Yes = true
-		case arg == "--allow-downgrade":
-			options.AllowDowngrade = true
-		default:
-			remaining = append(remaining, arg)
-		}
-	}
-	if options.Quiet && options.Verbose > 0 {
-		return options, nil, fmt.Errorf("--quiet and --verbose cannot be used together")
-	}
-	return options, remaining, nil
-}
-
-func containsHelp(args []string) bool {
-	for _, arg := range args {
-		if arg == "--help" || arg == "-h" {
-			return true
-		}
-	}
-	return false
-}
-
-func (a *App) printHelp(printer ui.Printer) {
-	if printer.JSON {
-		_ = printer.Encode(map[string]any{"name": "mksrv", "commands": []string{"version", "validate", "doctor"}})
-		return
-	}
-	fmt.Fprintln(a.stderr, `mksrv — Service stacks as code — deploy anywhere, wired by the mesh.
-
-Usage:
-  mksrv [global flags] <command> [arguments]
-
-M0 commands:
-  version                 Print build and embedded-engine information
-  validate [PATH]         Validate a workspace (discovered by default)
-  doctor                  Check local prerequisites and workspace health
-
-Global flags:
-  --workspace PATH        Select a workspace
-  --verbose, -v           Increase diagnostic output
-  --quiet, -q             Suppress successful human output
-  --json                  Emit machine-readable JSON on stdout
-  --no-color              Disable ANSI color
-  --yes                   Assume yes for non-destructive prompts
-  --allow-downgrade       Permit validation with an older binary
-  --help, -h              Show help
-
-Commands for infrastructure, deploy, tenants, users, DNS, and secrets are added
-in milestones M1–M6.`)
-}
-
-func (a *App) printCommandHelp(printer ui.Printer, command string) {
-	if printer.JSON {
-		_ = printer.Encode(map[string]string{"command": command, "help": commandHelp(command)})
-		return
-	}
-	fmt.Fprintln(a.stderr, commandHelp(command))
-}
-
-func commandHelp(command string) string {
-	switch command {
-	case "version":
-		return "Usage: mksrv version [--json]"
-	case "validate":
-		return "Usage: mksrv validate [PATH] [--workspace PATH] [--json] [--allow-downgrade]"
-	case "doctor":
-		return "Usage: mksrv doctor [--workspace PATH] [--json]"
-	default:
-		return fmt.Sprintf("Unknown command %q", command)
-	}
 }
 
 func defaultStartDirectory() string {

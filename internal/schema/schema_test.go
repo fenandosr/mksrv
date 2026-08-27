@@ -62,3 +62,26 @@ device_limit: 60
 		t.Fatal("expected validation issue")
 	}
 }
+
+func TestValidateAssertsStringFormats(t *testing.T) {
+	t.Parallel()
+	document := []byte(`
+version: 1
+tenant: acme
+users:
+  - email: not-an-email
+`)
+	_, issues, err := New().ValidateYAML("users.v1.json", document)
+	if err != nil {
+		t.Fatalf("ValidateYAML() error = %v", err)
+	}
+	found := false
+	for _, issue := range issues {
+		if issue.Keyword == "format" && strings.HasPrefix(issue.Path, "$.users[0].email") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected an email format issue, got %#v", issues)
+	}
+}

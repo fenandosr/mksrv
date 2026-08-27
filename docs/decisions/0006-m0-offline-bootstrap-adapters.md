@@ -1,6 +1,6 @@
 # ADR 0006: Temporary dependency-free adapters for the M0 bootstrap
 
-- Status: Temporary; must be superseded before M1 implementation
+- Status: Superseded by [ADR 0007](0007-adopt-mandated-cli-yaml-schema-libraries.md) on 2026-08-27
 - Date: 2026-08-27
 
 ## Context

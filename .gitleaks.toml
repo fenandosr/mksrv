@@ -2,7 +2,7 @@ title = "mksrv public repository"
 
 [allowlist]
 description = "Synthetic examples and reserved values"
-paths = ['''examples/workspace/''', '''testdata/''']
+paths = ['''examples/workspace/''', '''testdata/''', '''go\.sum$''']
 regexes = [
   '''example\.(com|org)''',
   '''[a-z0-9.-]+\.invalid''',

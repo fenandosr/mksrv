@@ -29,10 +29,7 @@ type doctorResult struct {
 	Checks    []doctorCheck `json:"checks"`
 }
 
-func (a *App) runDoctor(ctx context.Context, printer ui.Printer, globals globalOptions, args []string) error {
-	if len(args) != 0 {
-		return &ExitError{Code: 2, Err: fmt.Errorf("doctor accepts no arguments")}
-	}
+func (a *App) runDoctor(ctx context.Context, printer ui.Printer, globals *globalOptions) error {
 	result := doctorResult{Healthy: true, Checks: make([]doctorCheck, 0, 7)}
 	addCheck := func(name, status, message string) {
 		result.Checks = append(result.Checks, doctorCheck{Name: name, Status: status, Message: message})
