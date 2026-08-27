@@ -11,7 +11,7 @@ import (
 	"github.com/fenandosr/mksrv/internal/workspace"
 )
 
-func (a *App) runValidate(ctx context.Context, printer ui.Printer, globals globalOptions, args []string) error {
+func (a *App) runValidate(ctx context.Context, printer ui.Printer, globals *globalOptions, args []string) error {
 	if len(args) > 1 {
 		return &ExitError{Code: 2, Err: fmt.Errorf("validate accepts at most one PATH argument")}
 	}

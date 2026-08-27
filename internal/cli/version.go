@@ -21,12 +21,9 @@ type versionResult struct {
 	TerraformVersion string `json:"terraform_version"`
 }
 
-func (a *App) runVersion(ctx context.Context, printer ui.Printer, args []string) error {
+func (a *App) runVersion(ctx context.Context, printer ui.Printer) error {
 	if err := ctx.Err(); err != nil {
 		return err
-	}
-	if len(args) != 0 {
-		return &ExitError{Code: 2, Err: fmt.Errorf("version accepts no arguments")}
 	}
 	result := versionResult{
 		Version:          fallback(a.build.Version, "dev"),

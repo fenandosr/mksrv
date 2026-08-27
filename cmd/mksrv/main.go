@@ -9,6 +9,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	// Embed the IANA timezone database so workspace timezone validation is
+	// hermetic. Release builds use -trimpath, which prevents the runtime from
+	// locating $GOROOT/lib/time/zoneinfo.zip, and minimal hosts (Windows,
+	// scratch containers) ship no system tzdata.
+	_ "time/tzdata"
+
 	"github.com/fenandosr/mksrv/internal/cli"
 )
 

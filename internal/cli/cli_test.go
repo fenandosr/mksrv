@@ -56,3 +56,27 @@ func TestConflictingGlobalFlags(t *testing.T) {
 		t.Fatalf("ExitCode() = %d, err=%v", ExitCode(err), err)
 	}
 }
+
+func TestUnknownCommandExitsTwo(t *testing.T) {
+	t.Parallel()
+	app := New(BuildInfo{}, &bytes.Buffer{}, &bytes.Buffer{})
+	err := app.Execute(context.Background(), []string{"frobnicate"})
+	if ExitCode(err) != 2 {
+		t.Fatalf("ExitCode() = %d, err=%v", ExitCode(err), err)
+	}
+}
+
+func TestNoArgsPrintsHelpToStderr(t *testing.T) {
+	t.Parallel()
+	var stdout, stderr bytes.Buffer
+	app := New(BuildInfo{}, &stdout, &stderr)
+	if err := app.Execute(context.Background(), nil); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("validate")) {
+		t.Fatalf("stderr missing command list: %q", stderr.String())
+	}
+}

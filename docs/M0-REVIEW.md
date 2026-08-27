@@ -38,9 +38,12 @@ make snapshot
 (cd dist && sha256sum -c checksums.txt)
 ```
 
-## Required decision before M1
+## M1 entry gate — closed
 
-ADR 0006 is temporary. Before implementing AWS, Terraform execution, or SSH,
-replace the M0 dependency-free command/YAML/schema adapters with Cobra,
-`sigs.k8s.io/yaml`, and `santhosh-tekuri/jsonschema/v6`, then retain the existing
-behavioral tests as the compatibility gate.
+The temporary M0 command/YAML/schema adapters have been replaced with Cobra,
+`sigs.k8s.io/yaml`, and `santhosh-tekuri/jsonschema/v6`. The existing behavioral
+tests passed unchanged and served as the compatibility gate. ADR 0007 supersedes
+ADR 0006. AWS, Terraform execution, and SSH work (M1+) may now proceed.
+
+The binary also embeds `time/tzdata` so `-trimpath` release builds validate
+workspace timezones on hosts without system zoneinfo.
