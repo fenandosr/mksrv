@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"runtime"
 
+	"github.com/fenandosr/mksrv/internal/tf"
 	"github.com/fenandosr/mksrv/internal/ui"
 )
 
@@ -33,7 +34,7 @@ func (a *App) runVersion(ctx context.Context, printer ui.Printer) error {
 		Go:               runtime.Version(),
 		Platform:         runtime.GOOS + "/" + runtime.GOARCH,
 		EmbeddedEngine:   fallback(a.build.Version, "dev"),
-		TerraformVersion: fallback(a.build.TerraformVersion, "managed-from-M1"),
+		TerraformVersion: fallback(a.build.TerraformVersion, tf.Version),
 	}
 	if printer.JSON {
 		return printer.Encode(result)

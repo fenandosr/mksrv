@@ -5,7 +5,7 @@ the strict separation between the public engine and private deployment data.
 
 ## Development workflow
 
-1. Use Go 1.23 or newer.
+1. Use Go 1.25 or newer.
 2. Create a focused branch and add tests with the implementation.
 3. Run `make test lint schema-lint hygiene`.
 4. Run `make tf-validate` when Terraform is available.
