@@ -1,0 +1,29 @@
+[Unit]
+Description=mksrv Keycloak
+Requires=mksrv-identity-postgres.service
+After=mksrv-identity-postgres.service
+
+[Container]
+ContainerName=mksrv-keycloak
+Image={{ .Image "keycloak" | default "quay.io/keycloak/keycloak:26.1" }}
+Network=mksrv-identity.network
+PublishPort=127.0.0.1:8080:8080
+PublishPort=127.0.0.1:9000:9000
+Exec=start --http-enabled=true --hostname=https://{{ .Endpoints.Keycloak }} --proxy-headers=xforwarded
+Environment=KC_DB=postgres
+Environment=KC_DB_URL=jdbc:postgresql://mksrv-identity-postgres:5432/keycloak
+Environment=KC_DB_USERNAME=keycloak
+Environment=KC_HEALTH_ENABLED=true
+Environment=KC_METRICS_ENABLED=true
+Environment=KC_CACHE=local
+Environment=KC_HOSTNAME_STRICT=false
+Environment=KC_BOOTSTRAP_ADMIN_USERNAME=admin
+Secret=mksrv-identity-kc_db_password,type=env,target=KC_DB_PASSWORD
+Secret=mksrv-identity-keycloak_admin_password,type=env,target=KC_BOOTSTRAP_ADMIN_PASSWORD
+
+[Service]
+Restart=always
+TimeoutStartSec=240
+
+[Install]
+WantedBy=multi-user.target

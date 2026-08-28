@@ -95,21 +95,39 @@ firewall-cmd --reload >/dev/null
 # ---------------------------------------------------------------------------
 # 6. Podman storage on the data volume + Quadlet
 # ---------------------------------------------------------------------------
+GRAPHROOT="$MARKER_DIR/containers"
 install -d -m 0755 /etc/containers
 cat >/etc/containers/storage.conf <<EOF
 [storage]
 driver = "overlay"
-graphroot = "$MARKER_DIR/containers"
+graphroot = "$GRAPHROOT"
 runroot = "/run/containers/storage"
 EOF
 install -d -m 0755 /etc/containers/systemd
+
+# The relocated graphroot must carry the same SELinux labelling as the default
+# podman graphroot (/var/lib/containers/storage), or container processes fail
+# with "cannot change memory protections" and volume writes are denied.
+if command -v semanage >/dev/null 2>&1; then
+  semanage fcontext -d -e /var/lib/containers "$GRAPHROOT" 2>/dev/null || true
+  if ! semanage fcontext -l 2>/dev/null | awk -v p="$GRAPHROOT" '$1==p{f=1} END{exit !f}'; then
+    semanage fcontext -a -e /var/lib/containers/storage "$GRAPHROOT"
+  fi
+fi
+restorecon -RF "$GRAPHROOT" 2>/dev/null || true
 
 systemctl enable --now podman.socket
 systemctl enable podman-auto-update.timer || true
 
 # ---------------------------------------------------------------------------
-# 7. Kernel / sysctl tuning
+# 7. Kernel modules and sysctl tuning
 # ---------------------------------------------------------------------------
+# tun + netfilter modules are needed by the tailnet node container.
+for mod in tun iptable_filter iptable_nat ip6table_filter nf_nat; do
+  modprobe "$mod" 2>/dev/null || true
+done
+printf '%s\n' tun iptable_filter iptable_nat ip6table_filter nf_nat >/etc/modules-load.d/mksrv-mesh.conf
+
 cat >/etc/sysctl.d/90-mksrv.conf <<EOF
 net.core.somaxconn = 1024
 net.ipv4.ip_unprivileged_port_start = 80

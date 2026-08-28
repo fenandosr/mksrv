@@ -141,6 +141,7 @@ func (a *App) newRootCommand(opts *globalOptions) *cobra.Command {
 		a.newHostCommand(opts),
 		a.newBootstrapCommand(opts),
 		a.newDeployCommand(opts),
+		a.newMeshCommand(opts),
 		a.newStatusCommand(opts),
 	)
 	return root

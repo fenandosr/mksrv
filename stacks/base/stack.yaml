@@ -19,6 +19,9 @@ templates:
   - src: templates/mksrv-base.network.tmpl
     dst: /etc/containers/systemd/mksrv-base.network
     scope: shared
+  - src: templates/caddy.d-keep.tmpl
+    dst: /var/lib/mksrv/caddy.d/.keep
+    scope: shared
   - src: templates/caddy.container.tmpl
     dst: /etc/containers/systemd/mksrv-caddy.container
     scope: shared

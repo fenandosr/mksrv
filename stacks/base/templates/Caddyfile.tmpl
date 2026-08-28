@@ -9,5 +9,6 @@
 	respond "mksrv {{ .Env }} edge" 200
 }
 
-# Reverse-proxy vhosts for identity, monitor, and per-tenant services are added
-# to this file when those stacks are deployed on the edge (M3+).
+# Per-stack reverse-proxy vhosts (identity, monitor, tenant services) drop
+# fragments here as they are deployed on the edge. An empty glob is not an error.
+import /etc/caddy/caddy.d/*.caddy

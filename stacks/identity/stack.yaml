@@ -1,10 +1,12 @@
 name: identity
 title: Identity and mesh
-description: "Headscale, one Keycloak instance, and configd"
+description: "Headscale, one Keycloak instance with its own Postgres, and configd"
 targets: [cloud]
 per_tenant: true
 depends_on: [base]
 apps:
+  - name: postgres
+    image: docker.io/library/postgres:16
   - name: headscale
     image: ghcr.io/juanfont/headscale:0.26.0
   - name: keycloak
@@ -13,18 +15,40 @@ apps:
     image: registry.invalid/mksrv/configd:0.0.0
 networks: [mksrv-identity]
 secrets:
+  - /mksrv/{env}/identity/kc_db_password
   - /mksrv/{env}/identity/keycloak_admin_password
-  - /mksrv/{env}/identity/keycloak_admin_client_secret
 tailnet_ports: [8080, 9090]
 resources:
   min_ram_mb: 2048
   disk_gb: 10
-templates: []
+templates:
+  - src: templates/mksrv-identity.network.tmpl
+    dst: /etc/containers/systemd/mksrv-identity.network
+    scope: shared
+  - src: templates/postgres-kc.container.tmpl
+    dst: /etc/containers/systemd/mksrv-identity-postgres.container
+    scope: shared
+  - src: templates/headscale-config.yaml.tmpl
+    dst: /var/lib/mksrv/stacks/identity/headscale/config.yaml
+    scope: shared
+  - src: templates/headscale.container.tmpl
+    dst: /etc/containers/systemd/mksrv-headscale.container
+    scope: shared
+  - src: templates/keycloak.container.tmpl
+    dst: /etc/containers/systemd/mksrv-keycloak.container
+    scope: shared
+  - src: templates/identity.caddy.tmpl
+    dst: /var/lib/mksrv/caddy.d/10-identity.caddy
+    scope: shared
+hooks:
+  post_deploy:
+    - run: hooks/reload-caddy.sh
+      scope: shared
 health:
   - app: headscale
     type: http
     path: /health
-    port: 8080
+    port: 8081
   - app: keycloak
     type: http
     path: /health/ready

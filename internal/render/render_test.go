@@ -64,6 +64,32 @@ func TestStackRendersBase(t *testing.T) {
 	}
 }
 
+func TestStackRendersIdentity(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	files, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), catalog["identity"], baseContext())
+	if err != nil {
+		t.Fatalf("Stack() error = %v", err)
+	}
+	frag, ok := files["/var/lib/mksrv/caddy.d/10-identity.caddy"]
+	if !ok {
+		t.Fatalf("no identity caddy fragment; got %v", SortedPaths(files))
+	}
+	if !strings.Contains(string(frag), "auth.example.com") || !strings.Contains(string(frag), "vpn.example.com") {
+		t.Fatalf("fragment missing endpoints:\n%s", frag)
+	}
+	cfg, ok := files["/var/lib/mksrv/stacks/identity/headscale/config.yaml"]
+	if !ok {
+		t.Fatal("no headscale config rendered")
+	}
+	if !strings.Contains(string(cfg), "server_url: https://vpn.example.com") {
+		t.Fatalf("headscale config wrong:\n%s", cfg)
+	}
+}
+
 func TestContextHelpers(t *testing.T) {
 	t.Parallel()
 	ctx := baseContext()

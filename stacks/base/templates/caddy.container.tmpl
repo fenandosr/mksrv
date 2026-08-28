@@ -6,10 +6,11 @@ After=network-online.target
 [Container]
 ContainerName=mksrv-caddy
 Image={{ .Image "caddy" | default "docker.io/library/caddy:2.8" }}
-Network=mksrv-base.network
-PublishPort=80:80
-PublishPort=443:443
+# Host networking so the proxy can reach every stack's host-published port on
+# 127.0.0.1 and bind 80/443/443udp directly.
+Network=host
 Volume=/var/lib/mksrv/stacks/base/Caddyfile:/etc/caddy/Caddyfile:Z,ro
+Volume=/var/lib/mksrv/caddy.d:/etc/caddy/caddy.d:Z,ro
 Volume=mksrv-caddy-data:/data
 Volume=mksrv-caddy-config:/config
 

@@ -47,7 +47,12 @@ allowed_documentation_nets = (
     ipaddress.ip_network('192.0.2.0/24'),
     ipaddress.ip_network('198.51.100.0/24'),
     ipaddress.ip_network('203.0.113.0/24'),
+    ipaddress.ip_network('100.64.0.0/10'),  # RFC 6598 / Tailscale CGNAT range
 )
+# Well-known public DNS resolvers, which legitimately appear in config templates.
+allowed_public_ips = {
+    '1.1.1.1', '1.0.0.1', '8.8.8.8', '8.8.4.4', '9.9.9.9', '149.112.112.112',
+}
 
 for path in sorted(root.rglob('*')):
     if not path.is_file() or any(part in excluded_parts for part in path.relative_to(root).parts):
@@ -81,6 +86,7 @@ for path in sorted(root.rglob('*')):
             continue
         allowed = (
             ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_unspecified
+            or str(ip) in allowed_public_ips
             or any(ip in network for network in allowed_documentation_nets)
         )
         if not allowed:

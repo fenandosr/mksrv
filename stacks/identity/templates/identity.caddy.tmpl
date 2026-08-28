@@ -1,0 +1,8 @@
+# mksrv identity vhosts (rendered by the identity stack).
+{{ .Endpoints.Keycloak }} {
+	reverse_proxy 127.0.0.1:8080
+}
+
+{{ .Endpoints.Headscale }} {
+	reverse_proxy 127.0.0.1:8081
+}

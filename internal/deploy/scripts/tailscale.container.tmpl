@@ -1,0 +1,26 @@
+[Unit]
+Description=mksrv tailnet node
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=mksrv-tailscale
+Image={{ .Image }}
+Network=host
+AddCapability=NET_ADMIN
+AddCapability=NET_RAW
+AddDevice=/dev/net/tun
+Environment=TS_STATE_DIR=/var/lib/tailscale
+Environment=TS_USERSPACE=false
+Environment=TS_ACCEPT_DNS=false
+Environment=TS_HOSTNAME={{ .Hostname }}
+Environment=TS_EXTRA_ARGS=--login-server={{ .LoginServer }} --accept-routes
+Secret=mksrv-mesh-authkey,type=env,target=TS_AUTHKEY
+Volume=mksrv-tailscale-state:/var/lib/tailscale
+
+[Service]
+Restart=always
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

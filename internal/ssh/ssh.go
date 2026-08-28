@@ -139,6 +139,38 @@ func (c *Client) Run(ctx context.Context, command string) (Result, error) {
 	}
 }
 
+// RunInput runs command with stdin fed from input.
+func (c *Client) RunInput(ctx context.Context, command string, input []byte) (Result, error) {
+	session, err := c.ssh.NewSession()
+	if err != nil {
+		return Result{}, fmt.Errorf("open session on %s: %w", c.target.Host, err)
+	}
+	defer session.Close()
+
+	var stdout, stderr bytes.Buffer
+	session.Stdout = &stdout
+	session.Stderr = &stderr
+	session.Stdin = bytes.NewReader(input)
+
+	done := make(chan error, 1)
+	go func() { done <- session.Run(command) }()
+	select {
+	case <-ctx.Done():
+		_ = session.Signal(ssh.SIGKILL)
+		return Result{Stdout: stdout.String(), Stderr: stderr.String()}, ctx.Err()
+	case err := <-done:
+		result := Result{Stdout: stdout.String(), Stderr: stderr.String()}
+		if err == nil {
+			return result, nil
+		}
+		var exitErr *ssh.ExitError
+		if errors.As(err, &exitErr) {
+			result.ExitCode = exitErr.ExitStatus()
+		}
+		return result, fmt.Errorf("%s: %q: %s", c.target.Host, command, strings.TrimSpace(stderr.String()))
+	}
+}
+
 // RunScript pipes script to `sudo bash -s` on the host.
 func (c *Client) RunScript(ctx context.Context, script string) (Result, error) {
 	session, err := c.ssh.NewSession()

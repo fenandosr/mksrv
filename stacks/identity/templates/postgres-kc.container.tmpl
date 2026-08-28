@@ -1,0 +1,26 @@
+[Unit]
+Description=mksrv Keycloak database
+
+[Container]
+ContainerName=mksrv-identity-postgres
+Image={{ .Image "postgres" | default "docker.io/library/postgres:16" }}
+Network=mksrv-identity.network
+Environment=POSTGRES_DB=keycloak
+Environment=POSTGRES_USER=keycloak
+# initdb cannot chmod the volume mount point under SELinux; use a subdirectory.
+Environment=PGDATA=/var/lib/postgresql/data/pgdata
+Environment=POSTGRES_INITDB_ARGS=--data-checksums
+Secret=mksrv-identity-kc_db_password,type=env,target=POSTGRES_PASSWORD
+Volume=mksrv-identity-pgdata:/var/lib/postgresql/data
+HealthCmd=pg_isready -U keycloak -d keycloak -q
+HealthStartPeriod=5s
+HealthInterval=5s
+HealthRetries=30
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target
