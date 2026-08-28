@@ -135,6 +135,8 @@ func (a *App) newRootCommand(opts *globalOptions) *cobra.Command {
 		a.newInitCommand(opts),
 		a.newValidateCommand(opts),
 		a.newDoctorCommand(opts),
+		a.newPlanCommand(opts),
+		a.newApplyCommand(opts),
 	)
 	return root
 }

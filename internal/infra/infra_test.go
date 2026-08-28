@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fenandosr/mksrv/internal/workspace"
@@ -24,15 +25,15 @@ func TestMaterializeWritesTerraformInputs(t *testing.T) {
 		t.Fatalf("example workspace invalid: %#v", report.Issues)
 	}
 
-	written, err := Materialize(data)
+	varsPath, err := Materialize(data, nil)
 	if err != nil {
 		t.Fatalf("Materialize() error = %v", err)
 	}
-	if len(written) != 2 {
-		t.Fatalf("written = %v", written)
+	if filepath.Dir(varsPath) != WorkDir(root) {
+		t.Fatalf("varsPath = %q, want under %q", varsPath, WorkDir(root))
 	}
 
-	varsRaw, err := os.ReadFile(filepath.Join(WorkDir(root), "mksrv.auto.tfvars.json"))
+	varsRaw, err := os.ReadFile(varsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,25 +53,12 @@ func TestMaterializeWritesTerraformInputs(t *testing.T) {
 		t.Fatalf("tenants missing acme: %v", vars.Tenants)
 	}
 
-	backendRaw, err := os.ReadFile(filepath.Join(WorkDir(root), "backend.tf.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var backend struct {
-		Terraform struct {
-			Backend struct {
-				S3 struct {
-					Bucket  string `json:"bucket"`
-					Encrypt bool   `json:"encrypt"`
-				} `json:"s3"`
-			} `json:"backend"`
-		} `json:"terraform"`
-	}
-	if err := json.Unmarshal(backendRaw, &backend); err != nil {
-		t.Fatalf("backend.tf.json not valid JSON: %v", err)
-	}
-	if backend.Terraform.Backend.S3.Bucket == "" || !backend.Terraform.Backend.S3.Encrypt {
-		t.Fatalf("backend s3 = %#v", backend.Terraform.Backend.S3)
+	entries := BackendConfig(data.Deployment)
+	joined := strings.Join(entries, " ")
+	for _, want := range []string{"bucket=", "dynamodb_table=", "encrypt=true", "region="} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("BackendConfig() = %v, missing %q", entries, want)
+		}
 	}
 }
 

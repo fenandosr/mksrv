@@ -8,3 +8,9 @@ variable "tenants" {
   type        = map(any)
   default     = {}
 }
+
+variable "ssh_public_key" {
+  description = "Operator SSH public key. When set, an EC2 key pair is created and attached to every host. Injected by the CLI from the workspace or the operator's ~/.ssh."
+  type        = string
+  default     = ""
+}

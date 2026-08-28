@@ -38,6 +38,7 @@ type Identity struct {
 // Clients bundles the AWS service clients mksrv uses directly.
 type Clients struct {
 	region   string
+	cfg      awssdk.Config
 	sts      *sts.Client
 	s3       *s3.Client
 	dynamodb *dynamodb.Client
@@ -62,6 +63,7 @@ func Load(ctx context.Context, opts Options) (*Clients, error) {
 	}
 	return &Clients{
 		region:   cfg.Region,
+		cfg:      cfg,
 		sts:      sts.NewFromConfig(cfg),
 		s3:       s3.NewFromConfig(cfg),
 		dynamodb: dynamodb.NewFromConfig(cfg),
@@ -70,6 +72,28 @@ func Load(ctx context.Context, opts Options) (*Clients, error) {
 
 // Region reports the resolved region.
 func (c *Clients) Region() string { return c.region }
+
+// ExportEnv resolves the current credentials and returns them as the standard
+// AWS_* environment variables, so a child process (Terraform) inherits exactly
+// the identity mksrv resolved — including credential sources that older
+// embedded SDKs, such as Terraform's S3 backend, do not understand on their
+// own (e.g. the `login_session` profile written by `aws login`).
+func (c *Clients) ExportEnv(ctx context.Context) (map[string]string, error) {
+	creds, err := c.cfg.Credentials.Retrieve(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("retrieve AWS credentials: %w", err)
+	}
+	env := map[string]string{
+		"AWS_ACCESS_KEY_ID":     creds.AccessKeyID,
+		"AWS_SECRET_ACCESS_KEY": creds.SecretAccessKey,
+		"AWS_REGION":            c.region,
+		"AWS_DEFAULT_REGION":    c.region,
+	}
+	if creds.SessionToken != "" {
+		env["AWS_SESSION_TOKEN"] = creds.SessionToken
+	}
+	return env, nil
+}
 
 // WhoAmI calls STS GetCallerIdentity.
 func (c *Clients) WhoAmI(ctx context.Context) (Identity, error) {

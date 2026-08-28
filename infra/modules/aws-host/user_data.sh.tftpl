@@ -1,0 +1,19 @@
+#!/bin/bash
+# Minimal first-boot setup. Full host bootstrap (SELinux, firewalld, Podman,
+# data-volume mount) is done later by the mksrv CLI over SSH.
+set -euxo pipefail
+
+hostnamectl set-hostname "${hostname}"
+timedatectl set-timezone "${timezone}" || true
+
+%{ if swap_mb > 0 ~}
+if [ ! -e /swapfile ]; then
+  fallocate -l "${swap_mb}M" /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=${swap_mb}
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >>/etc/fstab
+  sysctl -w vm.swappiness=10
+  echo 'vm.swappiness=10' >/etc/sysctl.d/90-mksrv-swap.conf
+fi
+%{ endif ~}

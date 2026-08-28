@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"github.com/fenandosr/mksrv/internal/model"
 	"github.com/fenandosr/mksrv/internal/workspace"
@@ -21,42 +20,57 @@ const Dir = ".mksrv/infra"
 
 const backendKeyDefault = "mksrv.tfstate"
 
-type tfvars struct {
-	Deployment model.Deployment        `json:"deployment"`
-	Tenants    map[string]model.Tenant `json:"tenants"`
-}
-
 // WorkDir returns the absolute generated Terraform working directory for a
 // workspace root.
 func WorkDir(root string) string {
 	return filepath.Join(root, filepath.FromSlash(Dir))
 }
 
-// Materialize writes mksrv.auto.tfvars.json and backend.tf.json into
-// WorkDir(data.Root), creating the directory if needed. It returns the
-// workspace-relative paths written, sorted.
-func Materialize(data workspace.Data) ([]string, error) {
+// VarsFile is the tfvars filename Materialize writes inside WorkDir.
+const VarsFile = "mksrv.auto.tfvars.json"
+
+// Materialize writes the Terraform variables file into WorkDir(data.Root),
+// creating the directory if needed. It returns the absolute path written.
+// Any extra keys are merged in at the top level (e.g. "ssh_public_key").
+// Backend settings are passed to `terraform init` as flags (see BackendConfig),
+// not written to a file.
+func Materialize(data workspace.Data, extra map[string]any) (string, error) {
 	dir := WorkDir(data.Root)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("create %s: %w", dir, err)
+		return "", fmt.Errorf("create %s: %w", dir, err)
 	}
 	tenants := data.Tenants
 	if tenants == nil {
 		tenants = map[string]model.Tenant{}
 	}
-	documents := map[string]any{
-		"mksrv.auto.tfvars.json": tfvars{Deployment: data.Deployment, Tenants: tenants},
-		"backend.tf.json":        backendDocument(data.Deployment),
+	document := map[string]any{
+		"deployment": data.Deployment,
+		"tenants":    tenants,
 	}
-	written := make([]string, 0, len(documents))
-	for name, value := range documents {
-		if err := writeJSON(filepath.Join(dir, name), value); err != nil {
-			return nil, err
-		}
-		written = append(written, filepath.ToSlash(filepath.Join(Dir, name)))
+	for key, value := range extra {
+		document[key] = value
 	}
-	sort.Strings(written)
-	return written, nil
+	path := filepath.Join(dir, VarsFile)
+	if err := writeJSON(path, document); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// BackendConfig returns the `-backend-config` key=value entries for
+// `terraform init`, derived from deployment.backend.
+func BackendConfig(d model.Deployment) []string {
+	entries := []string{
+		"bucket=" + d.Backend.Bucket,
+		"key=" + BackendKey(d),
+		"region=" + BackendRegion(d),
+		"dynamodb_table=" + d.Backend.DynamoDBTable,
+		"encrypt=true",
+	}
+	if d.AWS.Profile != "" {
+		entries = append(entries, "profile="+d.AWS.Profile)
+	}
+	return entries
 }
 
 // BackendRegion is the region the S3 state backend uses: the explicit backend
@@ -74,26 +88,6 @@ func BackendKey(d model.Deployment) string {
 		return d.Backend.Key
 	}
 	return backendKeyDefault
-}
-
-func backendDocument(d model.Deployment) map[string]any {
-	s3 := map[string]any{
-		"bucket":         d.Backend.Bucket,
-		"key":            BackendKey(d),
-		"region":         BackendRegion(d),
-		"dynamodb_table": d.Backend.DynamoDBTable,
-		"encrypt":        true,
-	}
-	if d.AWS.Profile != "" {
-		s3["profile"] = d.AWS.Profile
-	}
-	return map[string]any{
-		"terraform": map[string]any{
-			"backend": map[string]any{
-				"s3": s3,
-			},
-		},
-	}
 }
 
 func writeJSON(path string, value any) error {
