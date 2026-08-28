@@ -16,3 +16,9 @@ variable "provider_config" {
     server    = optional(string)
   })
 }
+
+variable "allow_overwrite" {
+  description = "Adopt an existing record of the same name/type instead of failing. Safe for the operator zone (mksrv owns those names); leave false for tenant zones."
+  type        = bool
+  default     = false
+}
