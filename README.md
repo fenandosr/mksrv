@@ -79,6 +79,7 @@ mksrv apply [--infra-only] [--trust-hosts]
 mksrv host trust [HOST...]
 mksrv bootstrap [HOST...]
 mksrv deploy [HOST...] [--stack NAME]
+mksrv mesh
 mksrv status
 ```
 
@@ -150,8 +151,10 @@ source of version, commit, and date values.
   `plan --infra-only`, and `apply --infra-only`. (`existing`-host contents and
   per-tenant / mail DNS remain deferred.)
 - **M2:** ✅ SSH transport, render engine, Rocky 9 host bootstrap, the `base`
-  stack (Caddy), `status`, and the full `mksrv apply` chain. `identity` and mesh
-  join are M3.
+  stack (Caddy), `status`, and the full `mksrv apply` chain.
+- **M3:** ✅ `identity` stack (Keycloak + Headscale + Postgres), SSM secrets,
+  Caddy vhost fragments, and `mksrv mesh` (per-tenant Headscale users, fleet
+  hosts joined to the tailnet). Per-tenant realms and DNS records are next.
 - **M3:** tenant lifecycle, realms, per-tenant Headscale, DNS records.
 - **M4:** database, files, analytics, and monitoring data-plane stacks.
 - **M5:** Keycloak users, SES, and optional inbound mail.

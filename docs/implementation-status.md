@@ -76,5 +76,18 @@ Verified end to end against two live AWS hosts: bootstrap (SELinux enforcing,
 firewalld, Podman/Quadlet, data volume mounted), `base` deployed, external
 `/healthz` OK, `mksrv status` healthy, re-runs idempotent.
 
-Still deferred to M3+: `identity` (Headscale/Keycloak/configd), mesh join,
-tenant reconciliation, data-plane stacks.
+## M3 — implemented
+
+- `internal/secrets` (SSM), `internal/headscale` (users, pre-auth keys).
+- `internal/deploy`: podman-secret push, `post_deploy` hooks, `.deployed`
+  markers, `mesh.go` (tailnet node join). Bootstrap v7.
+- `identity` stack: Keycloak (its own Postgres), Headscale, Caddy vhost
+  fragments; `mksrv mesh` joins fleet hosts and creates per-tenant Headscale
+  users.
+
+Verified live: `auth.<domain>` serves Keycloak over TLS, `vpn.<domain>/health`
+passes, both fleet hosts on the tailnet with cross-host connectivity,
+`mksrv status` healthy, deploy/mesh idempotent.
+
+Still deferred: `configd` (M4), per-tenant Keycloak realms and DNS records (M4),
+the `database` / `monitor` data-plane stacks (M5), and mail (M5/M6).

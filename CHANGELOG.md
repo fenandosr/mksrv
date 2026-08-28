@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — M3
+
+- Added `internal/secrets` (SSM Parameter Store resolver; `EnsureRandom`
+  generates a SecureString on first use) and `internal/headscale` (users and
+  pre-auth keys via the container CLI).
+- `internal/deploy` gains podman-secret push, `post_deploy` hook execution,
+  per-stack `.deployed` markers, and `mesh.go` (tailnet node join). Bootstrap v7:
+  relocated-graphroot SELinux equivalence, `tun` + netfilter modules.
+- Added the `identity` stack: `mksrv-identity` network, a dedicated Postgres,
+  Keycloak, Headscale, a Caddy vhost fragment, and a reload hook. Caddy moves to
+  host networking and imports `caddy.d/*.caddy` fragments.
+- New command `mksrv mesh`: reconciles Headscale users (one per tenant plus a
+  fleet user) and joins every fleet host to the tailnet.
+- `scripts/public-hygiene.sh` allows well-known public DNS resolvers and the
+  RFC 6598 (Tailscale CGNAT) range.
+
 ## Unreleased — M2
 
 - Added `internal/ssh` (SSH + SFTP transport, workspace-pinned known_hosts,
