@@ -29,6 +29,17 @@ const (
 	configdClientID = "configd"
 )
 
+// vpnRedirectURIs are the OIDC loopback callbacks the Cloud-IT VPN desktop app
+// uses. The literal ports are the app's fixed candidates; the wildcards cover
+// any future dynamic-port build.
+var vpnRedirectURIs = []string{
+	"http://127.0.0.1:47017/callback",
+	"http://127.0.0.1:47018/callback",
+	"http://127.0.0.1:47019/callback",
+	"http://127.0.0.1:*/callback",
+	"http://localhost:*/callback",
+}
+
 func (a *App) newTenantCommand(opts *globalOptions) *cobra.Command {
 	cmd := &cobra.Command{Use: "tenant", Short: "Reconcile tenant realms, mesh users, and the VPN broker"}
 	cmd.AddCommand(&cobra.Command{
@@ -107,9 +118,7 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 			DisplayName: tenant.DisplayName,
 			Groups:      []string{"apps", "both"},
 			Clients: []keycloak.ClientSpec{
-				{ClientID: vpnClientID, Public: true, RedirectURIs: []string{
-					"http://127.0.0.1:*/callback", "http://localhost:*/callback",
-				}},
+				{ClientID: vpnClientID, Public: true, RedirectURIs: vpnRedirectURIs},
 				{ClientID: configdClientID, Public: false, RedirectURIs: []string{}},
 			},
 		})
