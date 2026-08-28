@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -159,6 +162,14 @@ func (a *App) openInfraSession(ctx context.Context, printer ui.Printer, globals 
 			}
 		}
 		return nil, &ExitError{Code: 1, Err: fmt.Errorf("workspace is invalid; run mksrv validate"), Printed: true}
+	}
+	if data.Deployment.MgmtCIDR == "auto" {
+		ip, err := publicIPv4(ctx)
+		if err != nil {
+			return nil, &ExitError{Code: 2, Err: fmt.Errorf("resolve operator public IP for mgmt_cidr: auto: %w", err)}
+		}
+		data.Deployment.MgmtCIDR = ip + "/32"
+		printer.Info("mgmt_cidr: auto resolved to %s", data.Deployment.MgmtCIDR)
 	}
 	dep := data.Deployment
 
@@ -398,6 +409,32 @@ func envWith(overrides map[string]string) map[string]string {
 		result[key] = value
 	}
 	return result
+}
+
+// publicIPv4 returns the operator machine's public IPv4 address.
+func publicIPv4(ctx context.Context) (string, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	var lastErr error
+	for _, url := range []string{"https://checkip.amazonaws.com", "https://api.ipify.org"} {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 64))
+		_ = res.Body.Close()
+		ip := strings.TrimSpace(string(body))
+		if parsed := net.ParseIP(ip); parsed != nil && parsed.To4() != nil {
+			return ip, nil
+		}
+		lastErr = fmt.Errorf("%s returned %q", url, ip)
+	}
+	return "", lastErr
 }
 
 func isAffirmative(answer string) bool {

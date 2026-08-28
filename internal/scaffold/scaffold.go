@@ -86,8 +86,10 @@ func (p Params) Validate() error {
 	if missing := p.MissingRequired(); len(missing) > 0 {
 		return fmt.Errorf("missing required values: %s", strings.Join(missing, ", "))
 	}
-	if _, _, err := net.ParseCIDR(p.MgmtCIDR); err != nil {
-		return fmt.Errorf("mgmt-cidr %q is not a valid CIDR: %w", p.MgmtCIDR, err)
+	if p.MgmtCIDR != "auto" {
+		if _, _, err := net.ParseCIDR(p.MgmtCIDR); err != nil {
+			return fmt.Errorf("mgmt-cidr %q is not a valid CIDR (or \"auto\"): %w", p.MgmtCIDR, err)
+		}
 	}
 	if !strings.Contains(p.ACMEEmail, "@") {
 		return fmt.Errorf("acme-email %q is not an email address", p.ACMEEmail)

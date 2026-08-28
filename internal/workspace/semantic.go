@@ -22,8 +22,10 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 	if _, err := time.LoadLocation(deployment.Timezone); err != nil {
 		semanticError(report, "deployment.yaml", "$.timezone", "timezone.invalid", fmt.Sprintf("%q is not an installed IANA timezone", deployment.Timezone))
 	}
-	if _, _, err := net.ParseCIDR(deployment.MgmtCIDR); err != nil {
-		semanticError(report, "deployment.yaml", "$.mgmt_cidr", "cidr.invalid", fmt.Sprintf("invalid management CIDR: %v", err))
+	if deployment.MgmtCIDR != "auto" {
+		if _, _, err := net.ParseCIDR(deployment.MgmtCIDR); err != nil {
+			semanticError(report, "deployment.yaml", "$.mgmt_cidr", "cidr.invalid", fmt.Sprintf("invalid management CIDR: %v", err))
+		}
 	}
 
 	checkEngineVersions(data, report, options)

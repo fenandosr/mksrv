@@ -2,6 +2,8 @@ version: 1
 engine: {{ .Engine }}
 env: {{ .Env }}
 timezone: Etc/UTC
+# CIDR allowed to reach SSH. "auto" resolves the operator's current public IP on
+# every apply — useful behind a dynamic address.
 mgmt_cidr: {{ .MgmtCIDR }}
 
 aws:

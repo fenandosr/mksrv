@@ -63,6 +63,29 @@ device_limit: 60
 	}
 }
 
+func TestValidateAcceptsAutoMgmtCIDR(t *testing.T) {
+	t.Parallel()
+	doc := []byte(`
+version: 1
+engine: dev
+env: prod
+mgmt_cidr: auto
+aws: { region: us-east-1 }
+backend: { type: s3, bucket: mksrv-prod-tfstate, dynamodb_table: mksrv-prod-lock }
+dns: { provider: manual, root_domain: example.com }
+identity: { keycloak_domain: auth.example.com, headscale_domain: vpn.example.com, acme_email: a@example.com }
+hosts:
+  edge: { provider: aws, stacks: [base] }
+`)
+	_, issues, err := New().ValidateYAML("deployment.v1.json", doc)
+	if err != nil {
+		t.Fatalf("ValidateYAML() error = %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("mgmt_cidr: auto rejected: %#v", issues)
+	}
+}
+
 func TestValidateAssertsStringFormats(t *testing.T) {
 	t.Parallel()
 	document := []byte(`
