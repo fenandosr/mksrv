@@ -1,0 +1,17 @@
+# Generated Terraform inputs, plans, outputs, and local state
+.mksrv/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+crash.log
+
+# Secrets (decrypted forms must never be committed)
+secrets.sops.yaml
+*.auto.tfvars.json
+
+# Editors and OS
+.DS_Store
+*.swp

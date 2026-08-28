@@ -89,9 +89,18 @@ type Tenant struct {
 	BaseDomain  string         `json:"base_domain"`
 	DNSOverride *DNSOverride   `json:"dns_override,omitempty"`
 	Keycloak    TenantKeycloak `json:"keycloak,omitempty"`
+	Mail        *TenantMail    `json:"mail,omitempty"`
 	Stacks      []string       `json:"stacks"`
 	DeviceLimit int            `json:"device_limit,omitempty"`
 	Branding    Branding       `json:"branding,omitempty"`
+}
+
+// TenantMail declares the mail identities and policy for a tenant. It drives
+// per-domain SES identity, DKIM, and MAIL FROM creation in the mail stack.
+type TenantMail struct {
+	Domains  []string `json:"domains,omitempty"`
+	Inbound  bool     `json:"inbound,omitempty"`
+	DMARCRUA string   `json:"dmarc_rua,omitempty"`
 }
 
 type DNSOverride struct {

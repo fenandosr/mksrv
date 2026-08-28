@@ -1,0 +1,26 @@
+# {{ .Env }} mksrv workspace
+
+This directory is a **private mksrv workspace**. It holds real deployment data:
+hostnames, account identifiers, DNS zones, and (once configured) encrypted
+secrets. Keep it in a **separate private repository** — never inside the public
+`mksrv` engine repository.
+
+## Layout
+
+```
+deployment.yaml      environment, AWS, backend, DNS, identity, and fleet hosts
+tenants/<id>.yaml    one client company; all service FQDNs derive from base_domain
+tenants/<id>.users.yaml   optional declarative user list
+secrets.sops.yaml    optional, SOPS-encrypted; added when a secret-bearing command runs
+mksrv.lock           engine version of the last successful apply
+.mksrv/              generated Terraform inputs, plans, outputs, and local state
+```
+
+## Next steps
+
+1. Edit `deployment.yaml`: set the Route 53 `zone_id`, confirm the region and
+   host layout, and adjust `mgmt_cidr` to your operator network.
+2. Add tenant documents under `tenants/`.
+3. Validate: `mksrv validate` and `mksrv doctor`.
+4. Provision infrastructure: `mksrv plan --infra-only` then
+   `mksrv apply --infra-only`.

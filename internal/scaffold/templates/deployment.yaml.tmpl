@@ -1,0 +1,47 @@
+version: 1
+engine: {{ .Engine }}
+env: {{ .Env }}
+timezone: Etc/UTC
+mgmt_cidr: {{ .MgmtCIDR }}
+
+aws:
+  region: {{ .Region }}
+{{- if .Profile }}
+  profile: {{ .Profile }}
+{{- end }}
+
+backend:
+  type: s3
+  bucket: {{ .Bucket }}
+  key: mksrv.tfstate
+  dynamodb_table: {{ .LockTable }}
+  region: {{ .Region }}
+
+dns:
+  provider: route53
+  root_domain: {{ .RootDomain }}
+  route53:
+    # Replace with the hosted-zone id once the zone exists:
+    #   zone_id: Z0123456789ABCDEFGHIJ
+    zone_name: {{ .RootDomain }}
+
+identity:
+  keycloak_domain: {{ .KeycloakDomain }}
+  headscale_domain: {{ .HeadscaleDomain }}
+  acme_email: {{ .ACMEEmail }}
+
+mail:
+  inbound: false
+
+# One AWS host carrying base and identity. Add more hosts (aws or existing)
+# and split stacks across them as the deployment grows.
+hosts:
+  edge:
+    provider: aws
+    instance_type: t4g.small
+    root_gb: 30
+    data_gb: 20
+    stacks: [base, identity]
+
+telemetry:
+  enabled: false

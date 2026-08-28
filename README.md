@@ -71,9 +71,15 @@ Actions.
 
 ```text
 mksrv version
+mksrv init [PATH]
 mksrv validate [PATH]
 mksrv doctor
 ```
+
+`mksrv init` scaffolds a private workspace from embedded templates. Required
+values come from flags (`--env`, `--region`, `--root-domain`, `--mgmt-cidr`,
+`--acme-email`, and optionally `--profile`, `--keycloak-domain`,
+`--headscale-domain`) or interactive prompts; `--yes` requires them all up front.
 
 Global flags currently implemented: `--workspace`, `--verbose/-v`,
 `--quiet/-q`, `--json`, `--no-color`, `--yes`, and `--allow-downgrade`.
