@@ -1,0 +1,467 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package cli
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/fenandosr/mksrv/internal/deploy"
+	"github.com/fenandosr/mksrv/internal/engine"
+	"github.com/fenandosr/mksrv/internal/infra"
+	"github.com/fenandosr/mksrv/internal/model"
+	"github.com/fenandosr/mksrv/internal/render"
+	"github.com/fenandosr/mksrv/internal/schema"
+	sshx "github.com/fenandosr/mksrv/internal/ssh"
+	"github.com/fenandosr/mksrv/internal/ui"
+	"github.com/fenandosr/mksrv/internal/workspace"
+)
+
+type hostTarget struct {
+	Name   string
+	Target sshx.Target
+	Host   model.Host
+}
+
+type fleet struct {
+	data       workspace.Data
+	catalog    map[string]model.Stack
+	knownHosts string
+	stacksRoot string
+	targets    []hostTarget
+	byName     map[string]hostTarget
+}
+
+func (a *App) openFleet(ctx context.Context, printer ui.Printer, globals *globalOptions) (*fleet, error) {
+	root, err := workspace.Discover(defaultStartDirectory(), globals.Workspace)
+	if err != nil {
+		if errors.Is(err, workspace.ErrNotFound) {
+			return nil, &ExitError{Code: 2, Err: fmt.Errorf("%w; pass --workspace", err)}
+		}
+		return nil, err
+	}
+	data, report, err := workspace.Validate(ctx, root, workspace.ValidateOptions{
+		RunningVersion: fallback(a.build.Version, "dev"),
+		AllowDowngrade: globals.AllowDowngrade,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !report.Valid {
+		return nil, &ExitError{Code: 1, Err: fmt.Errorf("workspace is invalid; run mksrv validate"), Printed: true}
+	}
+	outputs, err := infra.LoadOutputs(data.Root)
+	if err != nil {
+		return nil, &ExitError{Code: 2, Err: err}
+	}
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		return nil, err
+	}
+	cacheDir, err := engine.Extract(ctx, fallback(a.build.Version, "dev"))
+	if err != nil {
+		return nil, err
+	}
+
+	f := &fleet{
+		data:       data,
+		catalog:    catalog,
+		knownHosts: filepath.Join(data.Root, ".mksrv", "known_hosts"),
+		stacksRoot: filepath.Join(cacheDir, "stacks"),
+		byName:     map[string]hostTarget{},
+	}
+	names := make([]string, 0, len(data.Deployment.Hosts))
+	for name := range data.Deployment.Hosts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		host := data.Deployment.Hosts[name]
+		out, ok := outputs.Hosts[name]
+		if !ok {
+			return nil, &ExitError{Code: 2, Err: fmt.Errorf("no infra output for host %q; re-run apply --infra-only", name)}
+		}
+		user := host.SSHUser
+		if user == "" {
+			user = "rocky"
+		}
+		port := host.SSHPort
+		if port == 0 {
+			port = 22
+		}
+		ht := hostTarget{
+			Name:   name,
+			Host:   host,
+			Target: sshx.Target{Host: out.ManagementIP, Port: port, User: user},
+		}
+		f.targets = append(f.targets, ht)
+		f.byName[name] = ht
+	}
+	return f, nil
+}
+
+func (f *fleet) selected(names []string) ([]hostTarget, error) {
+	if len(names) == 0 {
+		return f.targets, nil
+	}
+	var out []hostTarget
+	for _, name := range names {
+		ht, ok := f.byName[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown host %q", name)
+		}
+		out = append(out, ht)
+	}
+	return out, nil
+}
+
+func (a *App) newHostCommand(opts *globalOptions) *cobra.Command {
+	cmd := &cobra.Command{Use: "host", Short: "Manage fleet host trust and connectivity"}
+	trust := &cobra.Command{
+		Use:   "trust [HOST...]",
+		Short: "Record fleet host SSH keys in the workspace known_hosts",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runHostTrust(cmd.Context(), a.printer(opts), opts, args)
+		},
+	}
+	cmd.AddCommand(trust)
+	return cmd
+}
+
+func (a *App) runHostTrust(ctx context.Context, printer ui.Printer, globals *globalOptions, args []string) error {
+	f, err := a.openFleet(ctx, printer, globals)
+	if err != nil {
+		return err
+	}
+	hosts, err := f.selected(args)
+	if err != nil {
+		return &ExitError{Code: 2, Err: err}
+	}
+	for _, ht := range hosts {
+		res, err := sshx.Trust(ctx, f.knownHosts, ht.Target)
+		if err != nil {
+			return &ExitError{Code: 1, Err: fmt.Errorf("trust %s: %w", ht.Name, err), Printed: false}
+		}
+		if res.Added {
+			printer.Success("%s (%s) %s", ht.Name, ht.Target.Host, res.Fingerprint)
+		} else {
+			printer.Info("%s already trusted (%s)", ht.Name, res.Fingerprint)
+		}
+	}
+	return nil
+}
+
+func (a *App) newBootstrapCommand(opts *globalOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "bootstrap [HOST...]",
+		Short: "Prepare Rocky Linux hosts (SELinux, firewalld, Podman, data volume)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runBootstrap(cmd.Context(), a.printer(opts), opts, args)
+		},
+	}
+}
+
+func (a *App) runBootstrap(ctx context.Context, printer ui.Printer, globals *globalOptions, args []string) error {
+	f, err := a.openFleet(ctx, printer, globals)
+	if err != nil {
+		return err
+	}
+	hosts, err := f.selected(args)
+	if err != nil {
+		return &ExitError{Code: 2, Err: err}
+	}
+	timezone := f.data.Deployment.Timezone
+	for _, ht := range hosts {
+		client, err := sshx.Dial(ctx, ht.Target, f.knownHosts)
+		if err != nil {
+			return dialError(ht.Name, err)
+		}
+		params := deploy.BootstrapParams{
+			IsEdge:   slices.Contains(ht.Host.Stacks, "base"),
+			Timezone: timezone,
+		}
+		printer.Info("%s: bootstrapping", ht.Name)
+		res, err := deploy.Bootstrap(ctx, client, params)
+		_ = client.Close()
+		if err != nil {
+			return &ExitError{Code: 1, Err: fmt.Errorf("%s: %w", ht.Name, err), Printed: false}
+		}
+		printer.Success("%s: %s", ht.Name, lastLine(res.Stdout))
+	}
+	return nil
+}
+
+func (a *App) newDeployCommand(opts *globalOptions) *cobra.Command {
+	var stackNames []string
+	cmd := &cobra.Command{
+		Use:   "deploy [HOST...]",
+		Short: "Render and deploy stacks to their hosts",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runDeploy(cmd.Context(), a.printer(opts), opts, args, stackNames)
+		},
+	}
+	cmd.Flags().StringSliceVar(&stackNames, "stack", nil, "Limit to these stacks (default: every stack on the selected hosts)")
+	return cmd
+}
+
+func (a *App) runDeploy(ctx context.Context, printer ui.Printer, globals *globalOptions, args, stackNames []string) error {
+	f, err := a.openFleet(ctx, printer, globals)
+	if err != nil {
+		return err
+	}
+	hosts, err := f.selected(args)
+	if err != nil {
+		return &ExitError{Code: 2, Err: err}
+	}
+	limit := map[string]bool{}
+	for _, name := range stackNames {
+		limit[name] = true
+	}
+
+	for _, ht := range hosts {
+		client, err := sshx.Dial(ctx, ht.Target, f.knownHosts)
+		if err != nil {
+			return dialError(ht.Name, err)
+		}
+		rctx := f.renderContext(ht)
+		for _, stackName := range orderedStacks(f.catalog, ht.Host.Stacks) {
+			if len(limit) > 0 && !limit[stackName] {
+				continue
+			}
+			stack := f.catalog[stackName]
+			if len(stack.Templates) == 0 {
+				continue
+			}
+			printer.Info("%s: deploying %s", ht.Name, stackName)
+			res, err := deploy.DeployStack(ctx, client, f.stacksRoot, stack, rctx)
+			if err != nil {
+				_ = client.Close()
+				return &ExitError{Code: 1, Err: fmt.Errorf("%s/%s: %w", ht.Name, stackName, err), Printed: false}
+			}
+			printer.Success("%s/%s: %d changed, %d unchanged, health %v", ht.Name, stackName, len(res.Changed), res.Unchanged, res.HealthOK)
+		}
+		_ = client.Close()
+	}
+	return nil
+}
+
+func (f *fleet) renderContext(ht hostTarget) render.Context {
+	out, _ := infra.LoadOutputs(f.data.Root)
+	hostOut := out.Hosts[ht.Name]
+	dep := f.data.Deployment
+	role := "data"
+	if slices.Contains(ht.Host.Stacks, "base") {
+		role = "edge"
+	}
+	images := map[string]string{}
+	for _, stackName := range ht.Host.Stacks {
+		for _, app := range f.catalog[stackName].Apps {
+			images[app.Name] = app.Image
+		}
+	}
+	return render.Context{
+		Env:       dep.Env,
+		Timezone:  dep.Timezone,
+		ACMEEmail: dep.Identity.ACMEEmail,
+		Host: render.HostView{
+			Name:      ht.Name,
+			Role:      role,
+			PublicIP:  hostOut.PublicIP,
+			PrivateIP: hostOut.PrivateIP,
+			MeshName:  fmt.Sprintf("%s.%s.mksrv", ht.Name, dep.Env),
+			Stacks:    ht.Host.Stacks,
+		},
+		Endpoints: render.Endpoints{
+			Keycloak:   dep.Identity.KeycloakDomain,
+			Headscale:  dep.Identity.HeadscaleDomain,
+			ConfigD:    "cfg." + dep.DNS.RootDomain,
+			RootDomain: dep.DNS.RootDomain,
+		},
+		Images: images,
+	}
+}
+
+// runFleetApply bootstraps and deploys every host, base host first.
+func (a *App) runFleetApply(ctx context.Context, printer ui.Printer, globals *globalOptions, trustHosts bool) error {
+	f, err := a.openFleet(ctx, printer, globals)
+	if err != nil {
+		return err
+	}
+
+	ordered := make([]hostTarget, 0, len(f.targets))
+	for _, ht := range f.targets {
+		if slices.Contains(ht.Host.Stacks, "base") {
+			ordered = append(ordered, ht)
+		}
+	}
+	for _, ht := range f.targets {
+		if !slices.Contains(ht.Host.Stacks, "base") {
+			ordered = append(ordered, ht)
+		}
+	}
+
+	for _, ht := range ordered {
+		if trustHosts {
+			if _, err := sshx.Trust(ctx, f.knownHosts, ht.Target); err != nil {
+				return &ExitError{Code: 1, Err: fmt.Errorf("trust %s: %w", ht.Name, err)}
+			}
+		}
+		client, err := sshx.Dial(ctx, ht.Target, f.knownHosts)
+		if err != nil {
+			return dialError(ht.Name, err)
+		}
+
+		printer.Info("%s: bootstrapping", ht.Name)
+		if _, err := deploy.Bootstrap(ctx, client, deploy.BootstrapParams{
+			IsEdge:   slices.Contains(ht.Host.Stacks, "base"),
+			Timezone: f.data.Deployment.Timezone,
+		}); err != nil {
+			_ = client.Close()
+			return &ExitError{Code: 1, Err: fmt.Errorf("%s: %w", ht.Name, err), Printed: false}
+		}
+
+		rctx := f.renderContext(ht)
+		for _, stackName := range orderedStacks(f.catalog, ht.Host.Stacks) {
+			stack := f.catalog[stackName]
+			if len(stack.Templates) == 0 {
+				continue
+			}
+			printer.Info("%s: deploying %s", ht.Name, stackName)
+			res, err := deploy.DeployStack(ctx, client, f.stacksRoot, stack, rctx)
+			if err != nil {
+				_ = client.Close()
+				return &ExitError{Code: 1, Err: fmt.Errorf("%s/%s: %w", ht.Name, stackName, err), Printed: false}
+			}
+			printer.Success("%s/%s: %d changed, %d unchanged", ht.Name, stackName, len(res.Changed), res.Unchanged)
+		}
+		_ = client.Close()
+	}
+	printer.Success("fleet applied")
+	return nil
+}
+
+func (a *App) newStatusCommand(opts *globalOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Report fleet host and stack health",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runStatus(cmd.Context(), a.printer(opts), opts)
+		},
+	}
+}
+
+type hostStatus struct {
+	Host         string   `json:"host"`
+	Reachable    bool     `json:"reachable"`
+	Bootstrapped bool     `json:"bootstrapped"`
+	FailedUnits  []string `json:"failed_units"`
+	Detail       string   `json:"detail,omitempty"`
+}
+
+func (a *App) runStatus(ctx context.Context, printer ui.Printer, globals *globalOptions) error {
+	f, err := a.openFleet(ctx, printer, globals)
+	if err != nil {
+		return err
+	}
+	statuses := make([]hostStatus, 0, len(f.targets))
+	healthy := true
+	for _, ht := range f.targets {
+		st := hostStatus{Host: ht.Name}
+		client, err := sshx.Dial(ctx, ht.Target, f.knownHosts)
+		if err != nil {
+			st.Detail = err.Error()
+			healthy = false
+			statuses = append(statuses, st)
+			continue
+		}
+		st.Reachable = true
+		if exists, _ := client.Exists(fmt.Sprintf("/var/lib/mksrv/.bootstrap-v%d", deploy.BootstrapVersion)); exists {
+			st.Bootstrapped = true
+		}
+		if res, err := client.Run(ctx, "systemctl list-units --state=failed --no-legend --plain | awk '{print $1}'"); err == nil {
+			for _, line := range strings.Split(strings.TrimSpace(res.Stdout), "\n") {
+				if line = strings.TrimSpace(line); line != "" {
+					st.FailedUnits = append(st.FailedUnits, line)
+				}
+			}
+		}
+		_ = client.Close()
+		if !st.Bootstrapped || len(st.FailedUnits) > 0 {
+			healthy = false
+		}
+		statuses = append(statuses, st)
+	}
+
+	if printer.JSON {
+		return printer.Encode(map[string]any{"healthy": healthy, "hosts": statuses})
+	}
+	for _, st := range statuses {
+		switch {
+		case !st.Reachable:
+			printer.Error("%-8s unreachable: %s", st.Host, st.Detail)
+		case !st.Bootstrapped:
+			printer.Warn("%-8s reachable, not bootstrapped", st.Host)
+		case len(st.FailedUnits) > 0:
+			printer.Error("%-8s failed units: %s", st.Host, strings.Join(st.FailedUnits, ", "))
+		default:
+			printer.Success("%-8s healthy", st.Host)
+		}
+	}
+	if !healthy {
+		return &ExitError{Code: 1, Err: fmt.Errorf("fleet is not fully healthy"), Printed: true}
+	}
+	return nil
+}
+
+func dialError(host string, err error) error {
+	if errors.Is(err, sshx.ErrUnknownHostKey) {
+		return &ExitError{Code: 2, Err: fmt.Errorf("%s host key is not trusted; run: mksrv host trust %s", host, host)}
+	}
+	return &ExitError{Code: 1, Err: fmt.Errorf("connect %s: %w", host, err), Printed: false}
+}
+
+// orderedStacks returns the subset of assigned present on a host, in dependency
+// order.
+func orderedStacks(catalog map[string]model.Stack, assigned []string) []string {
+	want := map[string]bool{}
+	for _, name := range assigned {
+		want[name] = true
+	}
+	var order []string
+	seen := map[string]bool{}
+	var visit func(string)
+	visit = func(name string) {
+		if seen[name] || !want[name] {
+			return
+		}
+		seen[name] = true
+		for _, dep := range catalog[name].DependsOn {
+			visit(dep)
+		}
+		order = append(order, name)
+	}
+	names := make([]string, 0, len(assigned))
+	names = append(names, assigned...)
+	sort.Strings(names)
+	for _, name := range names {
+		visit(name)
+	}
+	return order
+}
+
+func lastLine(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "ok"
+	}
+	lines := strings.Split(s, "\n")
+	return lines[len(lines)-1]
+}

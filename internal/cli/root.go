@@ -138,6 +138,10 @@ func (a *App) newRootCommand(opts *globalOptions) *cobra.Command {
 		a.newPlanCommand(opts),
 		a.newApplyCommand(opts),
 		a.newUnlockCommand(opts),
+		a.newHostCommand(opts),
+		a.newBootstrapCommand(opts),
+		a.newDeployCommand(opts),
+		a.newStatusCommand(opts),
 	)
 	return root
 }

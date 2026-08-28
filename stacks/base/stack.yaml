@@ -15,7 +15,16 @@ tailnet_ports: []
 resources:
   min_ram_mb: 512
   disk_gb: 5
-templates: []
+templates:
+  - src: templates/mksrv-base.network.tmpl
+    dst: /etc/containers/systemd/mksrv-base.network
+    scope: shared
+  - src: templates/caddy.container.tmpl
+    dst: /etc/containers/systemd/mksrv-caddy.container
+    scope: shared
+  - src: templates/Caddyfile.tmpl
+    dst: /var/lib/mksrv/stacks/base/Caddyfile
+    scope: shared
 health:
   - app: caddy
     type: http

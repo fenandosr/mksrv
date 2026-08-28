@@ -57,6 +57,39 @@ func Materialize(data workspace.Data, extra map[string]any) (string, error) {
 	return path, nil
 }
 
+// OutputsFile is the filename apply writes the Terraform outputs to.
+const OutputsFile = "outputs.json"
+
+// HostOutput is the connection data the Terraform root exposes per host.
+type HostOutput struct {
+	Provider     string `json:"provider"`
+	ManagementIP string `json:"management_ip"`
+	PrivateIP    string `json:"private_ip"`
+	PublicIP     string `json:"public_ip"`
+	InstanceID   string `json:"instance_id"`
+	EBSDevice    string `json:"ebs_device"`
+	AZ           string `json:"az"`
+}
+
+// Outputs is the decoded outputs.json.
+type Outputs struct {
+	Hosts map[string]HostOutput `json:"hosts"`
+}
+
+// LoadOutputs reads and decodes <root>/.mksrv/infra/outputs.json.
+func LoadOutputs(root string) (Outputs, error) {
+	path := filepath.Join(WorkDir(root), OutputsFile)
+	blob, err := os.ReadFile(path)
+	if err != nil {
+		return Outputs{}, fmt.Errorf("read %s: %w (run mksrv apply --infra-only first)", path, err)
+	}
+	var out Outputs
+	if err := json.Unmarshal(blob, &out); err != nil {
+		return Outputs{}, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return out, nil
+}
+
 // BackendConfig returns the `-backend-config` key=value entries for
 // `terraform init`, derived from deployment.backend.
 func BackendConfig(d model.Deployment) []string {

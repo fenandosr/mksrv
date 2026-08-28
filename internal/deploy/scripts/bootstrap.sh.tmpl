@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# mksrv host bootstrap. Idempotent and marker-guarded: safe to re-run.
+# Rendered by internal/deploy; do not run by hand.
+set -euo pipefail
+
+MARKER_DIR=/var/lib/mksrv
+MARKER="$MARKER_DIR/.bootstrap-v{{ .MarkerVersion }}"
+IS_EDGE={{ if .IsEdge }}1{{ else }}0{{ end }}
+TIMEZONE="{{ .Timezone }}"
+
+log() { printf '[mksrv-bootstrap] %s\n' "$*"; }
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "bootstrap must run as root" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# 1. Data volume -> /var/lib/mksrv
+# ---------------------------------------------------------------------------
+if ! mountpoint -q "$MARKER_DIR"; then
+  root_disk="$(lsblk -ndo PKNAME "$(findmnt -no SOURCE /)" 2>/dev/null || true)"
+  data_dev=""
+  while read -r name type mnt; do
+    [ "$type" = "disk" ] || continue
+    [ "$name" = "$root_disk" ] && continue
+    [ -n "$mnt" ] && continue
+    # skip disks that already hold partitions
+    if lsblk -nro NAME,TYPE "/dev/$name" | awk '$2=="part"{f=1} END{exit !f}'; then
+      continue
+    fi
+    data_dev="/dev/$name"
+    break
+  done < <(lsblk -nro NAME,TYPE,MOUNTPOINT)
+
+  if [ -n "$data_dev" ]; then
+    if ! blkid "$data_dev" >/dev/null 2>&1; then
+      log "formatting $data_dev as xfs"
+      mkfs.xfs -q "$data_dev"
+    fi
+    mkdir -p "$MARKER_DIR"
+    uuid="$(blkid -s UUID -o value "$data_dev")"
+    if ! grep -q "$uuid" /etc/fstab; then
+      echo "UUID=$uuid $MARKER_DIR xfs defaults,noatime 0 2" >>/etc/fstab
+    fi
+    systemctl daemon-reload
+    mount "$MARKER_DIR"
+    log "mounted $data_dev ($uuid) at $MARKER_DIR"
+  else
+    log "no separate data volume found; using root filesystem for $MARKER_DIR"
+    mkdir -p "$MARKER_DIR"
+  fi
+fi
+mkdir -p "$MARKER_DIR/containers" "$MARKER_DIR/stacks"
+
+if [ -f "$MARKER" ]; then
+  log "already bootstrapped ($MARKER); nothing to do"
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Packages
+# ---------------------------------------------------------------------------
+log "installing packages"
+dnf -y -q install \
+  podman podman-plugins container-selinux \
+  firewalld chrony \
+  policycoreutils-python-utils python3-libselinux \
+  tar rsync
+
+# ---------------------------------------------------------------------------
+# 3. Time
+# ---------------------------------------------------------------------------
+timedatectl set-timezone "$TIMEZONE" || true
+systemctl enable --now chronyd
+
+# ---------------------------------------------------------------------------
+# 4. SELinux enforcing
+# ---------------------------------------------------------------------------
+setenforce 1 || true
+sed -i 's/^SELINUX=.*/SELINUX=enforcing/' /etc/selinux/config
+
+# ---------------------------------------------------------------------------
+# 5. firewalld
+# ---------------------------------------------------------------------------
+systemctl enable --now firewalld
+firewall-cmd --set-default-zone=public >/dev/null
+firewall-cmd --permanent --zone=public --add-service=ssh >/dev/null
+if [ "$IS_EDGE" = "1" ]; then
+  firewall-cmd --permanent --zone=public --add-service=http >/dev/null
+  firewall-cmd --permanent --zone=public --add-service=https >/dev/null
+fi
+firewall-cmd --reload >/dev/null
+
+# ---------------------------------------------------------------------------
+# 6. Podman storage on the data volume + Quadlet
+# ---------------------------------------------------------------------------
+install -d -m 0755 /etc/containers
+cat >/etc/containers/storage.conf <<EOF
+[storage]
+driver = "overlay"
+graphroot = "$MARKER_DIR/containers"
+runroot = "/run/containers/storage"
+EOF
+install -d -m 0755 /etc/containers/systemd
+
+systemctl enable --now podman.socket
+systemctl enable podman-auto-update.timer || true
+
+# ---------------------------------------------------------------------------
+# 7. Kernel / sysctl tuning
+# ---------------------------------------------------------------------------
+cat >/etc/sysctl.d/90-mksrv.conf <<EOF
+net.core.somaxconn = 1024
+net.ipv4.ip_unprivileged_port_start = 80
+vm.max_map_count = 262144
+fs.inotify.max_user_instances = 512
+EOF
+sysctl -q --system
+
+# ---------------------------------------------------------------------------
+# 8. Quiet stock services that fail on EC2, and no unattended reboots
+# ---------------------------------------------------------------------------
+systemctl mask --now dnf-automatic-install.timer 2>/dev/null || true
+# rngd has no hardware RNG on most EC2 instance types; the kernel CSPRNG is used.
+systemctl mask --now rngd.service 2>/dev/null || true
+systemctl reset-failed 2>/dev/null || true
+
+printf 'bootstrapped %s on %s\n' "v{{ .MarkerVersion }}" "$(date -u +%FT%TZ)" >"$MARKER"
+log "bootstrap complete"
