@@ -31,12 +31,16 @@ builds:
 
 archives:
   - id: binaries
-    ids: [mksrv, configd]
+    ids: [mksrv]
     formats: [tar.gz]
     format_overrides:
       - goos: windows
         formats: [zip]
     name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+  - id: configd
+    ids: [configd]
+    formats: [tar.gz]
+    name_template: 'configd_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
   - id: engine
     meta: true
     formats: [tar.gz]
