@@ -74,12 +74,21 @@ mksrv version
 mksrv init [PATH]
 mksrv validate [PATH]
 mksrv doctor
+mksrv plan  --infra-only
+mksrv apply --infra-only
 ```
 
 `mksrv init` scaffolds a private workspace from embedded templates. Required
 values come from flags (`--env`, `--region`, `--root-domain`, `--mgmt-cidr`,
 `--acme-email`, and optionally `--profile`, `--keycloak-domain`,
 `--headscale-domain`) or interactive prompts; `--yes` requires them all up front.
+
+`mksrv apply --infra-only` resolves AWS credentials, creates the S3 + DynamoDB
+Terraform state backend if absent, and runs Terraform for the VPC, EC2 hosts,
+Elastic IPs, security groups, instance profiles, and the operator-zone DNS
+records. `mksrv plan --infra-only` shows the same without applying. Terraform is
+downloaded and version-pinned automatically. An operator SSH public key
+(`MKSRV_SSH_PUBLIC_KEY` or `~/.ssh/id_ed25519.pub`) is attached to every host.
 
 Global flags currently implemented: `--workspace`, `--verbose/-v`,
 `--quiet/-q`, `--json`, `--no-color`, `--yes`, and `--allow-downgrade`.
@@ -133,8 +142,9 @@ source of version, commit, and date values.
 
 ## Roadmap
 
-- **M1:** AWS/existing-host infrastructure, state bootstrap, Terraform wrapper,
-  `init`, `plan --infra-only`, and `apply --infra-only`.
+- **M1:** ✅ AWS infrastructure, state bootstrap, Terraform wrapper, `init`,
+  `plan --infra-only`, and `apply --infra-only`. (`existing`-host contents and
+  per-tenant / mail DNS remain deferred.)
 - **M2:** renderer, SSH bootstrap/deploy, `base`, `identity`, mesh join, status.
 - **M3:** tenant lifecycle, realms, per-tenant Headscale, DNS records.
 - **M4:** database, files, analytics, and monitoring data-plane stacks.

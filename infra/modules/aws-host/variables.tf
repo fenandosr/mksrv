@@ -10,6 +10,14 @@ variable "region" {
   type = string
 }
 
+variable "vpc_id" {
+  type = string
+}
+
+variable "subnet_id" {
+  type = string
+}
+
 variable "instance_type" {
   type    = string
   default = "t4g.small"
@@ -36,4 +44,34 @@ variable "stacks" {
 variable "advertise_exitnode" {
   type    = bool
   default = false
+}
+
+variable "ami_id" {
+  type    = string
+  default = ""
+}
+
+variable "ami_owner" {
+  type    = string
+  default = "792107900819" # Rocky Linux official AMI publisher
+}
+
+variable "key_name" {
+  type    = string
+  default = ""
+}
+
+variable "timezone" {
+  type    = string
+  default = "Etc/UTC"
+}
+
+variable "swap_mb" {
+  type    = number
+  default = 0
+}
+
+variable "tags" {
+  type    = map(string)
+  default = {}
 }

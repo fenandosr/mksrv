@@ -50,7 +50,13 @@ Implemented:
   (ADR 0009).
 - Optional per-tenant `mail` block in `schemas/tenant.v1.json` / `model.Tenant`.
 - ADR 0010 records the first real deployment's topology decisions.
+- `internal/aws` — SDK client set, `WhoAmI`, `ExportEnv` (hands resolved
+  credentials to Terraform), and idempotent S3 + DynamoDB state-backend bootstrap.
+- `internal/infra` — decodes a validated workspace into
+  `.mksrv/infra/mksrv.auto.tfvars.json` and the `-backend-config` entries.
+- Terraform modules `network`, `aws-host`, `dns` and the `infra/root` wiring.
+- `mksrv plan --infra-only` / `mksrv apply --infra-only`.
 
-Not yet implemented in M1: state-backend bootstrap, tfvars generation from
-`deployment.yaml`, the `aws-host` / `existing-host` / `dns` module contents, and
-the `plan --infra-only` / `apply --infra-only` commands.
+Still deferred: `existing-host` module contents, per-tenant and mail DNS
+(`mail-ses`), and the non-`--infra-only` (bootstrap + deploy) paths, which are
+M2 and later.

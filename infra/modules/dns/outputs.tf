@@ -1,6 +1,9 @@
 output "created" {
-  value = var.provider_config.kind == "manual" ? [] : local.record_fqdns
+  description = "FQDNs for which a record was created by this module."
+  value       = var.provider_config.kind == "manual" ? [] : sort([for r in aws_route53_record.this : r.fqdn])
 }
+
 output "pending" {
-  value = var.provider_config.kind == "manual" ? var.records : []
+  description = "Records the operator must create by hand (manual provider)."
+  value       = var.provider_config.kind == "manual" ? var.records : []
 }

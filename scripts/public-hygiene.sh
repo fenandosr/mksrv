@@ -23,8 +23,16 @@ explicit_text_names = {'Makefile', 'LICENSE', '.gitignore', '.goreleaser.yaml', 
 findings: list[str] = []
 
 aws_account = re.compile(r'(?<![A-Za-z0-9])[0-9]{12}(?![A-Za-z0-9])')
+# Well-known public vendor AWS account ids that legitimately appear in AMI
+# owner filters. These are not operator identifiers.
+public_vendor_accounts = {
+    '792107900819',  # Rocky Linux (official AMI publisher)
+}
 aws_key = re.compile(r'\b(?:AKIA|ASIA)[A-Z0-9]{16}\b')
-arn = re.compile(r'\barn:(?:aws|aws-cn|aws-us-gov):')
+# Only flag ARNs that embed a literal 12-digit account id. Service-owned
+# (arn:aws:iam::aws:...) and wildcard/templated ARNs in Terraform policy
+# documents are fine.
+arn = re.compile(r'\barn:(?:aws|aws-cn|aws-us-gov):[a-z0-9-]*:[a-z0-9-]*:[0-9]{12}:')
 private_key = re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----')
 email = re.compile(r'(?<![A-Za-z0-9._%+-])([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![A-Za-z0-9.-])')
 ipv4 = re.compile(r'(?<![0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9.])')
@@ -52,7 +60,7 @@ for path in sorted(root.rglob('*')):
         continue
     rel = path.relative_to(root).as_posix()
 
-    if aws_account.search(text):
+    if any(match.group(0) not in public_vendor_accounts for match in aws_account.finditer(text)):
         findings.append(f'{rel}: possible AWS account ID')
     if aws_key.search(text):
         findings.append(f'{rel}: possible AWS access key ID')
@@ -81,6 +89,9 @@ for path in sorted(root.rglob('*')):
     if path.suffix in {'.yaml', '.yml', '.json', '.toml', '.tf', '.md'}:
         for match in domain_assignment.finditer(text):
             domain = match.group(1).lower().rstrip('.')
+            # Skip HCL expression references like local.d.dns.root_domain.
+            if domain.split('.', 1)[0] in {'local', 'var', 'module', 'data', 'each', 'self', 'path'}:
+                continue
             if not any(domain == suffix or domain.endswith('.' + suffix) for suffix in allowed_domain_suffixes):
                 findings.append(f'{rel}: configured domain {domain!r} is not synthetic')
 
