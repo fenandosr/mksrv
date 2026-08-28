@@ -1,0 +1,13 @@
+{
+	admin off
+	email {{ .ACMEEmail }}
+}
+
+# Plain-HTTP health endpoint, reachable by IP for load-balancer style checks.
+:80 {
+	respond /healthz "ok" 200
+	respond "mksrv {{ .Env }} edge" 200
+}
+
+# Reverse-proxy vhosts for identity, monitor, and per-tenant services are added
+# to this file when those stacks are deployed on the edge (M3+).

@@ -68,19 +68,23 @@ func (a *App) newUnlockCommand(opts *globalOptions) *cobra.Command {
 }
 
 func (a *App) newApplyCommand(opts *globalOptions) *cobra.Command {
-	var infraOnly bool
+	var infraOnly, trustHosts bool
 	cmd := &cobra.Command{
 		Use:   "apply",
-		Short: "Create or update infrastructure",
+		Short: "Create or update infrastructure, then bootstrap and deploy",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !infraOnly {
-				return &ExitError{Code: 2, Err: fmt.Errorf("only --infra-only is implemented; host bootstrap and deploy arrive in M2")}
+			if err := a.runInfraApply(cmd.Context(), a.printer(opts), opts); err != nil {
+				return err
 			}
-			return a.runInfraApply(cmd.Context(), a.printer(opts), opts)
+			if infraOnly {
+				return nil
+			}
+			return a.runFleetApply(cmd.Context(), a.printer(opts), opts, trustHosts)
 		},
 	}
-	cmd.Flags().BoolVar(&infraOnly, "infra-only", false, "Apply only the Terraform-managed infrastructure")
+	cmd.Flags().BoolVar(&infraOnly, "infra-only", false, "Stop after the Terraform-managed infrastructure")
+	cmd.Flags().BoolVar(&trustHosts, "trust-hosts", false, "Enroll unknown host keys automatically (first run)")
 	return cmd
 }
 

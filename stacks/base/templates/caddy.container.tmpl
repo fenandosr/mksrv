@@ -1,0 +1,21 @@
+[Unit]
+Description=mksrv Caddy edge proxy
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=mksrv-caddy
+Image={{ .Image "caddy" | default "docker.io/library/caddy:2.8" }}
+Network=mksrv-base.network
+PublishPort=80:80
+PublishPort=443:443
+Volume=/var/lib/mksrv/stacks/base/Caddyfile:/etc/caddy/Caddyfile:Z,ro
+Volume=mksrv-caddy-data:/data
+Volume=mksrv-caddy-config:/config
+
+[Service]
+Restart=always
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target default.target
