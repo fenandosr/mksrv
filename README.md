@@ -75,7 +75,11 @@ mksrv init [PATH]
 mksrv validate [PATH]
 mksrv doctor
 mksrv plan  --infra-only
-mksrv apply --infra-only
+mksrv apply [--infra-only] [--trust-hosts]
+mksrv host trust [HOST...]
+mksrv bootstrap [HOST...]
+mksrv deploy [HOST...] [--stack NAME]
+mksrv status
 ```
 
 `mksrv init` scaffolds a private workspace from embedded templates. Required
@@ -145,7 +149,9 @@ source of version, commit, and date values.
 - **M1:** ✅ AWS infrastructure, state bootstrap, Terraform wrapper, `init`,
   `plan --infra-only`, and `apply --infra-only`. (`existing`-host contents and
   per-tenant / mail DNS remain deferred.)
-- **M2:** renderer, SSH bootstrap/deploy, `base`, `identity`, mesh join, status.
+- **M2:** ✅ SSH transport, render engine, Rocky 9 host bootstrap, the `base`
+  stack (Caddy), `status`, and the full `mksrv apply` chain. `identity` and mesh
+  join are M3.
 - **M3:** tenant lifecycle, realms, per-tenant Headscale, DNS records.
 - **M4:** database, files, analytics, and monitoring data-plane stacks.
 - **M5:** Keycloak users, SES, and optional inbound mail.

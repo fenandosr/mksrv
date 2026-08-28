@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — M2
+
+- Added `internal/ssh` (SSH + SFTP transport, workspace-pinned known_hosts,
+  explicit first-use enrollment), `internal/render` (text/template stack
+  renderer), and `internal/deploy` (idempotent Rocky 9 bootstrap + checksum-aware
+  stack deploy with Quadlet activation and health checks).
+- Added the `base` stack templates (Caddy Quadlet + Caddyfile + podman network).
+- New commands: `mksrv host trust`, `mksrv bootstrap`, `mksrv deploy`,
+  `mksrv status`. `mksrv apply` without `--infra-only` now bootstraps and
+  deploys the fleet (base host first); `--trust-hosts` auto-enrolls on first run.
+
 ## Unreleased — M1
 
 - Added `mksrv plan --infra-only` and `mksrv apply --infra-only`: resolve AWS

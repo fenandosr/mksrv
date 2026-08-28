@@ -58,5 +58,23 @@ Implemented:
 - `mksrv plan --infra-only` / `mksrv apply --infra-only`.
 
 Still deferred: `existing-host` module contents, per-tenant and mail DNS
-(`mail-ses`), and the non-`--infra-only` (bootstrap + deploy) paths, which are
-M2 and later.
+(`mail-ses`).
+
+## M2 — implemented
+
+- `internal/ssh` — SSH/SFTP transport, workspace-pinned `known_hosts`, explicit
+  enrollment (`mksrv host trust`), `Run` / `RunScript` / `WriteFileSudo`.
+- `internal/render` — text/template stack renderer keyed by descriptor
+  destination path; typed `Context`.
+- `internal/deploy` — idempotent marker-guarded Rocky 9 bootstrap; `DeployStack`
+  with sha256-compared writes, Quadlet unit activation, and health checks.
+- `base` stack templates (Caddy + podman network).
+- `mksrv bootstrap`, `mksrv deploy`, `mksrv status`, and the full `mksrv apply`
+  chain (`--trust-hosts` for first run).
+
+Verified end to end against two live AWS hosts: bootstrap (SELinux enforcing,
+firewalld, Podman/Quadlet, data volume mounted), `base` deployed, external
+`/healthz` OK, `mksrv status` healthy, re-runs idempotent.
+
+Still deferred to M3+: `identity` (Headscale/Keycloak/configd), mesh join,
+tenant reconciliation, data-plane stacks.
