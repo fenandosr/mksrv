@@ -30,12 +30,14 @@ const (
 )
 
 // vpnRedirectURIs are the OIDC loopback callbacks the Cloud-IT VPN desktop app
-// uses. The literal ports are the app's fixed candidates; the wildcards cover
-// any future dynamic-port build.
+// uses. The literal ports are the app's fixed candidates (chosen to avoid the
+// Hyper-V/WSL2 reserved port range); the wildcards cover any dynamic-port build.
 var vpnRedirectURIs = []string{
-	"http://127.0.0.1:47017/callback",
-	"http://127.0.0.1:47018/callback",
-	"http://127.0.0.1:47019/callback",
+	"http://127.0.0.1:18017/callback",
+	"http://127.0.0.1:18018/callback",
+	"http://127.0.0.1:18019/callback",
+	"http://127.0.0.1:33717/callback",
+	"http://127.0.0.1:33718/callback",
 	"http://127.0.0.1:*/callback",
 	"http://localhost:*/callback",
 }
