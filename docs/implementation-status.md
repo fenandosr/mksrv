@@ -89,5 +89,19 @@ Verified live: `auth.<domain>` serves Keycloak over TLS, `vpn.<domain>/health`
 passes, both fleet hosts on the tailnet with cross-host connectivity,
 `mksrv status` healthy, deploy/mesh idempotent.
 
-Still deferred: `configd` (M4), per-tenant Keycloak realms and DNS records (M4),
-the `database` / `monitor` data-plane stacks (M5), and mail (M5/M6).
+## M4 — implemented
+
+- `internal/keycloak` — Admin REST client; `EnsureRealm` (realm, groups,
+  PKCE + confidential clients), `EnsureUsers` (no pruning).
+- `internal/configd` + `cmd/configd` — token verification against the realm
+  JWKS, Headscale pre-auth key minting, Ed25519 compact-JWS clientconfig.
+- `mksrv tenant apply` / `mksrv users apply`.
+
+Verified live: `tenant apply` created the bitabit/mcps/hg realms; a Keycloak
+password-grant token for realm bitabit fetched a clientconfig from
+`https://cfg.<domain>/v1/clientconfig` that Cloud-IT VPN's `VerifyCompact`
+accepts (tenant binding, freshness, structure all pass).
+
+Still deferred: per-tenant DNS records, the `database` / `monitor` stacks (M5),
+and mail (M5/M6). The configd container image is built locally for the demo; a
+GHCR-published image and a signing-key rotation flow are follow-ups.

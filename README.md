@@ -80,6 +80,8 @@ mksrv host trust [HOST...]
 mksrv bootstrap [HOST...]
 mksrv deploy [HOST...] [--stack NAME]
 mksrv mesh
+mksrv tenant apply [ID...]
+mksrv users apply [ID...]
 mksrv status
 ```
 
@@ -154,7 +156,10 @@ source of version, commit, and date values.
   stack (Caddy), `status`, and the full `mksrv apply` chain.
 - **M3:** ✅ `identity` stack (Keycloak + Headscale + Postgres), SSM secrets,
   Caddy vhost fragments, and `mksrv mesh` (per-tenant Headscale users, fleet
-  hosts joined to the tailnet). Per-tenant realms and DNS records are next.
+  hosts joined to the tailnet).
+- **M4:** ✅ `configd` (the Cloud-IT VPN broker), the Keycloak Admin client,
+  and `mksrv tenant apply` / `mksrv users apply` (one realm per tenant, groups,
+  OIDC clients, and a signed clientconfig endpoint). Data-plane stacks are next.
 - **M3:** tenant lifecycle, realms, per-tenant Headscale, DNS records.
 - **M4:** database, files, analytics, and monitoring data-plane stacks.
 - **M5:** Keycloak users, SES, and optional inbound mail.

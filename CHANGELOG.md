@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — M4
+
+- Added `internal/keycloak` (Admin REST client — realms, groups, OIDC clients,
+  declarative users) and `internal/configd` + `cmd/configd` (the Cloud-IT VPN
+  broker: verifies a Keycloak RS256 token, mints a one-use Headscale pre-auth
+  key, returns a compact Ed25519 JWS clientconfig). Containerfile + goreleaser
+  `configd` binary.
+- New commands `mksrv tenant apply` (realms, groups, clients, mesh users, and
+  the configd unit + signing key + roster) and `mksrv users apply`.
+- `internal/secrets` gains `Put` / `EnsureString`; `internal/headscale` gains
+  `CreateAPIKey`; stack deploy runs `podman network reload --all` after
+  container restarts.
+- The `identity` `configd` app now points at `localhost/mksrv-configd:dev`; the
+  Caddy fragment serves the `cfg.` vhost.
+
 ## Unreleased — M3
 
 - Added `internal/secrets` (SSM Parameter Store resolver; `EnsureRandom`
