@@ -108,7 +108,7 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 			Groups:      []string{"apps", "both"},
 			Clients: []keycloak.ClientSpec{
 				{ClientID: vpnClientID, Public: true, RedirectURIs: []string{
-					"http://127.0.0.1/*", "http://localhost/*",
+					"http://127.0.0.1:*/callback", "http://localhost:*/callback",
 				}},
 				{ClientID: configdClientID, Public: false, RedirectURIs: []string{}},
 			},
@@ -228,18 +228,34 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 }
 
 // demoForwards is a placeholder forward set until the data-plane stacks land.
+// The first forward targets the edge health endpoint, which is reachable over
+// the tailnet as soon as a client joins, so the desktop app can exercise the
+// full tunnel path before database/monitor exist.
 func demoForwards(env string) []configd.Forward {
-	return []configd.Forward{{
-		ID:           "database",
-		Label:        "PostgreSQL",
-		Type:         "tcp",
-		Listen:       configd.Listen{Host: "127.0.0.1", Port: 0},
-		PortStrategy: "auto",
-		Target:       fmt.Sprintf("%s-data.%s.mksrv:5432", env, env),
-		OpenAction:   configd.OpenAction{Kind: "none"},
-		HealthCheck:  configd.HealthCheck{Kind: "tcp", IntervalSec: 30},
-		MaxConns:     16,
-	}}
+	return []configd.Forward{
+		{
+			ID:           "edge-health",
+			Label:        "Edge health",
+			Type:         "http",
+			Listen:       configd.Listen{Host: "127.0.0.1", Port: 0},
+			PortStrategy: "auto",
+			Target:       fmt.Sprintf("%s-edge.%s.mksrv:80", env, env),
+			OpenAction:   configd.OpenAction{Kind: "browser", Path: "/healthz"},
+			HealthCheck:  configd.HealthCheck{Kind: "http", Path: "/healthz", IntervalSec: 30},
+			MaxConns:     8,
+		},
+		{
+			ID:           "database",
+			Label:        "PostgreSQL",
+			Type:         "tcp",
+			Listen:       configd.Listen{Host: "127.0.0.1", Port: 0},
+			PortStrategy: "auto",
+			Target:       fmt.Sprintf("%s-data.%s.mksrv:5432", env, env),
+			OpenAction:   configd.OpenAction{Kind: "none"},
+			HealthCheck:  configd.HealthCheck{Kind: "tcp", IntervalSec: 30},
+			MaxConns:     16,
+		},
+	}
 }
 
 func (f *fleet) identityHost() *hostTarget {
