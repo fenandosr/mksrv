@@ -4,6 +4,10 @@ display_name: "ACME Corp"
 base_domain: acme.example.com
 keycloak:
   realm: acme
+mail:
+  domains: [acme.example.com]
+  inbound: false
+  dmarc_rua: dmarc@acme.example.com
 stacks: [database, files, analytics, monitor]
 device_limit: 60
 branding:

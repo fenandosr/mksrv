@@ -22,6 +22,14 @@
       "type": "object", "additionalProperties": false,
       "properties": {"realm": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"}}
     },
+    "mail": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "domains": {"type": "array", "uniqueItems": true, "items": {"type": "string", "format": "hostname"}},
+        "inbound": {"type": "boolean", "default": false},
+        "dmarc_rua": {"type": "string", "format": "email"}
+      }
+    },
     "stacks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"}},
     "device_limit": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 50},
     "branding": {

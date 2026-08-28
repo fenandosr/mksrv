@@ -2,6 +2,15 @@
 
 ## Unreleased — M1
 
+- Added `mksrv init`: scaffolds a private workspace (`deployment.yaml`, `tenants/`,
+  `.gitignore`, `.mksrv/`, `README.md`) from embedded templates, with flags or
+  interactive prompts, `--force`, `--json`, and a validation pass on the result.
+  New `internal/scaffold` package. ADR 0009.
+- Added an optional per-tenant `mail` block (`domains`, `inbound`, `dmarc_rua`) to
+  `schemas/tenant.v1.json` and `model.Tenant`, to drive per-domain SES identity in
+  the `mail` stack.
+- Recorded ADR 0010: operator domain plus per-tenant DNS overrides, the
+  edge/data host split, SSM+age secrets, and a minimal `configd`.
 - Added `internal/tf`: pinned Terraform version (`1.9.8`), binary location and
   download via `hashicorp/hc-install`, and a `Runner` over
   `hashicorp/terraform-exec` (`Init`, `Validate`, `Plan`, `Apply`, `Output`).

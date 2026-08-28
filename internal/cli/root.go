@@ -27,6 +27,7 @@ type BuildInfo struct {
 // App is one configured CLI instance.
 type App struct {
 	build  BuildInfo
+	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
 }
@@ -55,7 +56,15 @@ func New(build BuildInfo, stdout, stderr io.Writer) *App {
 	if stderr == nil {
 		stderr = io.Discard
 	}
-	return &App{build: build, stdout: stdout, stderr: stderr}
+	return &App{build: build, stdin: os.Stdin, stdout: stdout, stderr: stderr}
+}
+
+// SetStdin overrides the reader used for interactive prompts. It is intended
+// for tests; the default is os.Stdin.
+func (a *App) SetStdin(r io.Reader) {
+	if r != nil {
+		a.stdin = r
+	}
 }
 
 type globalOptions struct {
@@ -123,6 +132,7 @@ func (a *App) newRootCommand(opts *globalOptions) *cobra.Command {
 
 	root.AddCommand(
 		a.newVersionCommand(opts),
+		a.newInitCommand(opts),
 		a.newValidateCommand(opts),
 		a.newDoctorCommand(opts),
 	)

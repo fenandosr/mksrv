@@ -44,7 +44,13 @@ Implemented:
   Unit-tested offline; `init`/`plan`/`apply`/`output` covered by an
   `integration`-tagged test run in CI.
 - `version` now reports the real pinned Terraform version.
+- `internal/scaffold` + `mksrv init` — renders a private workspace from embedded
+  templates, resolves required values from flags or prompts, refuses to
+  overwrite `deployment.yaml` without `--force`, and validates the result
+  (ADR 0009).
+- Optional per-tenant `mail` block in `schemas/tenant.v1.json` / `model.Tenant`.
+- ADR 0010 records the first real deployment's topology decisions.
 
 Not yet implemented in M1: state-backend bootstrap, tfvars generation from
-`deployment.yaml`, the `aws-host` / `existing-host` / `dns` module contents,
-`mksrv init`, and the `plan --infra-only` / `apply --infra-only` commands.
+`deployment.yaml`, the `aws-host` / `existing-host` / `dns` module contents, and
+the `plan --infra-only` / `apply --infra-only` commands.
