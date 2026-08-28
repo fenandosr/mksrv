@@ -4,6 +4,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -40,6 +41,7 @@ func (f *fleet) provisionDatabases(ctx context.Context, printer ui.Printer, tena
 	}
 	defer client.Close()
 
+	var pgTenants []string
 	for _, id := range tenants {
 		if !slices.Contains(f.data.Tenants[id].Stacks, "database") {
 			continue
@@ -56,9 +58,51 @@ func (f *fleet) provisionDatabases(ctx context.Context, printer ui.Printer, tena
 		if _, err := client.RunInput(ctx, cmd, []byte(sql)); err != nil {
 			return fmt.Errorf("provision database for %s: %w", id, err)
 		}
+		pgTenants = append(pgTenants, id)
 		printer.Success("tenant %s: database db_%s and role %s ready", id, id, id)
 	}
+
+	if len(pgTenants) > 0 {
+		if err := loadPgAdminServers(ctx, client, f.data.Deployment.Identity.ACMEEmail, pgTenants); err != nil {
+			printer.Warn("pgAdmin server list not loaded: %v", err)
+		} else {
+			printer.Info("pgAdmin servers registered for %d tenants", len(pgTenants))
+		}
+	}
 	return nil
+}
+
+// loadPgAdminServers pre-registers the tenant databases in pgAdmin so operators
+// only need to enter the password.
+func loadPgAdminServers(ctx context.Context, client *sshx.Client, pgadminUser string, tenants []string) error {
+	servers := map[string]any{}
+	for i, id := range tenants {
+		servers[fmt.Sprintf("%d", i+1)] = map[string]any{
+			"Name":          fmt.Sprintf("%s (db_%s)", id, id),
+			"Group":         "mksrv tenants",
+			"Host":          "mksrv-postgres",
+			"Port":          5432,
+			"MaintenanceDB": "db_" + id,
+			"Username":      id,
+			"SSLMode":       "prefer",
+			"Shared":        true,
+		}
+	}
+	blob, err := json.Marshal(map[string]any{"Servers": servers})
+	if err != nil {
+		return err
+	}
+	if _, err := client.RunInput(ctx,
+		"sudo podman exec -i mksrv-pgadmin sh -c 'cat > /tmp/mksrv-servers.json' 2>/dev/null || sudo tee /tmp/mksrv-servers.json >/dev/null && sudo podman cp /tmp/mksrv-servers.json mksrv-pgadmin:/tmp/mksrv-servers.json",
+		blob,
+	); err != nil {
+		return err
+	}
+	_, err = client.Run(ctx, fmt.Sprintf(
+		"sudo podman exec mksrv-pgadmin /venv/bin/python3 /pgadmin4/setup.py load-servers /tmp/mksrv-servers.json --user %s",
+		quoteArg(pgadminUser),
+	))
+	return err
 }
 
 func tenantDatabaseSQL(id, password string) string {
