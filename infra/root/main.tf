@@ -85,4 +85,7 @@ module "dns_operator" {
     kind    = local.d.dns.provider
     zone_id = local.zone_id
   }
+  # mksrv owns auth./vpn./cfg. in the operator zone; adopt them if a prior
+  # partial apply already created them.
+  allow_overwrite = true
 }
