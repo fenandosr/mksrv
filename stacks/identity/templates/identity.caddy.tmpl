@@ -6,3 +6,7 @@
 {{ .Endpoints.Headscale }} {
 	reverse_proxy 127.0.0.1:8081
 }
+
+{{ .Endpoints.ConfigD }} {
+	reverse_proxy 127.0.0.1:8090
+}

@@ -1,0 +1,23 @@
+[Unit]
+Description=mksrv configd (Cloud-IT VPN broker)
+Requires=mksrv-headscale.service
+After=mksrv-headscale.service
+
+[Container]
+ContainerName=mksrv-configd
+Image={{ .Image "configd" | default "localhost/mksrv-configd:dev" }}
+Network=mksrv-identity.network
+PublishPort=127.0.0.1:8090:8090
+Environment=CONFIGD_LISTEN=:8090
+Environment=CONFIGD_HEADSCALE_URL=http://mksrv-headscale:8080
+Secret=mksrv-identity-configd_signing_kid,type=env,target=CONFIGD_SIGNING_KID
+Secret=mksrv-identity-configd_signing_key,type=env,target=CONFIGD_SIGNING_KEY
+Secret=mksrv-identity-configd_headscale_apikey,type=env,target=CONFIGD_HEADSCALE_APIKEY
+Secret=mksrv-identity-configd_tenants,type=env,target=CONFIGD_TENANTS
+
+[Service]
+Restart=always
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

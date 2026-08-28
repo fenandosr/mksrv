@@ -106,6 +106,11 @@ func DeployStack(ctx context.Context, client *ssh.Client, opts Options) (StackRe
 			}
 			result.Restarted = append(result.Restarted, unit)
 		}
+		// Restarting containers on a shared podman network can leave
+		// aardvark-dns with stale records; reload it so name resolution works.
+		if len(units) > 0 {
+			_, _ = client.Run(ctx, "sudo podman network reload --all")
+		}
 	} else {
 		for _, unit := range units {
 			if _, err := client.Run(ctx, "sudo systemctl start "+unit); err != nil {

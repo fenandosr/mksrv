@@ -66,6 +66,34 @@ func (r *Resolver) Get(ctx context.Context, ref string) (string, error) {
 	return *out.Parameter.Value, nil
 }
 
+// Put writes value to ref as a SecureString, overwriting any existing value.
+// Use it for computed configuration (not random secrets).
+func (r *Resolver) Put(ctx context.Context, ref, value string) error {
+	name := r.Expand(ref)
+	_, err := r.api.PutParameter(ctx, &ssm.PutParameterInput{
+		Name:      awssdk.String(name),
+		Value:     awssdk.String(value),
+		Type:      ssmtypes.ParameterTypeSecureString,
+		Overwrite: awssdk.Bool(true),
+		Tier:      ssmtypes.ParameterTierStandard,
+	})
+	if err != nil {
+		return fmt.Errorf("put parameter %s: %w", name, err)
+	}
+	return nil
+}
+
+// EnsureString returns ref if it exists, otherwise stores value and returns it.
+func (r *Resolver) EnsureString(ctx context.Context, ref, value string) (string, error) {
+	if existing, err := r.Get(ctx, ref); err == nil {
+		return existing, nil
+	}
+	if err := r.Put(ctx, ref, value); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
 // EnsureRandom returns the value of ref, generating and storing a URL-safe
 // random string of at least nbytes of entropy when the parameter is absent.
 func (r *Resolver) EnsureRandom(ctx context.Context, ref string, nbytes int) (string, error) {
