@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — M6
+
+- Added `mksrv destroy --infra-only` (confirmation-gated `terraform destroy`).
+- Added a GitHub Actions workflow that builds and pushes a multi-arch
+  `ghcr.io/<owner>/mksrv-configd` image; the `identity` stack now references it.
+- `internal/keycloak` gains `EnsureClient` (single-client reconcile returning
+  the client secret).
+- Added a Spanish quick-start (`docs/quickstart.es.md`).
+
 ## Unreleased — M5
 
 - Added the `database` stack (PostgreSQL 16 + pgAdmin) and the `monitor` stack

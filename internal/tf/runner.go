@@ -126,6 +126,19 @@ func (r *Runner) Apply(ctx context.Context, planPath string, varFiles ...string)
 	return nil
 }
 
+// Destroy runs `terraform destroy` with auto-approve. varFiles become
+// `-var-file` flags.
+func (r *Runner) Destroy(ctx context.Context, varFiles ...string) error {
+	opts := make([]tfexec.DestroyOption, 0, len(varFiles))
+	for _, file := range varFiles {
+		opts = append(opts, tfexec.VarFile(file))
+	}
+	if err := r.terraform.Destroy(ctx, opts...); err != nil {
+		return fmt.Errorf("terraform destroy: %w", err)
+	}
+	return nil
+}
+
 // Output returns the root-module outputs as raw JSON values keyed by name.
 func (r *Runner) Output(ctx context.Context) (map[string]json.RawMessage, error) {
 	raw, err := r.terraform.Output(ctx)

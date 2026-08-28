@@ -42,6 +42,47 @@ func (a *App) newPlanCommand(opts *globalOptions) *cobra.Command {
 	return cmd
 }
 
+func (a *App) newDestroyCommand(opts *globalOptions) *cobra.Command {
+	var infraOnly bool
+	cmd := &cobra.Command{
+		Use:   "destroy",
+		Short: "Tear down the Terraform-managed infrastructure",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !infraOnly {
+				return &ExitError{Code: 2, Err: fmt.Errorf("pass --infra-only; destroying the state backend and workspace is manual")}
+			}
+			return a.runInfraDestroy(cmd.Context(), a.printer(opts), opts)
+		},
+	}
+	cmd.Flags().BoolVar(&infraOnly, "infra-only", false, "Destroy the Terraform-managed infrastructure")
+	return cmd
+}
+
+func (a *App) runInfraDestroy(ctx context.Context, printer ui.Printer, globals *globalOptions) error {
+	session, err := a.openInfraSession(ctx, printer, globals)
+	if err != nil {
+		return err
+	}
+	if !globals.Yes {
+		if !stdinIsInteractive() {
+			return &ExitError{Code: 2, Err: fmt.Errorf("refusing to destroy without confirmation; pass --yes")}
+		}
+		fmt.Fprint(a.stderr, "This DESTROYS all mksrv infrastructure (hosts, volumes, DNS). Type 'destroy' to confirm: ")
+		answer, _ := bufio.NewReader(a.stdin).ReadString('\n')
+		if strings.TrimSpace(answer) != "destroy" {
+			return &ExitError{Code: 1, Err: fmt.Errorf("destroy cancelled")}
+		}
+	}
+	printer.Info("terraform destroy")
+	if err := session.runner.Destroy(ctx, session.varsPath); err != nil {
+		return err
+	}
+	_ = os.Remove(filepath.Join(session.stateDir, infra.OutputsFile))
+	printer.Success("infrastructure destroyed; the S3 state bucket and DynamoDB table are left in place")
+	return nil
+}
+
 func (a *App) newUnlockCommand(opts *globalOptions) *cobra.Command {
 	var infraOnly bool
 	cmd := &cobra.Command{

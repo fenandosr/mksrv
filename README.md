@@ -83,6 +83,7 @@ mksrv mesh
 mksrv tenant apply [ID...]
 mksrv users apply [ID...]
 mksrv status
+mksrv destroy --infra-only
 ```
 
 `mksrv init` scaffolds a private workspace from embedded templates. Required
@@ -161,7 +162,9 @@ source of version, commit, and date values.
   and `mksrv tenant apply` / `mksrv users apply`.
 - **M5:** ✅ `database` (PostgreSQL 16 + pgAdmin, per-tenant DB/role/schema) and
   `monitor` (Prometheus + Grafana + node-exporter + cAdvisor) stacks, with
-  cross-host Caddy vhosts. Mail (SES) and polish remain.
+  cross-host Caddy vhosts and a Headscale tenant-isolation ACL.
+- **M6:** in progress — `mksrv destroy`, a GHCR-published `configd` image,
+  Spanish docs. Mail (SES) and Grafana OIDC remain.
 - **M3:** tenant lifecycle, realms, per-tenant Headscale, DNS records.
 - **M4:** database, files, analytics, and monitoring data-plane stacks.
 - **M5:** Keycloak users, SES, and optional inbound mail.
