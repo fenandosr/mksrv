@@ -108,6 +108,53 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 	return result, nil
 }
 
+// EnsureClient creates or updates a single OIDC client in an existing realm and
+// returns its secret (empty for public clients).
+func (c *Client) EnsureClient(ctx context.Context, realm string, spec ClientSpec) (string, error) {
+	origins := spec.WebOrigins
+	if origins == nil {
+		origins = []string{"+"}
+	}
+	body := map[string]any{
+		"clientId":                  spec.ClientID,
+		"enabled":                   true,
+		"publicClient":              spec.Public,
+		"standardFlowEnabled":       true,
+		"directAccessGrantsEnabled": false,
+		"redirectUris":              spec.RedirectURIs,
+		"webOrigins":                origins,
+		"attributes":                map[string]string{"pkce.code.challenge.method": "S256"},
+	}
+	existing, err := c.clientUUIDs(ctx, realm)
+	if err != nil {
+		return "", err
+	}
+	uuid, ok := existing[spec.ClientID]
+	if ok {
+		if _, err := c.do(ctx, http.MethodPut, "/realms/"+realm+"/clients/"+uuid, body, nil); err != nil {
+			return "", err
+		}
+	} else {
+		if _, err := c.do(ctx, http.MethodPost, "/realms/"+realm+"/clients", body, nil); err != nil {
+			return "", err
+		}
+		if existing, err = c.clientUUIDs(ctx, realm); err != nil {
+			return "", err
+		}
+		uuid = existing[spec.ClientID]
+	}
+	if spec.Public || uuid == "" {
+		return "", nil
+	}
+	var secret struct {
+		Value string `json:"value"`
+	}
+	if _, err := c.do(ctx, http.MethodGet, "/realms/"+realm+"/clients/"+uuid+"/client-secret", nil, &secret); err != nil {
+		return "", err
+	}
+	return secret.Value, nil
+}
+
 // UserSpec is one declarative realm user.
 type UserSpec struct {
 	Email   string

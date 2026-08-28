@@ -78,3 +78,41 @@ func TestEnsureRealmCreatesWhenAbsent(t *testing.T) {
 		t.Fatalf("idempotency broken: %+v createdRealm=%d", res, createdRealm)
 	}
 }
+
+func TestEnsureClientReturnsSecret(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/realms/master/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "t"})
+	})
+	created := false
+	mux.HandleFunc("/admin/realms/master/clients", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			created = true
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		if created {
+			_ = json.NewEncoder(w).Encode([]map[string]string{{"id": "abc", "clientId": "grafana"}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
+	mux.HandleFunc("/admin/realms/master/clients/abc/client-secret", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"value": "s3cr3t"})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := New(server.URL)
+	if err := c.Login(context.Background(), "admin", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	secret, err := c.EnsureClient(context.Background(), "master", ClientSpec{ClientID: "grafana"})
+	if err != nil {
+		t.Fatalf("EnsureClient() error = %v", err)
+	}
+	if secret != "s3cr3t" {
+		t.Fatalf("secret = %q", secret)
+	}
+}
