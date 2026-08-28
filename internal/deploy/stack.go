@@ -25,7 +25,13 @@ type Options struct {
 	Stack      model.Stack       // descriptor
 	Context    render.Context    // template data
 	Secrets    map[string]string // podman-secret leaf name -> value
+	// Edge is an SSH client to the host running Caddy. When the target host is
+	// not the edge, rendered files under /var/lib/mksrv/caddy.d/ are written
+	// there instead and Caddy is reloaded. Leave nil when deploying to the edge.
+	Edge *ssh.Client
 }
+
+const caddyFragmentDir = "/var/lib/mksrv/caddy.d/"
 
 // StackResult reports what a stack deploy did on one host.
 type StackResult struct {
@@ -80,18 +86,33 @@ func DeployStack(ctx context.Context, client *ssh.Client, opts Options) (StackRe
 	}
 
 	quadletChanged := false
+	edgeFragmentChanged := false
 	for _, dst := range render.SortedPaths(files) {
 		content := files[dst]
-		if same, _ := remoteMatches(ctx, client, dst, content); same {
+		target := client
+		isEdgeFragment := opts.Edge != nil && strings.HasPrefix(dst, caddyFragmentDir)
+		if isEdgeFragment {
+			target = opts.Edge
+		}
+		if same, _ := remoteMatches(ctx, target, dst, content); same {
 			result.Unchanged++
 			continue
 		}
-		if err := client.WriteFileSudo(ctx, dst, content, fileMode(dst)); err != nil {
+		if err := target.WriteFileSudo(ctx, dst, content, fileMode(dst)); err != nil {
 			return result, err
 		}
 		result.Changed = append(result.Changed, dst)
-		if strings.HasPrefix(dst, quadletDir) {
+		switch {
+		case strings.HasPrefix(dst, quadletDir):
 			quadletChanged = true
+		case isEdgeFragment:
+			edgeFragmentChanged = true
+		}
+	}
+
+	if edgeFragmentChanged {
+		if _, err := opts.Edge.Run(ctx, "sudo podman exec mksrv-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile || sudo systemctl restart mksrv-caddy.service"); err != nil {
+			return result, fmt.Errorf("reload edge caddy: %w", err)
 		}
 	}
 

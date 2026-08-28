@@ -1,0 +1,27 @@
+[Unit]
+Description=mksrv Grafana
+Requires=mksrv-prometheus.service
+After=mksrv-prometheus.service
+
+[Container]
+ContainerName=mksrv-grafana
+Image={{ .Image "grafana" | default "docker.io/grafana/grafana:11.5.1" }}
+Network=mksrv-monitor.network
+PublishPort={{ .Host.PrivateIP }}:3000:3000
+PublishPort=127.0.0.1:3000:3000
+Environment=GF_SERVER_ROOT_URL=https://grafana.{{ .Endpoints.RootDomain }}
+Environment=GF_SERVER_ENFORCE_DOMAIN=false
+Environment=GF_USERS_ALLOW_SIGN_UP=false
+Environment=GF_AUTH_ANONYMOUS_ENABLED=false
+Environment=GF_SECURITY_ADMIN_USER=admin
+Environment=GF_DATASOURCES_PROMETHEUS_URL=http://mksrv-prometheus:9090
+Secret=mksrv-monitor-grafana_admin_password,type=env,target=GF_SECURITY_ADMIN_PASSWORD
+Volume=/var/lib/mksrv/stacks/monitor/grafana-datasource.yml:/etc/grafana/provisioning/datasources/mksrv.yml:Z,ro
+Volume=mksrv-monitor-grafana:/var/lib/grafana
+
+[Service]
+Restart=always
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

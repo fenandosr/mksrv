@@ -1,0 +1,25 @@
+[Unit]
+Description=mksrv pgAdmin
+Requires=mksrv-postgres.service
+After=mksrv-postgres.service
+
+[Container]
+ContainerName=mksrv-pgadmin
+Image={{ .Image "pgadmin" | default "docker.io/dpage/pgadmin4:8" }}
+Network=mksrv-database.network
+PublishPort={{ .Host.PrivateIP }}:5050:80
+PublishPort=127.0.0.1:5050:80
+Environment=PGADMIN_DEFAULT_EMAIL={{ .ACMEEmail }}
+Environment=PGADMIN_DISABLE_POSTFIX=true
+Environment=PGADMIN_CONFIG_SERVER_MODE=True
+Environment=PGADMIN_CONFIG_PROXY_X_HOST_COUNT=1
+Environment=PGADMIN_CONFIG_PROXY_X_PREFIX_COUNT=1
+Secret=mksrv-database-pgadmin_pass,type=env,target=PGADMIN_DEFAULT_PASSWORD
+Volume=mksrv-database-pgadmin:/var/lib/pgadmin
+
+[Service]
+Restart=always
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

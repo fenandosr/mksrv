@@ -24,6 +24,8 @@ locals {
     local.d.identity.keycloak_domain,
     local.d.identity.headscale_domain,
     "cfg.${local.root_domain}",
+    "grafana.${local.root_domain}",
+    "pgadmin.${local.root_domain}",
   ])
   operator_records = [
     for fqdn in local.operator_fqdns : {
@@ -56,6 +58,7 @@ module "aws_host" {
   region        = local.region
   vpc_id        = module.network.vpc_id
   subnet_id     = module.network.subnet_id
+  vpc_cidr      = module.network.cidr
   instance_type = try(each.value.instance_type, "t4g.small")
   root_gb       = try(each.value.root_gb, 30)
   data_gb       = try(each.value.data_gb, 40)

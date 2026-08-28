@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package cli
+
+import (
+	"context"
+	"fmt"
+	"slices"
+	"strings"
+
+	sshx "github.com/fenandosr/mksrv/internal/ssh"
+	"github.com/fenandosr/mksrv/internal/ui"
+)
+
+// provisionDatabases creates one database, login role, and app schema per
+// tenant that consumes the `database` stack. It is idempotent and only runs
+// when a data host carries `database`.
+func (f *fleet) provisionDatabases(ctx context.Context, printer ui.Printer, tenants []string) error {
+	var dataHost *hostTarget
+	for i := range f.targets {
+		if slices.Contains(f.targets[i].Host.Stacks, "database") {
+			dataHost = &f.targets[i]
+			break
+		}
+	}
+	if dataHost == nil {
+		return nil
+	}
+	if err := f.ensureSecrets(ctx); err != nil {
+		return err
+	}
+	superPass, err := f.resolver.Get(ctx, "/mksrv/{env}/database/pg_superpass")
+	if err != nil {
+		return fmt.Errorf("postgres superuser password: %w (deploy database first)", err)
+	}
+
+	client, err := sshx.Dial(ctx, dataHost.Target, f.knownHosts)
+	if err != nil {
+		return dialError(dataHost.Name, err)
+	}
+	defer client.Close()
+
+	for _, id := range tenants {
+		if !slices.Contains(f.data.Tenants[id].Stacks, "database") {
+			continue
+		}
+		dbPass, err := f.resolver.EnsureRandom(ctx, "/mksrv/{env}/database/tenant_"+id+"_password", 24)
+		if err != nil {
+			return err
+		}
+		sql := tenantDatabaseSQL(id, dbPass)
+		cmd := fmt.Sprintf(
+			"sudo podman exec -e PGPASSWORD=%s -i mksrv-postgres psql -v ON_ERROR_STOP=1 -U mksrv -d postgres",
+			quoteArg(superPass),
+		)
+		if _, err := client.RunInput(ctx, cmd, []byte(sql)); err != nil {
+			return fmt.Errorf("provision database for %s: %w", id, err)
+		}
+		printer.Success("tenant %s: database db_%s and role %s ready", id, id, id)
+	}
+	return nil
+}
+
+func tenantDatabaseSQL(id, password string) string {
+	db := "db_" + id
+	role := id
+	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	return strings.Join([]string{
+		fmt.Sprintf(`SELECT format('CREATE ROLE %%I LOGIN PASSWORD %%L', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(role), q(password), q(role)),
+		fmt.Sprintf(`ALTER ROLE %q WITH LOGIN PASSWORD %s;`, role, q(password)),
+		fmt.Sprintf(`SELECT format('CREATE DATABASE %%I OWNER %%I', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = %s)\gexec`, q(db), q(role), q(db)),
+		fmt.Sprintf(`REVOKE ALL ON DATABASE %q FROM PUBLIC;`, db),
+		fmt.Sprintf(`GRANT CONNECT, CREATE ON DATABASE %q TO %q;`, db, role),
+		fmt.Sprintf(`\connect %q`, db),
+		fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS app AUTHORIZATION %q;`, role),
+		fmt.Sprintf(`ALTER DATABASE %q SET search_path TO app, public;`, db),
+		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %q IN SCHEMA app GRANT ALL ON TABLES TO %q;`, role, role),
+		"",
+	}, "\n")
+}

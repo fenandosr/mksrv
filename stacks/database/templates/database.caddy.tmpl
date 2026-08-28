@@ -1,0 +1,4 @@
+# mksrv database vhosts (rendered by the database stack, served by the edge).
+pgadmin.{{ .Endpoints.RootDomain }} {
+	reverse_proxy {{ .Host.PrivateIP }}:5050
+}

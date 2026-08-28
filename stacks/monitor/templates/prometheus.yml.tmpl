@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 30s
+  external_labels:
+    env: {{ .Env }}
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: node
+    static_configs:
+      - targets: ["mksrv-node-exporter:9100"]
+        labels: { host: "{{ .Host.Name }}" }
+
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["mksrv-cadvisor:8080"]
+        labels: { host: "{{ .Host.Name }}" }

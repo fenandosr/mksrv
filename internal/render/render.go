@@ -23,6 +23,7 @@ type HostView struct {
 	Role      string // "edge" when it carries base, otherwise "data"
 	PublicIP  string
 	PrivateIP string
+	TailnetIP string
 	MeshName  string
 	Stacks    []string
 }
@@ -43,10 +44,14 @@ type Context struct {
 	Host      HostView
 	Endpoints Endpoints
 	Images    map[string]string
-	Deployed  []string // stacks already deployed on this host
+	Deployed  []string          // stacks already deployed on this host
+	Peers     map[string]string // mksrv host name -> tailnet IPv4
 	Tenant    *model.Tenant
 	Secrets   map[string]string
 }
+
+// Peer returns the tailnet IPv4 of another fleet host, or "" if unknown.
+func (c Context) Peer(host string) string { return c.Peers[host] }
 
 // HasStack reports whether the host carries the named stack.
 func (c Context) HasStack(name string) bool {

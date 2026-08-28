@@ -151,12 +151,20 @@ func (c *Client) CreateAPIKey(ctx context.Context, ttl time.Duration) (string, e
 
 // Node is a headscale node record (subset).
 type Node struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Online    bool     `json:"online"`
-	IPv4      string   `json:"ip_addresses"`
-	GivenName string   `json:"given_name"`
-	Tags      []string `json:"forced_tags"`
+	ID     json.Number `json:"id"`
+	Name   string      `json:"name"`
+	Online bool        `json:"online"`
+	IPs    []string    `json:"ip_addresses"`
+}
+
+// IPv4 returns the node's first IPv4 tailnet address, or "".
+func (n Node) IPv4() string {
+	for _, ip := range n.IPs {
+		if strings.Count(ip, ".") == 3 && !strings.Contains(ip, ":") {
+			return ip
+		}
+	}
+	return ""
 }
 
 // Nodes lists registered nodes.

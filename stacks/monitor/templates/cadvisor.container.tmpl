@@ -1,0 +1,19 @@
+[Unit]
+Description=mksrv cAdvisor
+
+[Container]
+ContainerName=mksrv-cadvisor
+Image={{ .Image "cadvisor" | default "gcr.io/cadvisor/cadvisor:v0.49.2" }}
+Network=mksrv-monitor.network
+Volume=/:/rootfs:ro
+Volume=/var/run:/var/run:ro
+Volume=/sys:/sys:ro
+Volume=/var/lib/containers:/var/lib/containers:ro
+Volume=/dev/disk:/dev/disk:ro
+PodmanArgs=--privileged --device=/dev/kmsg
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
