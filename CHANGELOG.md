@@ -2,6 +2,19 @@
 
 ## Unreleased — M1
 
+- Added `mksrv plan --infra-only` and `mksrv apply --infra-only`: resolve AWS
+  credentials, bootstrap the S3 + DynamoDB Terraform state backend
+  (`internal/aws`), decode the workspace into Terraform variables
+  (`internal/infra`), and run the Terraform root. `apply` writes
+  `.mksrv/infra/outputs.json` and updates `mksrv.lock`.
+- Filled the Terraform modules: `network` (dedicated single-subnet VPC, no NAT),
+  `aws-host` (Rocky 9 arm64 EC2, gp3 data volume, EIP, locked-down security
+  group, SSM instance profile, minimal cloud-init), `dns` (Route 53 records),
+  and `infra/root` wiring (hosts + operator-zone DNS).
+- `internal/aws` exports the resolved credentials as `AWS_*` for Terraform, so
+  credential sources newer than Terraform's embedded SDK work.
+- `scripts/public-hygiene.sh`: no longer flags templated/service ARNs or HCL
+  expression references in Terraform; allows the public Rocky AMI owner id.
 - Added `mksrv init`: scaffolds a private workspace (`deployment.yaml`, `tenants/`,
   `.gitignore`, `.mksrv/`, `README.md`) from embedded templates, with flags or
   interactive prompts, `--force`, `--json`, and a validation pass on the result.
