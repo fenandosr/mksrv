@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — M5
+
+- Added the `database` stack (PostgreSQL 16 + pgAdmin) and the `monitor` stack
+  (Prometheus, Grafana, node-exporter, cAdvisor). `mksrv tenant apply` now
+  provisions a database, login role, and `app` schema per tenant.
+- Cross-host Caddy vhosts: rendered files under `/var/lib/mksrv/caddy.d/` from a
+  non-edge host's stack are written to the edge and Caddy is reloaded.
+- `render.Context` gains `Peers` (fleet private IPs), `Host.TailnetIP`;
+  `mksrv mesh` writes `.mksrv/mesh.json`. Caddy admin moves to `127.0.0.1:2019`.
+- `aws-host` gets an intra-VPC ingress rule; two operator DNS records
+  (`grafana.`, `pgadmin.`).
+
 ## Unreleased — M4
 
 - Added `internal/keycloak` (Admin REST client — realms, groups, OIDC clients,
