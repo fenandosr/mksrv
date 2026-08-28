@@ -167,6 +167,35 @@ func (n Node) IPv4() string {
 	return ""
 }
 
+// SetPolicyFile loads the HuJSON ACL policy at containerPath (a path visible
+// inside the Headscale container) into Headscale (policy.mode: database).
+func (c *Client) SetPolicyFile(ctx context.Context, containerPath string) error {
+	if _, err := c.run(ctx, "policy", "set", "-f", containerPath); err != nil {
+		return fmt.Errorf("headscale policy set: %w", err)
+	}
+	return nil
+}
+
+// Policy renders the tenant-isolation HuJSON ACL: fleet hosts reach everything,
+// each tenant reaches its own devices freely and the fleet on service ports
+// only, and tenants cannot reach each other.
+func Policy(tenantIDs []string) string {
+	const fleetPorts = "22,80,443,3000,5050,5432,8090,9090"
+	rules := []string{
+		fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s@:*"] }`, fleetUser, fleetUser),
+	}
+	for _, id := range tenantIDs {
+		rules = append(rules,
+			fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s@:*"] }`, id, id),
+			fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s@:%s"] }`, id, fleetUser, fleetPorts),
+		)
+	}
+	return "{\n  \"acls\": [\n    " + strings.Join(rules, ",\n    ") + "\n  ]\n}\n"
+}
+
+// fleetUser is the Headscale user that owns the mksrv fleet hosts.
+const fleetUser = "mksrv-fleet"
+
 // Nodes lists registered nodes.
 func (c *Client) Nodes(ctx context.Context) ([]Node, error) {
 	out, err := c.run(ctx, "nodes", "list", "--output", "json")

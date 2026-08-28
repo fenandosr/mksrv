@@ -123,6 +123,18 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 			id, realm, res.RealmCreated, len(res.GroupsCreated), len(res.ClientsCreated))
 	}
 
+	// Tenant-isolation ACL: tenants reach the fleet on service ports and their
+	// own devices; not each other.
+	policy := headscale.Policy(sortedTenantIDs(f.data.Tenants))
+	const policyHost = "/var/lib/mksrv/stacks/identity/headscale/policy.hujson"
+	if err := edgeClient.WriteFileSudo(ctx, policyHost, []byte(policy), 0o644); err != nil {
+		return &ExitError{Code: 1, Err: fmt.Errorf("write headscale policy: %w", err)}
+	}
+	if err := hs.SetPolicyFile(ctx, "/etc/headscale/policy.hujson"); err != nil {
+		return &ExitError{Code: 1, Err: err}
+	}
+	printer.Success("headscale ACL applied (%d tenants isolated)", len(f.data.Tenants))
+
 	if err := f.provisionDatabases(ctx, printer, selected); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
