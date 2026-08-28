@@ -72,14 +72,11 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 		result.GroupsCreated = append(result.GroupsCreated, name)
 	}
 
-	existingClients, err := c.clientIDs(ctx, spec.Realm)
+	existingClients, err := c.clientUUIDs(ctx, spec.Realm)
 	if err != nil {
 		return result, err
 	}
 	for _, cs := range spec.Clients {
-		if existingClients[cs.ClientID] {
-			continue
-		}
 		origins := cs.WebOrigins
 		if origins == nil {
 			origins = []string{"+"}
@@ -96,6 +93,12 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 			"attributes": map[string]string{
 				"pkce.code.challenge.method": "S256",
 			},
+		}
+		if uuid, ok := existingClients[cs.ClientID]; ok {
+			if _, err := c.do(ctx, http.MethodPut, "/realms/"+spec.Realm+"/clients/"+uuid, body, nil); err != nil {
+				return result, err
+			}
+			continue
 		}
 		if _, err := c.do(ctx, http.MethodPost, "/realms/"+spec.Realm+"/clients", body, nil); err != nil {
 			return result, err
@@ -215,16 +218,17 @@ func (c *Client) groupIDs(ctx context.Context, realm string) (map[string]string,
 	return out, nil
 }
 
-func (c *Client) clientIDs(ctx context.Context, realm string) (map[string]bool, error) {
+func (c *Client) clientUUIDs(ctx context.Context, realm string) (map[string]string, error) {
 	var clients []struct {
+		ID       string `json:"id"`
 		ClientID string `json:"clientId"`
 	}
 	if _, err := c.do(ctx, http.MethodGet, "/realms/"+realm+"/clients?max=200", nil, &clients); err != nil {
 		return nil, err
 	}
-	out := make(map[string]bool, len(clients))
+	out := make(map[string]string, len(clients))
 	for _, cl := range clients {
-		out[cl.ClientID] = true
+		out[cl.ClientID] = cl.ID
 	}
 	return out, nil
 }

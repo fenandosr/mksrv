@@ -108,7 +108,7 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 			Groups:      []string{"apps", "both"},
 			Clients: []keycloak.ClientSpec{
 				{ClientID: vpnClientID, Public: true, RedirectURIs: []string{
-					"http://127.0.0.1/*", "http://localhost/*",
+					"http://127.0.0.1:*/callback", "http://localhost:*/callback",
 				}},
 				{ClientID: configdClientID, Public: false, RedirectURIs: []string{}},
 			},
