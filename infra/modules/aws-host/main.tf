@@ -82,6 +82,18 @@ resource "aws_vpc_security_group_ingress_rule" "web" {
   ip_protocol       = "tcp"
 }
 
+# Fleet hosts trust each other inside the VPC; the VPC boundary (no public
+# ingress to non-edge hosts) is the perimeter for data-plane ports.
+resource "aws_vpc_security_group_ingress_rule" "intra_vpc" {
+  count             = var.vpc_cidr == "" ? 0 : 1
+  security_group_id = aws_security_group.host.id
+  description       = "all TCP from within the VPC"
+  cidr_ipv4         = var.vpc_cidr
+  from_port         = 0
+  to_port           = 65535
+  ip_protocol       = "tcp"
+}
+
 resource "aws_vpc_security_group_egress_rule" "all" {
   security_group_id = aws_security_group.host.id
   description       = "all egress"

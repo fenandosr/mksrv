@@ -1,6 +1,6 @@
 name: database
 title: Database
-description: "PostgreSQL, pgAdmin, and PostgREST"
+description: "PostgreSQL 16 with per-tenant databases, roles, and RLS, plus pgAdmin"
 targets: [cloud, local]
 per_tenant: true
 depends_on: [identity]
@@ -9,17 +9,27 @@ apps:
     image: docker.io/library/postgres:16
   - name: pgadmin
     image: docker.io/dpage/pgadmin4:8
-  - name: postgrest
-    image: docker.io/postgrest/postgrest:v12
 networks: [mksrv-database]
 secrets:
   - /mksrv/{env}/database/pg_superpass
   - /mksrv/{env}/database/pgadmin_pass
-tailnet_ports: [5432, 5050, 3000]
+tailnet_ports: [5432, 5050]
 resources:
   min_ram_mb: 1024
   disk_gb: 20
-templates: []
+templates:
+  - src: templates/mksrv-database.network.tmpl
+    dst: /etc/containers/systemd/mksrv-database.network
+    scope: shared
+  - src: templates/postgres.container.tmpl
+    dst: /etc/containers/systemd/mksrv-postgres.container
+    scope: shared
+  - src: templates/pgadmin.container.tmpl
+    dst: /etc/containers/systemd/mksrv-pgadmin.container
+    scope: shared
+  - src: templates/database.caddy.tmpl
+    dst: /var/lib/mksrv/caddy.d/20-database.caddy
+    scope: shared
 health:
   - app: postgres
     type: tcp

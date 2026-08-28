@@ -4,8 +4,10 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -43,6 +45,7 @@ type fleet struct {
 	byName     map[string]hostTarget
 	outputs    infra.Outputs
 	resolver   *secretsx.Resolver
+	meshIPs    map[string]string
 }
 
 // ensureSecrets loads AWS config and builds the SSM-backed secret resolver.
@@ -121,6 +124,7 @@ func (a *App) openFleet(ctx context.Context, printer ui.Printer, globals *global
 		byName:     map[string]hostTarget{},
 		outputs:    outputs,
 	}
+	f.loadMeshIPs()
 	names := make([]string, 0, len(data.Deployment.Hosts))
 	for name := range data.Deployment.Hosts {
 		names = append(names, name)
@@ -290,6 +294,18 @@ func (f *fleet) deployHost(ctx context.Context, printer ui.Printer, ht hostTarge
 	rctx := f.renderContext(ht)
 	rctx.Deployed = deployed
 
+	// A non-edge host's stacks may still contribute Caddy vhost fragments, which
+	// belong on the edge.
+	var edgeClient *sshx.Client
+	if !slices.Contains(ht.Host.Stacks, "base") {
+		if edge := f.identityHost(); edge != nil {
+			if ec, err := sshx.Dial(ctx, edge.Target, f.knownHosts); err == nil {
+				edgeClient = ec
+				defer edgeClient.Close()
+			}
+		}
+	}
+
 	for _, stackName := range orderedStacks(f.catalog, ht.Host.Stacks) {
 		if len(limit) > 0 && !limit[stackName] {
 			continue
@@ -308,6 +324,7 @@ func (f *fleet) deployHost(ctx context.Context, printer ui.Printer, ht hostTarge
 			Stack:      stack,
 			Context:    rctx,
 			Secrets:    secretValues,
+			Edge:       edgeClient,
 		})
 		if err != nil {
 			return &ExitError{Code: 1, Err: fmt.Errorf("%s/%s: %w", ht.Name, stackName, err), Printed: false}
@@ -333,6 +350,14 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 			images[app.Name] = app.Image
 		}
 	}
+	// Peers: other fleet hosts' private (VPC) IPs — same subnet, so the edge
+	// reaches data-plane services directly without the mesh.
+	peers := map[string]string{}
+	for name, out := range f.outputs.Hosts {
+		if name != ht.Name && out.PrivateIP != "" {
+			peers[name] = out.PrivateIP
+		}
+	}
 	return render.Context{
 		Env:       dep.Env,
 		Timezone:  dep.Timezone,
@@ -342,7 +367,8 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 			Role:      role,
 			PublicIP:  hostOut.PublicIP,
 			PrivateIP: hostOut.PrivateIP,
-			MeshName:  fmt.Sprintf("%s.%s.mksrv", ht.Name, dep.Env),
+			TailnetIP: f.meshIPs[ht.Name],
+			MeshName:  fmt.Sprintf("%s-%s.%s.mksrv", dep.Env, ht.Name, dep.Env),
 			Stacks:    ht.Host.Stacks,
 		},
 		Endpoints: render.Endpoints{
@@ -352,7 +378,27 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 			RootDomain: dep.DNS.RootDomain,
 		},
 		Images: images,
+		Peers:  peers,
 	}
+}
+
+const meshFile = ".mksrv/mesh.json"
+
+func (f *fleet) loadMeshIPs() {
+	f.meshIPs = map[string]string{}
+	blob, err := os.ReadFile(filepath.Join(f.data.Root, filepath.FromSlash(meshFile)))
+	if err != nil {
+		return
+	}
+	_ = json.Unmarshal(blob, &f.meshIPs)
+}
+
+func (f *fleet) writeMeshIPs(ips map[string]string) error {
+	blob, err := json.MarshalIndent(ips, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(f.data.Root, filepath.FromSlash(meshFile)), append(blob, '\n'), 0o600)
 }
 
 // runFleetApply bootstraps and deploys every host, base host first.
@@ -461,6 +507,7 @@ func (a *App) runMesh(ctx context.Context, printer ui.Printer, globals *globalOp
 	}
 
 	loginServer := "https://" + f.data.Deployment.Identity.HeadscaleDomain
+	meshIPs := map[string]string{}
 	for _, ht := range f.targets {
 		key, err := hs.PreAuthKey(ctx, fleetID, time.Hour, false)
 		if err != nil {
@@ -480,8 +527,13 @@ func (a *App) runMesh(ctx context.Context, printer ui.Printer, globals *globalOp
 		if err != nil {
 			return &ExitError{Code: 1, Err: fmt.Errorf("%s: %w", ht.Name, err), Printed: false}
 		}
+		meshIPs[ht.Name] = ip
 		printer.Success("%s joined tailnet as %s", ht.Name, ip)
 	}
+	if err := f.writeMeshIPs(meshIPs); err != nil {
+		printer.Warn("could not write %s: %v", meshFile, err)
+	}
+	f.meshIPs = meshIPs
 	return nil
 }
 

@@ -1,0 +1,30 @@
+[Unit]
+Description=mksrv PostgreSQL
+
+[Container]
+ContainerName=mksrv-postgres
+Image={{ .Image "postgres" | default "docker.io/library/postgres:16" }}
+Network=mksrv-database.network
+PublishPort={{ .Host.PrivateIP }}:5432:5432
+{{- if .Host.TailnetIP }}
+PublishPort={{ .Host.TailnetIP }}:5432:5432
+{{- end }}
+PublishPort=127.0.0.1:5432:5432
+Environment=POSTGRES_DB=postgres
+Environment=POSTGRES_USER=mksrv
+Environment=PGDATA=/var/lib/postgresql/data/pgdata
+Environment=POSTGRES_INITDB_ARGS=--data-checksums
+Secret=mksrv-database-pg_superpass,type=env,target=POSTGRES_PASSWORD
+Volume=mksrv-database-pgdata:/var/lib/postgresql/data
+HealthCmd=pg_isready -U mksrv -q
+HealthStartPeriod=10s
+HealthInterval=10s
+HealthRetries=30
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

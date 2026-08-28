@@ -123,6 +123,10 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 			id, realm, res.RealmCreated, len(res.GroupsCreated), len(res.ClientsCreated))
 	}
 
+	if err := f.provisionDatabases(ctx, printer, selected); err != nil {
+		return &ExitError{Code: 1, Err: err}
+	}
+
 	pubPEM, err := a.reconcileConfigd(ctx, printer, f, hs, edgeClient, *edge)
 	if err != nil {
 		return err

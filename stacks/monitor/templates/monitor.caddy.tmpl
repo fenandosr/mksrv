@@ -1,0 +1,4 @@
+# mksrv monitor vhosts (rendered by the monitor stack, served by the edge).
+grafana.{{ .Endpoints.RootDomain }} {
+	reverse_proxy {{ .Host.PrivateIP }}:3000
+}

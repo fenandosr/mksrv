@@ -90,6 +90,38 @@ func TestStackRendersIdentity(t *testing.T) {
 	}
 }
 
+func TestStackRendersDataPlane(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	ctx := baseContext()
+	ctx.Host.Name = "data"
+	ctx.Host.Role = "data"
+	ctx.Host.PrivateIP = "10.20.0.168"
+	ctx.Host.TailnetIP = "100.64.0.1"
+	ctx.Host.Stacks = []string{"database", "monitor"}
+	ctx.Images = map[string]string{"postgres": "docker.io/library/postgres:16"}
+
+	stacksRoot := filepath.Clean(filepath.Join("..", "..", "stacks"))
+	dbFiles, err := Stack(stacksRoot, catalog["database"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(database) error = %v", err)
+	}
+	if pg := string(dbFiles["/etc/containers/systemd/mksrv-postgres.container"]); !strings.Contains(pg, "PublishPort=100.64.0.1:5432:5432") {
+		t.Fatalf("postgres unit missing tailnet publish:\n%s", pg)
+	}
+
+	monFiles, err := Stack(stacksRoot, catalog["monitor"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(monitor) error = %v", err)
+	}
+	if frag := string(monFiles["/var/lib/mksrv/caddy.d/30-monitor.caddy"]); !strings.Contains(frag, "reverse_proxy 10.20.0.168:3000") {
+		t.Fatalf("monitor fragment wrong:\n%s", frag)
+	}
+}
+
 func TestContextHelpers(t *testing.T) {
 	t.Parallel()
 	ctx := baseContext()

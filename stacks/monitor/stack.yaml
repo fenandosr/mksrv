@@ -1,6 +1,6 @@
 name: monitor
 title: Monitoring
-description: "Prometheus, Grafana, Alertmanager, node-exporter, and cAdvisor"
+description: "Prometheus, Grafana, node-exporter, and cAdvisor"
 targets: [cloud, local]
 per_tenant: true
 depends_on: [identity]
@@ -9,8 +9,6 @@ apps:
     image: quay.io/prometheus/prometheus:v3.1.0
   - name: grafana
     image: docker.io/grafana/grafana:11.5.1
-  - name: alertmanager
-    image: quay.io/prometheus/alertmanager:v0.28.0
   - name: node-exporter
     image: quay.io/prometheus/node-exporter:v1.8.2
   - name: cadvisor
@@ -18,11 +16,35 @@ apps:
 networks: [mksrv-monitor]
 secrets:
   - /mksrv/{env}/monitor/grafana_admin_password
-tailnet_ports: [9090, 3000, 9093, 9100, 8080]
+tailnet_ports: [9090, 3000, 9100, 8080]
 resources:
-  min_ram_mb: 2048
-  disk_gb: 30
-templates: []
+  min_ram_mb: 1024
+  disk_gb: 20
+templates:
+  - src: templates/mksrv-monitor.network.tmpl
+    dst: /etc/containers/systemd/mksrv-monitor.network
+    scope: shared
+  - src: templates/prometheus.yml.tmpl
+    dst: /var/lib/mksrv/stacks/monitor/prometheus.yml
+    scope: shared
+  - src: templates/node-exporter.container.tmpl
+    dst: /etc/containers/systemd/mksrv-node-exporter.container
+    scope: shared
+  - src: templates/cadvisor.container.tmpl
+    dst: /etc/containers/systemd/mksrv-cadvisor.container
+    scope: shared
+  - src: templates/prometheus.container.tmpl
+    dst: /etc/containers/systemd/mksrv-prometheus.container
+    scope: shared
+  - src: templates/grafana-datasource.yml.tmpl
+    dst: /var/lib/mksrv/stacks/monitor/grafana-datasource.yml
+    scope: shared
+  - src: templates/grafana.container.tmpl
+    dst: /etc/containers/systemd/mksrv-grafana.container
+    scope: shared
+  - src: templates/monitor.caddy.tmpl
+    dst: /var/lib/mksrv/caddy.d/30-monitor.caddy
+    scope: shared
 health:
   - app: prometheus
     type: http

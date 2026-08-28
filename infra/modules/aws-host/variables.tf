@@ -18,6 +18,11 @@ variable "subnet_id" {
   type = string
 }
 
+variable "vpc_cidr" {
+  type    = string
+  default = ""
+}
+
 variable "instance_type" {
   type    = string
   default = "t4g.small"

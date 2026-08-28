@@ -102,6 +102,19 @@ password-grant token for realm bitabit fetched a clientconfig from
 `https://cfg.<domain>/v1/clientconfig` that Cloud-IT VPN's `VerifyCompact`
 accepts (tenant binding, freshness, structure all pass).
 
-Still deferred: per-tenant DNS records, the `database` / `monitor` stacks (M5),
-and mail (M5/M6). The configd container image is built locally for the demo; a
-GHCR-published image and a signing-key rotation flow are follow-ups.
+## M5 — implemented
+
+- `database` stack: PostgreSQL 16 (published on the host private + tailnet IP)
+  and pgAdmin. `mksrv tenant apply` provisions one DB, login role, and `app`
+  schema per tenant.
+- `monitor` stack: Prometheus, Grafana (provisioned Prometheus datasource),
+  node-exporter, cAdvisor.
+- Cross-host Caddy vhost fragments (edge serves `grafana.` / `pgadmin.`);
+  `mksrv mesh` records tailnet IPs; intra-VPC security-group rule.
+
+Verified live: `grafana.` and `pgadmin.` serve over TLS; `psql` as a tenant
+role into its own database works; Postgres is reachable on the tailnet.
+
+Still deferred: table-level RLS policies (application concern), per-tenant DNS
+records under the real tenant domains, Grafana OIDC, mail (SES), a
+GHCR-published configd image, signing-key rotation, and `mksrv destroy`.
