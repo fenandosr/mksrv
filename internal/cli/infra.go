@@ -42,6 +42,31 @@ func (a *App) newPlanCommand(opts *globalOptions) *cobra.Command {
 	return cmd
 }
 
+func (a *App) newUnlockCommand(opts *globalOptions) *cobra.Command {
+	var infraOnly bool
+	cmd := &cobra.Command{
+		Use:   "unlock LOCK_ID",
+		Short: "Release a stale Terraform state lock",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !infraOnly {
+				return &ExitError{Code: 2, Err: fmt.Errorf("pass --infra-only; it is the only state mksrv locks today")}
+			}
+			session, err := a.openInfraSession(cmd.Context(), a.printer(opts), opts)
+			if err != nil {
+				return err
+			}
+			if err := session.runner.Raw().ForceUnlock(cmd.Context(), args[0]); err != nil {
+				return fmt.Errorf("force-unlock %s: %w", args[0], err)
+			}
+			a.printer(opts).Success("released state lock %s", args[0])
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&infraOnly, "infra-only", false, "Release the infrastructure state lock")
+	return cmd
+}
+
 func (a *App) newApplyCommand(opts *globalOptions) *cobra.Command {
 	var infraOnly bool
 	cmd := &cobra.Command{
