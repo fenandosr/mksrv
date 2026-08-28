@@ -1,0 +1,13 @@
+# configd container image. Build context is the repository root:
+#   podman build -f cmd/configd/Containerfile -t mksrv-configd .
+FROM docker.io/library/golang:1.25-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/configd ./cmd/configd
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/configd /usr/local/bin/configd
+EXPOSE 8090
+ENTRYPOINT ["/usr/local/bin/configd"]

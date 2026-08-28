@@ -109,6 +109,16 @@ func Stack(stacksRoot string, stack model.Stack, ctx Context) (map[string][]byte
 	return out, nil
 }
 
+// One renders a single template file (used for units mksrv manages outside the
+// stack deploy loop, e.g. configd).
+func One(templatePath string, ctx Context) ([]byte, error) {
+	raw, err := os.ReadFile(templatePath)
+	if err != nil {
+		return nil, fmt.Errorf("read template %s: %w", templatePath, err)
+	}
+	return renderOne(filepath.Base(templatePath), string(raw), ctx)
+}
+
 func renderOne(name, body string, ctx Context) ([]byte, error) {
 	tmpl, err := template.New(name).Option("missingkey=error").Funcs(funcs).Parse(body)
 	if err != nil {

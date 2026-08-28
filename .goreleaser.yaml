@@ -21,6 +21,13 @@ builds:
         -X main.version={{.Version}}
         -X main.commit={{.Commit}}
         -X main.date={{.Date}}
+  - id: configd
+    main: ./cmd/configd
+    binary: configd
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    ldflags: ["-s -w"]
 
 archives:
   - id: binaries
@@ -30,6 +37,10 @@ archives:
       - goos: windows
         formats: [zip]
     name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+  - id: configd
+    ids: [configd]
+    formats: [tar.gz]
+    name_template: 'configd_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
   - id: engine
     meta: true
     formats: [tar.gz]

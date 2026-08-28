@@ -12,7 +12,7 @@ apps:
   - name: keycloak
     image: quay.io/keycloak/keycloak:26.1
   - name: configd
-    image: registry.invalid/mksrv/configd:0.0.0
+    image: localhost/mksrv-configd:dev
 networks: [mksrv-identity]
 secrets:
   - /mksrv/{env}/identity/kc_db_password

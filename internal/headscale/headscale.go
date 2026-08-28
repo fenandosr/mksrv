@@ -116,6 +116,39 @@ func (c *Client) PreAuthKey(ctx context.Context, userID string, ttl time.Duratio
 	return key.Key, nil
 }
 
+// CreateAPIKey mints a Headscale API key valid for ttl. The key is shown only
+// once, at creation.
+func (c *Client) CreateAPIKey(ctx context.Context, ttl time.Duration) (string, error) {
+	out, err := c.run(ctx, "apikeys", "create", "--expiration", ttl.String(), "--output", "json")
+	if err != nil {
+		return "", err
+	}
+	trimmed := strings.TrimSpace(out)
+	// Older/newer headscale prints either a bare quoted string or an object.
+	if strings.HasPrefix(trimmed, "\"") {
+		var key string
+		if err := json.Unmarshal([]byte(trimmed), &key); err == nil {
+			return key, nil
+		}
+	}
+	var obj struct {
+		APIKey string `json:"apiKey"`
+		Key    string `json:"key"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &obj); err == nil {
+		if obj.APIKey != "" {
+			return obj.APIKey, nil
+		}
+		if obj.Key != "" {
+			return obj.Key, nil
+		}
+	}
+	if trimmed != "" && !strings.ContainsAny(trimmed, "{}[]") {
+		return trimmed, nil
+	}
+	return "", fmt.Errorf("could not parse headscale api key from %q", trimmed)
+}
+
 // Node is a headscale node record (subset).
 type Node struct {
 	ID        string   `json:"id"`
