@@ -18,6 +18,7 @@ import (
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
 )
@@ -42,7 +43,11 @@ type Clients struct {
 	sts      *sts.Client
 	s3       *s3.Client
 	dynamodb *dynamodb.Client
+	ssm      *ssm.Client
 }
+
+// SSM returns the Systems Manager client.
+func (c *Clients) SSM() *ssm.Client { return c.ssm }
 
 // Load resolves AWS configuration from the environment and shared files and
 // constructs the client set. It performs no network calls.
@@ -67,6 +72,7 @@ func Load(ctx context.Context, opts Options) (*Clients, error) {
 		sts:      sts.NewFromConfig(cfg),
 		s3:       s3.NewFromConfig(cfg),
 		dynamodb: dynamodb.NewFromConfig(cfg),
+		ssm:      ssm.NewFromConfig(cfg),
 	}, nil
 }
 

@@ -18,8 +18,9 @@ func TestRenderBootstrapEdge(t *testing.T) {
 		`TIMEZONE="America/Mexico_City"`,
 		"SELINUX=enforcing",
 		"--add-service=http",
-		"graphroot = \"$MARKER_DIR/containers\"",
-		".bootstrap-v3",
+		`GRAPHROOT="$MARKER_DIR/containers"`,
+		"semanage fcontext -a -e /var/lib/containers/storage",
+		".bootstrap-v7",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("bootstrap script missing %q", want)

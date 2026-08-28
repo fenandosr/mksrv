@@ -43,6 +43,7 @@ type Context struct {
 	Host      HostView
 	Endpoints Endpoints
 	Images    map[string]string
+	Deployed  []string // stacks already deployed on this host
 	Tenant    *model.Tenant
 	Secrets   map[string]string
 }
@@ -50,6 +51,16 @@ type Context struct {
 // HasStack reports whether the host carries the named stack.
 func (c Context) HasStack(name string) bool {
 	for _, s := range c.Host.Stacks {
+		if s == name {
+			return true
+		}
+	}
+	return false
+}
+
+// IsDeployed reports whether the named stack is already deployed on this host.
+func (c Context) IsDeployed(name string) bool {
+	for _, s := range c.Deployed {
 		if s == name {
 			return true
 		}

@@ -1,0 +1,18 @@
+[Unit]
+Description=mksrv Headscale control plane
+
+[Container]
+ContainerName=mksrv-headscale
+Image={{ .Image "headscale" | default "ghcr.io/juanfont/headscale:0.26.0" }}
+Network=mksrv-identity.network
+PublishPort=127.0.0.1:8081:8080
+Volume=/var/lib/mksrv/stacks/identity/headscale:/etc/headscale:Z,ro
+Volume=mksrv-identity-headscale:/var/lib/headscale
+Exec=serve
+
+[Service]
+Restart=always
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

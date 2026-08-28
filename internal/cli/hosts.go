@@ -10,15 +10,19 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	awsclient "github.com/fenandosr/mksrv/internal/aws"
 	"github.com/fenandosr/mksrv/internal/deploy"
 	"github.com/fenandosr/mksrv/internal/engine"
+	"github.com/fenandosr/mksrv/internal/headscale"
 	"github.com/fenandosr/mksrv/internal/infra"
 	"github.com/fenandosr/mksrv/internal/model"
 	"github.com/fenandosr/mksrv/internal/render"
 	"github.com/fenandosr/mksrv/internal/schema"
+	secretsx "github.com/fenandosr/mksrv/internal/secrets"
 	sshx "github.com/fenandosr/mksrv/internal/ssh"
 	"github.com/fenandosr/mksrv/internal/ui"
 	"github.com/fenandosr/mksrv/internal/workspace"
@@ -37,6 +41,45 @@ type fleet struct {
 	stacksRoot string
 	targets    []hostTarget
 	byName     map[string]hostTarget
+	outputs    infra.Outputs
+	resolver   *secretsx.Resolver
+}
+
+// ensureSecrets loads AWS config and builds the SSM-backed secret resolver.
+// It is called only by paths that deploy stacks.
+func (f *fleet) ensureSecrets(ctx context.Context) error {
+	if f.resolver != nil {
+		return nil
+	}
+	clients, err := awsclient.Load(ctx, awsclient.Options{
+		Region:  f.data.Deployment.AWS.Region,
+		Profile: f.data.Deployment.AWS.Profile,
+	})
+	if err != nil {
+		return &ExitError{Code: 2, Err: err}
+	}
+	f.resolver = secretsx.NewResolver(clients.SSM(), f.data.Deployment.Env)
+	return nil
+}
+
+// stackSecrets resolves every secret a stack declares, generating a random
+// 32-byte value on first use. Keys are the reference leaf names.
+func (f *fleet) stackSecrets(ctx context.Context, stack model.Stack) (map[string]string, error) {
+	if len(stack.Secrets) == 0 {
+		return nil, nil
+	}
+	if err := f.ensureSecrets(ctx); err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(stack.Secrets))
+	for _, ref := range stack.Secrets {
+		value, err := f.resolver.EnsureRandom(ctx, ref, 32)
+		if err != nil {
+			return nil, fmt.Errorf("resolve secret %s: %w", ref, err)
+		}
+		out[secretsx.Leaf(ref)] = value
+	}
+	return out, nil
 }
 
 func (a *App) openFleet(ctx context.Context, printer ui.Printer, globals *globalOptions) (*fleet, error) {
@@ -76,6 +119,7 @@ func (a *App) openFleet(ctx context.Context, printer ui.Printer, globals *global
 		knownHosts: filepath.Join(data.Root, ".mksrv", "known_hosts"),
 		stacksRoot: filepath.Join(cacheDir, "stacks"),
 		byName:     map[string]hostTarget{},
+		outputs:    outputs,
 	}
 	names := make([]string, 0, len(data.Deployment.Hosts))
 	for name := range data.Deployment.Hosts {
@@ -230,31 +274,54 @@ func (a *App) runDeploy(ctx context.Context, printer ui.Printer, globals *global
 		if err != nil {
 			return dialError(ht.Name, err)
 		}
-		rctx := f.renderContext(ht)
-		for _, stackName := range orderedStacks(f.catalog, ht.Host.Stacks) {
-			if len(limit) > 0 && !limit[stackName] {
-				continue
-			}
-			stack := f.catalog[stackName]
-			if len(stack.Templates) == 0 {
-				continue
-			}
-			printer.Info("%s: deploying %s", ht.Name, stackName)
-			res, err := deploy.DeployStack(ctx, client, f.stacksRoot, stack, rctx)
-			if err != nil {
-				_ = client.Close()
-				return &ExitError{Code: 1, Err: fmt.Errorf("%s/%s: %w", ht.Name, stackName, err), Printed: false}
-			}
-			printer.Success("%s/%s: %d changed, %d unchanged, health %v", ht.Name, stackName, len(res.Changed), res.Unchanged, res.HealthOK)
-		}
+		err = f.deployHost(ctx, printer, ht, client, limit)
 		_ = client.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deployHost renders and deploys every templated stack the host carries (or the
+// limit subset), in dependency order, resolving each stack's secrets first.
+func (f *fleet) deployHost(ctx context.Context, printer ui.Printer, ht hostTarget, client *sshx.Client, limit map[string]bool) error {
+	deployed, _ := deploy.DeployedStacks(ctx, client)
+	rctx := f.renderContext(ht)
+	rctx.Deployed = deployed
+
+	for _, stackName := range orderedStacks(f.catalog, ht.Host.Stacks) {
+		if len(limit) > 0 && !limit[stackName] {
+			continue
+		}
+		stack := f.catalog[stackName]
+		if len(stack.Templates) == 0 {
+			continue
+		}
+		secretValues, err := f.stackSecrets(ctx, stack)
+		if err != nil {
+			return &ExitError{Code: 2, Err: fmt.Errorf("%s/%s: %w", ht.Name, stackName, err)}
+		}
+		printer.Info("%s: deploying %s", ht.Name, stackName)
+		res, err := deploy.DeployStack(ctx, client, deploy.Options{
+			StacksRoot: f.stacksRoot,
+			Stack:      stack,
+			Context:    rctx,
+			Secrets:    secretValues,
+		})
+		if err != nil {
+			return &ExitError{Code: 1, Err: fmt.Errorf("%s/%s: %w", ht.Name, stackName, err), Printed: false}
+		}
+		if !slices.Contains(rctx.Deployed, stackName) {
+			rctx.Deployed = append(rctx.Deployed, stackName)
+		}
+		printer.Success("%s/%s: %d changed, %d unchanged, health %v", ht.Name, stackName, len(res.Changed), res.Unchanged, res.HealthOK)
 	}
 	return nil
 }
 
 func (f *fleet) renderContext(ht hostTarget) render.Context {
-	out, _ := infra.LoadOutputs(f.data.Root)
-	hostOut := out.Hosts[ht.Name]
+	hostOut := f.outputs.Hosts[ht.Name]
 	dep := f.data.Deployment
 	role := "data"
 	if slices.Contains(ht.Host.Stacks, "base") {
@@ -327,23 +394,94 @@ func (a *App) runFleetApply(ctx context.Context, printer ui.Printer, globals *gl
 			return &ExitError{Code: 1, Err: fmt.Errorf("%s: %w", ht.Name, err), Printed: false}
 		}
 
-		rctx := f.renderContext(ht)
-		for _, stackName := range orderedStacks(f.catalog, ht.Host.Stacks) {
-			stack := f.catalog[stackName]
-			if len(stack.Templates) == 0 {
-				continue
-			}
-			printer.Info("%s: deploying %s", ht.Name, stackName)
-			res, err := deploy.DeployStack(ctx, client, f.stacksRoot, stack, rctx)
-			if err != nil {
-				_ = client.Close()
-				return &ExitError{Code: 1, Err: fmt.Errorf("%s/%s: %w", ht.Name, stackName, err), Printed: false}
-			}
-			printer.Success("%s/%s: %d changed, %d unchanged", ht.Name, stackName, len(res.Changed), res.Unchanged)
-		}
+		err = f.deployHost(ctx, printer, ht, client, nil)
 		_ = client.Close()
+		if err != nil {
+			return err
+		}
 	}
 	printer.Success("fleet applied")
+	return nil
+}
+
+const fleetMeshUser = "mksrv-fleet"
+
+func (a *App) newMeshCommand(opts *globalOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "mesh",
+		Short: "Reconcile Headscale users and join non-edge hosts to the tailnet",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runMesh(cmd.Context(), a.printer(opts), opts)
+		},
+	}
+}
+
+func (a *App) runMesh(ctx context.Context, printer ui.Printer, globals *globalOptions) error {
+	f, err := a.openFleet(ctx, printer, globals)
+	if err != nil {
+		return err
+	}
+	var edge *hostTarget
+	for i := range f.targets {
+		if slices.Contains(f.targets[i].Host.Stacks, "identity") {
+			edge = &f.targets[i]
+			break
+		}
+	}
+	if edge == nil {
+		return &ExitError{Code: 2, Err: fmt.Errorf("no host carries identity; deploy it first")}
+	}
+
+	edgeClient, err := sshx.Dial(ctx, edge.Target, f.knownHosts)
+	if err != nil {
+		return dialError(edge.Name, err)
+	}
+	defer edgeClient.Close()
+	hs := headscale.New(edgeClient)
+
+	// One Headscale user per tenant (for Cloud-IT VPN clients) plus a fleet user.
+	users := []string{fleetMeshUser}
+	tenantIDs := make([]string, 0, len(f.data.Tenants))
+	for id := range f.data.Tenants {
+		tenantIDs = append(tenantIDs, id)
+	}
+	sort.Strings(tenantIDs)
+	users = append(users, tenantIDs...)
+	for _, name := range users {
+		if _, err := hs.EnsureUser(ctx, name); err != nil {
+			return &ExitError{Code: 1, Err: fmt.Errorf("headscale user %s: %w", name, err)}
+		}
+		printer.Info("headscale user %s ready", name)
+	}
+
+	fleetID, err := hs.EnsureUser(ctx, fleetMeshUser)
+	if err != nil {
+		return &ExitError{Code: 1, Err: err}
+	}
+
+	loginServer := "https://" + f.data.Deployment.Identity.HeadscaleDomain
+	for _, ht := range f.targets {
+		key, err := hs.PreAuthKey(ctx, fleetID, time.Hour, false)
+		if err != nil {
+			return &ExitError{Code: 1, Err: fmt.Errorf("preauth key for %s: %w", ht.Name, err)}
+		}
+		client, err := sshx.Dial(ctx, ht.Target, f.knownHosts)
+		if err != nil {
+			return dialError(ht.Name, err)
+		}
+		printer.Info("%s: joining tailnet", ht.Name)
+		ip, err := deploy.JoinMesh(ctx, client, deploy.MeshParams{
+			LoginServer: loginServer,
+			AuthKey:     key,
+			Hostname:    fmt.Sprintf("%s-%s", f.data.Deployment.Env, ht.Name),
+		})
+		_ = client.Close()
+		if err != nil {
+			return &ExitError{Code: 1, Err: fmt.Errorf("%s: %w", ht.Name, err), Printed: false}
+		}
+		printer.Success("%s joined tailnet as %s", ht.Name, ip)
+	}
 	return nil
 }
 
