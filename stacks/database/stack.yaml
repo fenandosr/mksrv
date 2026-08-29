@@ -9,11 +9,13 @@ apps:
     image: docker.io/library/postgres:16
   - name: pgadmin
     image: docker.io/dpage/pgadmin4:8
+  - name: postgrest
+    image: docker.io/postgrest/postgrest:v12.2.3
 networks: [mksrv-database]
 secrets:
   - /mksrv/{env}/database/pg_superpass
   - /mksrv/{env}/database/pgadmin_pass
-tailnet_ports: [5432, 5050]
+tailnet_ports: [5432, 5050, 3010]
 resources:
   min_ram_mb: 1024
   disk_gb: 20
@@ -30,6 +32,9 @@ templates:
   - src: templates/database.caddy.tmpl
     dst: /var/lib/mksrv/caddy.d/20-database.caddy
     scope: shared
+  - src: templates/postgrest.container.tmpl
+    dst: /etc/containers/systemd/mksrv-postgrest-{tenant}.container
+    scope: per_tenant
 health:
   - app: postgres
     type: tcp

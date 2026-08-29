@@ -19,14 +19,20 @@ locals {
   root_domain = local.d.dns.root_domain
   zone_id     = try(local.d.dns.route53.zone_id, null)
 
+  # Per-tenant PostgREST data API: <id>.rest.<root_domain>, fronted by the edge.
+  tenant_rest_fqdns = [
+    for id, t in var.tenants : "${id}.rest.${local.root_domain}"
+    if contains(try(t.stacks, []), "database")
+  ]
+
   # Shared operator endpoints, all fronted by the edge.
-  operator_fqdns = distinct([
+  operator_fqdns = distinct(concat([
     local.d.identity.keycloak_domain,
     local.d.identity.headscale_domain,
     "cfg.${local.root_domain}",
     "grafana.${local.root_domain}",
     "pgadmin.${local.root_domain}",
-  ])
+  ], local.tenant_rest_fqdns))
   operator_records = [
     for fqdn in local.operator_fqdns : {
       fqdn  = fqdn

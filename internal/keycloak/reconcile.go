@@ -25,6 +25,10 @@ type ClientSpec struct {
 	RedirectURIs []string
 	// WebOrigins defaults to "+" (derive from redirect URIs) when nil.
 	WebOrigins []string
+	// HardcodedClaims adds one oidc-hardcoded-claim protocol mapper per entry
+	// (claim name -> string value) to the access token. Used to stamp the
+	// PostgREST `role` claim with the tenant's database role.
+	HardcodedClaims map[string]string
 }
 
 // RealmResult reports what EnsureRealm changed.
@@ -98,14 +102,74 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 			if _, err := c.do(ctx, http.MethodPut, "/realms/"+spec.Realm+"/clients/"+uuid, body, nil); err != nil {
 				return result, err
 			}
-			continue
+		} else {
+			if _, err := c.do(ctx, http.MethodPost, "/realms/"+spec.Realm+"/clients", body, nil); err != nil {
+				return result, err
+			}
+			result.ClientsCreated = append(result.ClientsCreated, cs.ClientID)
 		}
-		if _, err := c.do(ctx, http.MethodPost, "/realms/"+spec.Realm+"/clients", body, nil); err != nil {
-			return result, err
-		}
-		result.ClientsCreated = append(result.ClientsCreated, cs.ClientID)
+	}
+
+	if err := c.applyClaimMappers(ctx, spec.Realm, spec.Clients); err != nil {
+		return result, err
 	}
 	return result, nil
+}
+
+// applyClaimMappers ensures each client's HardcodedClaims are present as
+// oidc-hardcoded-claim protocol mappers. It is additive and idempotent: a
+// mapper is created only when no mapper of the same name exists yet.
+func (c *Client) applyClaimMappers(ctx context.Context, realm string, clients []ClientSpec) error {
+	var uuids map[string]string
+	for _, cs := range clients {
+		if len(cs.HardcodedClaims) == 0 {
+			continue
+		}
+		if uuids == nil {
+			var err error
+			if uuids, err = c.clientUUIDs(ctx, realm); err != nil {
+				return err
+			}
+		}
+		uuid, ok := uuids[cs.ClientID]
+		if !ok {
+			return fmt.Errorf("client %s not found after upsert", cs.ClientID)
+		}
+		var existing []struct {
+			Name string `json:"name"`
+		}
+		if _, err := c.do(ctx, http.MethodGet, "/realms/"+realm+"/clients/"+uuid+"/protocol-mappers/models", nil, &existing); err != nil {
+			return err
+		}
+		have := make(map[string]bool, len(existing))
+		for _, m := range existing {
+			have[m.Name] = true
+		}
+		for claim, value := range cs.HardcodedClaims {
+			name := "mksrv-" + claim
+			if have[name] {
+				continue
+			}
+			body := map[string]any{
+				"name":           name,
+				"protocol":       "openid-connect",
+				"protocolMapper": "oidc-hardcoded-claim-mapper",
+				"config": map[string]string{
+					"claim.name":                 claim,
+					"claim.value":                value,
+					"jsonType.label":             "String",
+					"access.token.claim":         "true",
+					"id.token.claim":             "false",
+					"userinfo.token.claim":       "false",
+					"access.tokenResponse.claim": "false",
+				},
+			}
+			if _, err := c.do(ctx, http.MethodPost, "/realms/"+realm+"/clients/"+uuid+"/protocol-mappers/models", body, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // EnsureClient creates or updates a single OIDC client in an existing realm and

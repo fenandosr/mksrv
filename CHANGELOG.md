@@ -2,6 +2,14 @@
 
 ## Unreleased — M6
 
+- Added PostgREST to the `database` stack: `mksrv tenant apply` now deploys one
+  `mksrv-postgrest-<id>` container per tenant that consumes `database`, connected
+  as an `<id>_auth` authenticator role that switches into `<id>` (JWT `role`
+  claim) or `<id>_anon`. Tokens are verified against the tenant realm's JWKS; a
+  hard-coded `role` claim mapper is added to the `cloud-it-vpn-desktop` client.
+  Each instance is exposed at `<id>.rest.<root_domain>` (edge Caddy vhost + an
+  operator DNS record) and over the tailnet, with a `rest` forward in the
+  configd roster. Headscale ACL opens ports 3010-3019.
 - Added `mksrv destroy --infra-only` (confirmation-gated `terraform destroy`).
 - Added a GitHub Actions workflow that builds and pushes a multi-arch
   `ghcr.io/<owner>/mksrv-configd` image; the `identity` stack now references it.

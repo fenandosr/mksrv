@@ -79,6 +79,81 @@ func TestEnsureRealmCreatesWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestEnsureRealmAddsHardcodedClaimMapper(t *testing.T) {
+	t.Parallel()
+	var mapperPosts []map[string]any
+	mapperExists := false
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/realms/master/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "t"})
+	})
+	mux.HandleFunc("/admin/realms/acme", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"realm": "acme"})
+	})
+	mux.HandleFunc("/admin/realms/acme/groups", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
+	mux.HandleFunc("/admin/realms/acme/clients", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost || r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]string{{"id": "u1", "clientId": "cloud-it-vpn-desktop"}})
+	})
+	mux.HandleFunc("/admin/realms/acme/clients/u1", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/admin/realms/acme/clients/u1/protocol-mappers/models", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			mapperPosts = append(mapperPosts, body)
+			mapperExists = true
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		if mapperExists {
+			_ = json.NewEncoder(w).Encode([]map[string]string{{"name": "mksrv-role"}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := New(server.URL)
+	if err := c.Login(context.Background(), "admin", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	spec := RealmSpec{
+		Realm: "acme",
+		Clients: []ClientSpec{{
+			ClientID:        "cloud-it-vpn-desktop",
+			Public:          true,
+			HardcodedClaims: map[string]string{"role": "bitabit"},
+		}},
+	}
+	if _, err := c.EnsureRealm(context.Background(), spec); err != nil {
+		t.Fatalf("EnsureRealm() error = %v", err)
+	}
+	if len(mapperPosts) != 1 {
+		t.Fatalf("want 1 mapper POST, got %d", len(mapperPosts))
+	}
+	cfg, _ := mapperPosts[0]["config"].(map[string]any)
+	if mapperPosts[0]["protocolMapper"] != "oidc-hardcoded-claim-mapper" || cfg["claim.name"] != "role" || cfg["claim.value"] != "bitabit" {
+		t.Fatalf("unexpected mapper body: %+v", mapperPosts[0])
+	}
+
+	// Second apply: mapper now present, no duplicate POST.
+	if _, err := c.EnsureRealm(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	if len(mapperPosts) != 1 {
+		t.Fatalf("idempotency broken: %d mapper POSTs", len(mapperPosts))
+	}
+}
+
 func TestEnsureClientReturnsSecret(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()

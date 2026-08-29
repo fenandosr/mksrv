@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/fenandosr/mksrv/internal/engine"
+	"github.com/fenandosr/mksrv/internal/model"
 	"github.com/fenandosr/mksrv/internal/schema"
 )
 
@@ -119,6 +120,30 @@ func TestStackRendersDataPlane(t *testing.T) {
 	}
 	if frag := string(monFiles["/var/lib/mksrv/caddy.d/30-monitor.caddy"]); !strings.Contains(frag, "reverse_proxy 10.20.0.168:3000") {
 		t.Fatalf("monitor fragment wrong:\n%s", frag)
+	}
+
+	// The per-tenant PostgREST unit is skipped when Tenant is nil...
+	if _, ok := dbFiles["/etc/containers/systemd/mksrv-postgrest-{tenant}.container"]; ok {
+		t.Fatal("postgrest unit rendered without a tenant")
+	}
+	// ...and named + wired per tenant when Tenant is set.
+	ctx.Tenant = &model.Tenant{ID: "bitabit"}
+	ctx.Secrets = map[string]string{"listen_port": "3010", "rest_fqdn": "bitabit.rest.example.com"}
+	tFiles, err := Stack(stacksRoot, catalog["database"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(database, tenant) error = %v", err)
+	}
+	pgrst := string(tFiles["/etc/containers/systemd/mksrv-postgrest-bitabit.container"])
+	for _, want := range []string{
+		"ContainerName=mksrv-postgrest-bitabit",
+		"PublishPort=10.20.0.168:3010:3000",
+		"PublishPort=100.64.0.1:3010:3000",
+		"PGRST_DB_ANON_ROLE=bitabit_anon",
+		"mksrv-database-postgrest-bitabit-jwt,type=env,target=PGRST_JWT_SECRET",
+	} {
+		if !strings.Contains(pgrst, want) {
+			t.Fatalf("postgrest unit missing %q:\n%s", want, pgrst)
+		}
 	}
 }
 
