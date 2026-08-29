@@ -1,0 +1,32 @@
+[Unit]
+Description=mksrv PostgREST ({{ .Tenant.ID }})
+Requires=mksrv-postgres.service
+After=mksrv-postgres.service
+
+[Container]
+ContainerName=mksrv-postgrest-{{ .Tenant.ID }}
+Image={{ .Image "postgrest" | default "docker.io/postgrest/postgrest:v12.2.3" }}
+Network=mksrv-database.network
+# Reachable by the edge over the VPC and by tenant devices over the tailnet;
+# the container always listens on 3000 inside its netns.
+PublishPort={{ .Host.PrivateIP }}:{{ .Secrets.listen_port }}:3000
+{{- if .Host.TailnetIP }}
+PublishPort={{ .Host.TailnetIP }}:{{ .Secrets.listen_port }}:3000
+{{- end }}
+PublishPort=127.0.0.1:{{ .Secrets.listen_port }}:3000
+Environment=PGRST_DB_SCHEMAS=app
+Environment=PGRST_DB_ANON_ROLE={{ .Tenant.ID }}_anon
+Environment=PGRST_DB_POOL=4
+Environment=PGRST_DB_CONFIG=false
+Environment=PGRST_SERVER_PORT=3000
+Environment=PGRST_JWT_ROLE_CLAIM_KEY=.role
+Environment=PGRST_OPENAPI_SERVER_PROXY_URI=https://{{ .Secrets.rest_fqdn }}
+Secret=mksrv-database-postgrest-{{ .Tenant.ID }}-dburi,type=env,target=PGRST_DB_URI
+Secret=mksrv-database-postgrest-{{ .Tenant.ID }}-jwt,type=env,target=PGRST_JWT_SECRET
+
+[Service]
+Restart=always
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

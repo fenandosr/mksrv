@@ -120,7 +120,12 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 			DisplayName: tenant.DisplayName,
 			Groups:      []string{"apps", "both"},
 			Clients: []keycloak.ClientSpec{
-				{ClientID: vpnClientID, Public: true, RedirectURIs: vpnRedirectURIs},
+				{
+					ClientID:        vpnClientID,
+					Public:          true,
+					RedirectURIs:    vpnRedirectURIs,
+					HardcodedClaims: map[string]string{"role": id},
+				},
 				{ClientID: configdClientID, Public: false, RedirectURIs: []string{}},
 			},
 		})
@@ -147,6 +152,10 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 	printer.Success("headscale ACL applied (%d tenants isolated)", len(f.data.Tenants))
 
 	if err := f.provisionDatabases(ctx, printer, selected); err != nil {
+		return &ExitError{Code: 1, Err: err}
+	}
+
+	if err := f.reconcilePostgREST(ctx, printer, edgeClient, selected); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
 
@@ -184,8 +193,13 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 	}
 
 	roster := configd.Config{}
-	for _, id := range sortedTenantIDs(f.data.Tenants) {
+	sortedIDs := sortedTenantIDs(f.data.Tenants)
+	for _, id := range sortedIDs {
 		tenant := f.data.Tenants[id]
+		restPort := 0
+		if slices.Contains(tenant.Stacks, "database") {
+			restPort = postgrestPort(sortedIDs, id)
+		}
 		roster.Tenants = append(roster.Tenants, configd.TenantEntry{
 			Issuer:        fmt.Sprintf("https://%s/realms/%s", dep.Identity.KeycloakDomain, tenantRealm(tenant)),
 			Tenant:        id,
@@ -193,7 +207,7 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 			Primary:       tenantPrimary(tenant),
 			HeadscaleUser: id,
 			ControlURL:    "https://" + dep.Identity.HeadscaleDomain,
-			Forwards:      demoForwards(dep.Env),
+			Forwards:      demoForwards(dep.Env, restPort),
 			UpdateFeedURL: fmt.Sprintf("https://%s/appcast.json", tenant.BaseDomain),
 			MinVersion:    "0.1.0",
 		})
@@ -254,12 +268,12 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 	return configd.PublicKeyPEM(signer.PublicKey())
 }
 
-// demoForwards is a placeholder forward set until the data-plane stacks land.
-// The first forward targets the edge health endpoint, which is reachable over
-// the tailnet as soon as a client joins, so the desktop app can exercise the
-// full tunnel path before database/monitor exist.
-func demoForwards(env string) []configd.Forward {
-	return []configd.Forward{
+// demoForwards is the forward set advertised to Cloud-IT VPN clients. The
+// edge-health forward exercises the full tunnel path; database exposes raw
+// PostgreSQL; rest exposes the tenant's PostgREST data API (only when the
+// tenant consumes the database stack, i.e. restPort > 0).
+func demoForwards(env string, restPort int) []configd.Forward {
+	forwards := []configd.Forward{
 		{
 			ID:           "edge-health",
 			Label:        "Edge health",
@@ -283,6 +297,20 @@ func demoForwards(env string) []configd.Forward {
 			MaxConns:     16,
 		},
 	}
+	if restPort > 0 {
+		forwards = append(forwards, configd.Forward{
+			ID:           "rest",
+			Label:        "Data API (PostgREST)",
+			Type:         "http",
+			Listen:       configd.Listen{Host: "127.0.0.1", Port: 0},
+			PortStrategy: "auto",
+			Target:       fmt.Sprintf("%s-data.%s.mksrv:%d", env, env, restPort),
+			OpenAction:   configd.OpenAction{Kind: "browser", Path: "/"},
+			HealthCheck:  configd.HealthCheck{Kind: "http", Path: "/", IntervalSec: 30},
+			MaxConns:     16,
+		})
+	}
+	return forwards
 }
 
 func (f *fleet) identityHost() *hostTarget {

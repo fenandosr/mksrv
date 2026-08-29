@@ -50,7 +50,11 @@ func (f *fleet) provisionDatabases(ctx context.Context, printer ui.Printer, tena
 		if err != nil {
 			return err
 		}
-		sql := tenantDatabaseSQL(id, dbPass)
+		authPass, err := f.resolver.EnsureRandom(ctx, "/mksrv/{env}/database/tenant_"+id+"_authpw", 24)
+		if err != nil {
+			return err
+		}
+		sql := tenantDatabaseSQL(id, dbPass, authPass)
 		cmd := fmt.Sprintf(
 			"sudo podman exec -e PGPASSWORD=%s -i mksrv-postgres psql -v ON_ERROR_STOP=1 -U mksrv -d postgres",
 			quoteArg(superPass),
@@ -105,9 +109,11 @@ func loadPgAdminServers(ctx context.Context, client *sshx.Client, pgadminUser st
 	return err
 }
 
-func tenantDatabaseSQL(id, password string) string {
+func tenantDatabaseSQL(id, password, authPassword string) string {
 	db := "db_" + id
 	role := id
+	anon := id + "_anon"
+	auth := id + "_auth"
 	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 	return strings.Join([]string{
 		fmt.Sprintf(`SELECT format('CREATE ROLE %%I LOGIN PASSWORD %%L', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(role), q(password), q(role)),
@@ -115,10 +121,22 @@ func tenantDatabaseSQL(id, password string) string {
 		fmt.Sprintf(`SELECT format('CREATE DATABASE %%I OWNER %%I', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = %s)\gexec`, q(db), q(role), q(db)),
 		fmt.Sprintf(`REVOKE ALL ON DATABASE %q FROM PUBLIC;`, db),
 		fmt.Sprintf(`GRANT CONNECT, CREATE ON DATABASE %q TO %q;`, db, role),
+		// PostgREST roles: an anonymous role for token-less reads and an
+		// authenticator that logs in and switches into the tenant role
+		// (JWT role claim) or anon.
+		fmt.Sprintf(`SELECT format('CREATE ROLE %%I NOLOGIN', %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(anon), q(anon)),
+		fmt.Sprintf(`SELECT format('CREATE ROLE %%I LOGIN NOINHERIT PASSWORD %%L', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(auth), q(authPassword), q(auth)),
+		fmt.Sprintf(`ALTER ROLE %q WITH LOGIN NOINHERIT PASSWORD %s;`, auth, q(authPassword)),
+		fmt.Sprintf(`GRANT %q TO %q;`, anon, auth),
+		fmt.Sprintf(`GRANT %q TO %q;`, role, auth),
+		fmt.Sprintf(`GRANT CONNECT ON DATABASE %q TO %q;`, db, auth),
 		fmt.Sprintf(`\connect %q`, db),
 		fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS app AUTHORIZATION %q;`, role),
 		fmt.Sprintf(`ALTER DATABASE %q SET search_path TO app, public;`, db),
 		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %q IN SCHEMA app GRANT ALL ON TABLES TO %q;`, role, role),
+		fmt.Sprintf(`GRANT USAGE ON SCHEMA app TO %q;`, anon),
+		fmt.Sprintf(`GRANT SELECT ON ALL TABLES IN SCHEMA app TO %q;`, anon),
+		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %q IN SCHEMA app GRANT SELECT ON TABLES TO %q;`, role, anon),
 		"",
 	}, "\n")
 }
