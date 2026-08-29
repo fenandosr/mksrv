@@ -1,0 +1,28 @@
+[Unit]
+Description=mksrv Redis
+
+[Container]
+ContainerName=mksrv-redis
+Image={{ .Image "redis" | default "docker.io/library/redis:7.4" }}
+Network=mksrv-cache.network
+PublishPort={{ .Host.PrivateIP }}:6379:6379
+{{- if .Host.TailnetIP }}
+PublishPort={{ .Host.TailnetIP }}:6379:6379
+{{- end }}
+PublishPort=127.0.0.1:6379:6379
+Volume=/var/lib/mksrv/stacks/cache/redis.conf:/etc/redis/redis.conf:Z,ro
+Volume=/var/lib/mksrv/stacks/cache/users.acl:/etc/redis/users.acl:Z,ro
+Volume=mksrv-cache-data:/data
+Secret=mksrv-cache-redis_admin_pass,type=env,target=REDIS_ADMIN_PASS
+Exec=redis-server /etc/redis/redis.conf
+HealthCmd=redis-cli -a ${REDIS_ADMIN_PASS} --user mksrv --no-auth-warning ping
+HealthInterval=15s
+HealthRetries=10
+HealthStartPeriod=5s
+
+[Service]
+Restart=always
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

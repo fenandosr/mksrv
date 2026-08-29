@@ -159,6 +159,10 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 		return &ExitError{Code: 1, Err: err}
 	}
 
+	if err := f.provisionRedis(ctx, printer, selected); err != nil {
+		return &ExitError{Code: 1, Err: err}
+	}
+
 	pubPEM, err := a.reconcileConfigd(ctx, printer, f, hs, edgeClient, *edge)
 	if err != nil {
 		return err
@@ -200,6 +204,10 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 		if slices.Contains(tenant.Stacks, "database") {
 			restPort = postgrestPort(sortedIDs, id)
 		}
+		cachePort := 0
+		if slices.Contains(tenant.Stacks, "cache") {
+			cachePort = 6379
+		}
 		roster.Tenants = append(roster.Tenants, configd.TenantEntry{
 			Issuer:        fmt.Sprintf("https://%s/realms/%s", dep.Identity.KeycloakDomain, tenantRealm(tenant)),
 			Tenant:        id,
@@ -207,7 +215,7 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 			Primary:       tenantPrimary(tenant),
 			HeadscaleUser: id,
 			ControlURL:    "https://" + dep.Identity.HeadscaleDomain,
-			Forwards:      demoForwards(dep.Env, restPort),
+			Forwards:      demoForwards(dep.Env, restPort, cachePort),
 			UpdateFeedURL: fmt.Sprintf("https://%s/appcast.json", tenant.BaseDomain),
 			MinVersion:    "0.1.0",
 		})
@@ -270,9 +278,10 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 
 // demoForwards is the forward set advertised to Cloud-IT VPN clients. The
 // edge-health forward exercises the full tunnel path; database exposes raw
-// PostgreSQL; rest exposes the tenant's PostgREST data API (only when the
-// tenant consumes the database stack, i.e. restPort > 0).
-func demoForwards(env string, restPort int) []configd.Forward {
+// PostgreSQL; rest exposes the tenant's PostgREST data API (restPort > 0 when
+// the tenant consumes database); cache exposes shared Redis (cachePort > 0 when
+// the tenant consumes cache).
+func demoForwards(env string, restPort, cachePort int) []configd.Forward {
 	forwards := []configd.Forward{
 		{
 			ID:           "edge-health",
@@ -307,6 +316,19 @@ func demoForwards(env string, restPort int) []configd.Forward {
 			Target:       fmt.Sprintf("%s-data.%s.mksrv:%d", env, env, restPort),
 			OpenAction:   configd.OpenAction{Kind: "browser", Path: "/"},
 			HealthCheck:  configd.HealthCheck{Kind: "http", Path: "/", IntervalSec: 30},
+			MaxConns:     16,
+		})
+	}
+	if cachePort > 0 {
+		forwards = append(forwards, configd.Forward{
+			ID:           "cache",
+			Label:        "Redis",
+			Type:         "tcp",
+			Listen:       configd.Listen{Host: "127.0.0.1", Port: 0},
+			PortStrategy: "auto",
+			Target:       fmt.Sprintf("%s-data.%s.mksrv:%d", env, env, cachePort),
+			OpenAction:   configd.OpenAction{Kind: "none"},
+			HealthCheck:  configd.HealthCheck{Kind: "tcp", IntervalSec: 30},
 			MaxConns:     16,
 		})
 	}

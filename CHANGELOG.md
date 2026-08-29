@@ -2,6 +2,12 @@
 
 ## Unreleased — M6
 
+- Added the `cache` stack: one shared Redis 7 on the data host, with a
+  per-tenant ACL login user confined to the `<id>:*` key and channel namespace
+  (no `@dangerous`/`@admin` commands). `mksrv tenant apply` rewrites the ACL
+  file and runs `ACL LOAD`; passwords land in SSM
+  `/mksrv/<env>/cache/redis_<id>_password`. Reachable over the tailnet and via a
+  `cache` forward in the configd roster; Headscale ACL opens port 6379.
 - Added PostgREST to the `database` stack: `mksrv tenant apply` now deploys one
   `mksrv-postgrest-<id>` container per tenant that consumes `database`, connected
   as an `<id>_auth` authenticator role that switches into `<id>` (JWT `role`

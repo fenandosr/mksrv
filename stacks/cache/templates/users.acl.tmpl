@@ -1,0 +1,6 @@
+# Rendered by mksrv on stack deploy: the disabled default user and the mksrv
+# admin only. `mksrv tenant apply` rewrites this file with one `user <id>` line
+# per tenant (key/channel namespace `<id>:*`) and runs ACL LOAD. A bare
+# `mksrv deploy` reverts it to this seed until the next `tenant apply`.
+user default off
+user mksrv on >{{ .Secrets.redis_admin_pass }} ~* &* +@all

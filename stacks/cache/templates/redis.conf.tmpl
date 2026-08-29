@@ -1,0 +1,15 @@
+# Rendered by mksrv. Per-tenant ACL users live in users.acl, which
+# `mksrv tenant apply` rewrites and reloads (ACL LOAD).
+aclfile /etc/redis/users.acl
+
+appendonly yes
+appendfsync everysec
+dir /data
+save ""
+
+maxmemory 256mb
+maxmemory-policy allkeys-lru
+
+# Binds are the private VPC IP, the tailnet IP, and loopback; every client
+# authenticates as an ACL user, so protected-mode would only get in the way.
+protected-mode no

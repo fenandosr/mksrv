@@ -180,7 +180,7 @@ func (c *Client) SetPolicyFile(ctx context.Context, containerPath string) error 
 // each tenant reaches its own devices freely and the fleet on service ports
 // only, and tenants cannot reach each other.
 func Policy(tenantIDs []string) string {
-	const fleetPorts = "22,80,443,3000,3010-3019,5050,5432,8090,9090"
+	const fleetPorts = "22,80,443,3000,3010-3019,5050,5432,6379,8090,9090"
 	rules := []string{
 		fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s@:*"] }`, fleetUser, fleetUser),
 	}

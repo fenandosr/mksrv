@@ -145,6 +145,19 @@ func TestStackRendersDataPlane(t *testing.T) {
 			t.Fatalf("postgrest unit missing %q:\n%s", want, pgrst)
 		}
 	}
+
+	ctx.Tenant = nil
+	ctx.Secrets = map[string]string{"redis_admin_pass": "adminpw"}
+	cacheFiles, err := Stack(stacksRoot, catalog["cache"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(cache) error = %v", err)
+	}
+	if acl := string(cacheFiles["/var/lib/mksrv/stacks/cache/users.acl"]); !strings.Contains(acl, "user mksrv on >adminpw ~* &* +@all") {
+		t.Fatalf("cache users.acl seed wrong:\n%s", acl)
+	}
+	if unit := string(cacheFiles["/etc/containers/systemd/mksrv-redis.container"]); !strings.Contains(unit, "PublishPort=100.64.0.1:6379:6379") {
+		t.Fatalf("redis unit missing tailnet publish:\n%s", unit)
+	}
 }
 
 func TestContextHelpers(t *testing.T) {

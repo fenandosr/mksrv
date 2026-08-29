@@ -1,0 +1,33 @@
+name: cache
+title: Cache
+description: "Redis 7 with a per-tenant ACL user and key namespace"
+targets: [cloud, local]
+per_tenant: true
+depends_on: [identity]
+apps:
+  - name: redis
+    image: docker.io/library/redis:7.4
+networks: [mksrv-cache]
+secrets:
+  - /mksrv/{env}/cache/redis_admin_pass
+tailnet_ports: [6379]
+resources:
+  min_ram_mb: 384
+  disk_gb: 5
+templates:
+  - src: templates/mksrv-cache.network.tmpl
+    dst: /etc/containers/systemd/mksrv-cache.network
+    scope: shared
+  - src: templates/redis.conf.tmpl
+    dst: /var/lib/mksrv/stacks/cache/redis.conf
+    scope: shared
+  - src: templates/users.acl.tmpl
+    dst: /var/lib/mksrv/stacks/cache/users.acl
+    scope: shared
+  - src: templates/redis.container.tmpl
+    dst: /etc/containers/systemd/mksrv-redis.container
+    scope: shared
+health:
+  - app: redis
+    type: tcp
+    port: 6379
