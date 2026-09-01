@@ -12,6 +12,12 @@ variable "availability_zone" {
   default = ""
 }
 
+variable "subnet_count" {
+  description = "Number of public subnets, one per AZ. 1 for a single-node fleet; 3 for a distributed (cluster) fleet."
+  type        = number
+  default     = 1
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

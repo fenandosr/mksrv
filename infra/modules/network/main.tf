@@ -18,7 +18,12 @@ data "aws_availability_zones" "available" {
 
 locals {
   name = "mksrv-${var.env}"
-  az   = var.availability_zone != "" ? var.availability_zone : data.aws_availability_zones.available.names[0]
+  # Subnet 0 keeps a pinned AZ (when supplied) for a stable single-node fleet;
+  # extra subnets take consecutive AZs.
+  azs = [
+    for i in range(var.subnet_count) :
+    i == 0 && var.availability_zone != "" ? var.availability_zone : data.aws_availability_zones.available.names[i]
+  ]
   tags = merge(var.tags, { "mksrv:env" = var.env })
 }
 
@@ -35,11 +40,12 @@ resource "aws_internet_gateway" "this" {
 }
 
 resource "aws_subnet" "public" {
+  count                   = var.subnet_count
   vpc_id                  = aws_vpc.this.id
-  availability_zone       = local.az
-  cidr_block              = cidrsubnet(var.cidr, 8, 0)
+  availability_zone       = local.azs[count.index]
+  cidr_block              = cidrsubnet(var.cidr, 8, count.index)
   map_public_ip_on_launch = false
-  tags                    = merge(local.tags, { Name = "${local.name}-public" })
+  tags                    = merge(local.tags, { Name = count.index == 0 ? "${local.name}-public" : "${local.name}-public-${count.index}" })
 }
 
 resource "aws_route_table" "public" {
@@ -52,6 +58,19 @@ resource "aws_route_table" "public" {
 }
 
 resource "aws_route_table_association" "public" {
-  subnet_id      = aws_subnet.public.id
+  count          = var.subnet_count
+  subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
+}
+
+# Converting the single subnet/association to count-indexed must not destroy the
+# live resources.
+moved {
+  from = aws_subnet.public
+  to   = aws_subnet.public[0]
+}
+
+moved {
+  from = aws_route_table_association.public
+  to   = aws_route_table_association.public[0]
 }

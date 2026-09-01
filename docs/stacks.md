@@ -5,18 +5,22 @@ Each `stacks/<name>/stack.yaml` document is validated against
 dependencies, apps, networks, secret references, templates, hooks, resources,
 and health checks.
 
-| Stack | Target | Tenant scope | Dependencies | M0 state |
-|---|---|---:|---|---|
-| `base` | cloud | no | — | descriptor |
-| `identity` | cloud | yes | base | descriptor |
-| `mail` | cloud | no | base | descriptor |
-| `database` | cloud/local | yes | identity | descriptor |
-| `cache` | cloud/local | yes | identity | implemented |
-| `files` | cloud/local | yes | identity | descriptor |
-| `analytics` | cloud/local | yes | database, identity | descriptor |
-| `monitor` | cloud/local | yes | identity | descriptor |
-| `logs` | cloud/local | yes | monitor | implemented (opt-in) |
-| `security` | cloud/local | no | logs, monitor | implemented (opt-in) |
+A stack's `kind` is `service` (one instance per assigned host, the default) or
+`cluster` (an odd number of hosts ≥ 3, self-organising quorum — see ADR 0013).
+
+| Stack | Kind | Target | Tenant scope | Dependencies | State |
+|---|---|---|---:|---|---|
+| `base` | service | cloud | no | — | implemented |
+| `identity` | service | cloud | yes | base | implemented |
+| `mail` | service | cloud | no | base | descriptor |
+| `postgres` | cluster | cloud | no | — | implemented (opt-in) |
+| `database` | service | cloud/local | yes | identity | implemented |
+| `cache` | service | cloud/local | yes | identity | implemented |
+| `files` | service | cloud/local | yes | identity | descriptor |
+| `analytics` | service | cloud/local | yes | database, identity | descriptor |
+| `monitor` | service | cloud/local | yes | identity | implemented |
+| `logs` | service | cloud/local | yes | monitor | implemented (opt-in) |
+| `security` | service | cloud/local | no | logs, monitor | implemented (opt-in) |
 
 Templates and hooks are intentionally empty in M0. Their implementation belongs
 to M2–M5 and must be golden-tested.

@@ -39,6 +39,8 @@ output "network" {
   value = {
     vpc_id            = module.network.vpc_id
     subnet_id         = module.network.subnet_id
+    subnet_ids        = module.network.subnet_ids
+    azs               = module.network.azs
     availability_zone = module.network.availability_zone
   }
 }

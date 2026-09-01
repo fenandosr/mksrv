@@ -1,0 +1,15 @@
+# mksrv HA PostgreSQL image: PostgreSQL 16 + Patroni (raft DCS) + pgBackRest.
+# Build context is the repository root:
+#   podman build -f images/postgres/Containerfile -t mksrv-postgres .
+FROM docker.io/library/postgres:16-bookworm
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      patroni \
+      python3-pysyncobj \
+      pgbackrest \
+ && rm -rf /var/lib/apt/lists/*
+
+USER postgres
+EXPOSE 5432 8008 2222
+ENTRYPOINT ["patroni", "/etc/patroni/patroni.yml"]

@@ -162,6 +162,7 @@ type Stack struct {
 	Title        string          `json:"title"`
 	Description  string          `json:"description"`
 	Targets      []string        `json:"targets"`
+	Kind         string          `json:"kind,omitempty"` // "service" (default) or "cluster"
 	PerTenant    bool            `json:"per_tenant"`
 	DependsOn    []string        `json:"depends_on,omitempty"`
 	Apps         []StackApp      `json:"apps"`

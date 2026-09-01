@@ -46,6 +46,7 @@ type fleet struct {
 	outputs    infra.Outputs
 	resolver   *secretsx.Resolver
 	meshIPs    map[string]string
+	postgres   postgresCluster
 }
 
 // ensureSecrets loads AWS config and builds the SSM-backed secret resolver.
@@ -125,6 +126,7 @@ func (a *App) openFleet(ctx context.Context, printer ui.Printer, globals *global
 		outputs:    outputs,
 	}
 	f.loadMeshIPs()
+	f.loadPostgres()
 	names := make([]string, 0, len(data.Deployment.Hosts))
 	for name := range data.Deployment.Hosts {
 		names = append(names, name)
@@ -358,15 +360,19 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 			peers[name] = out.PrivateIP
 		}
 	}
-	// StackHosts: which fleet host carries each stack, by private VPC IP.
+	// StackHosts/StackMembers: which fleet host(s) carry each stack. targets is
+	// already sorted by host name, so StackMembers slices are too.
 	stackHosts := map[string]string{}
+	stackMembers := map[string][]render.Member{}
 	for _, t := range f.targets {
 		ip := f.outputs.Hosts[t.Name].PrivateIP
 		if ip == "" {
 			continue
 		}
+		member := render.Member{Name: t.Name, PrivateIP: ip, TailnetIP: f.meshIPs[t.Name]}
 		for _, s := range t.Host.Stacks {
 			stackHosts[s] = ip
+			stackMembers[s] = append(stackMembers[s], member)
 		}
 	}
 	return render.Context{
@@ -388,9 +394,10 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 			ConfigD:    "cfg." + dep.DNS.RootDomain,
 			RootDomain: dep.DNS.RootDomain,
 		},
-		Images:     images,
-		Peers:      peers,
-		StackHosts: stackHosts,
+		Images:       images,
+		Peers:        peers,
+		StackHosts:   stackHosts,
+		StackMembers: stackMembers,
 	}
 }
 

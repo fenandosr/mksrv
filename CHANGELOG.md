@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — M9
+
+- Added `kind: cluster` stacks (ADR 0013): a stack that must be assigned to an
+  odd number of hosts ≥ 3 and self-organises a quorum. `render.Context` gains
+  `StackMembers` / `.StackNodes` / `.StackPeers`.
+- Added the `postgres` stack (opt-in): Patroni-managed HA PostgreSQL 16 with a
+  raft DCS (no etcd), automatic failover, image `ghcr.io/<owner>/mksrv-postgres`
+  built in CI. `mksrv postgres bootstrap` waits for the cluster, records
+  `.mksrv/postgres.json`, creates the `app` database, and can force a switchover.
+- `infra/modules/network` gains `subnet_count` (multi-AZ subnets, `moved` blocks
+  keep the live single subnet). The CLI sets it to 3 when a `kind: cluster` stack
+  is assigned. AWS hosts round-robin across the AZ subnets.
+
 ## Unreleased — M8
 
 - Added the `logs` stack (Grafana Loki + Alloy journal collector) and the

@@ -14,3 +14,9 @@ variable "ssh_public_key" {
   type        = string
   default     = ""
 }
+
+variable "subnet_count" {
+  description = "Public subnet count (one per AZ). The CLI sets 3 when a kind:cluster stack is assigned, 1 otherwise."
+  type        = number
+  default     = 1
+}

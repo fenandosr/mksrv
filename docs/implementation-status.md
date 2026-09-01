@@ -140,3 +140,15 @@ non-route53 tenant DNS providers.
 
 Still deferred: edge log collection into Loki, per-tenant Loki retention,
 CrowdSec Grafana dashboard auto-provisioning, CrowdSec AppSec/Caddy bouncer.
+
+## M9 — implemented (prototype)
+
+- `kind: cluster` stack primitive + `render.Context.StackPeers/StackNodes`.
+- `postgres` stack: Patroni HA PostgreSQL (raft DCS), `mksrv postgres bootstrap`,
+  `.mksrv/postgres.json`. Multi-AZ `infra/modules/network` (`subnet_count`).
+  Image built by `.github/workflows/postgres-image.yaml`. See ADR 0013.
+
+Still deferred: pgBackRest (S3 + IAM + WAL archiving), the consumer refactor
+(Keycloak/PostgREST/`provisionDatabases` → cluster), the OpenBao cluster stack,
+`identity`/`monitor` distributed rendering, `apply` integration of `postgres
+bootstrap`, and a `deployment.yaml` `topology` field.

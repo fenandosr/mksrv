@@ -71,6 +71,19 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 	if len(identityHosts) != 1 {
 		semanticError(report, "deployment.yaml", "$.hosts", "stack.identity.count", fmt.Sprintf("exactly one host must carry identity; found %d (%s)", len(identityHosts), strings.Join(identityHosts, ", ")))
 	}
+	clusterStacks := make([]string, 0, len(assigned))
+	for stackName := range assigned {
+		if data.Catalog[stackName].Kind == "cluster" {
+			clusterStacks = append(clusterStacks, stackName)
+		}
+	}
+	sort.Strings(clusterStacks)
+	for _, stackName := range clusterStacks {
+		n := len(assigned[stackName])
+		if n < 3 || n%2 == 0 {
+			semanticError(report, "deployment.yaml", "$.hosts", "stack.cluster.count", fmt.Sprintf("cluster stack %q needs an odd number of hosts >= 3; found %d (%s)", stackName, n, strings.Join(assigned[stackName], ", ")))
+		}
+	}
 	for stackName := range assigned {
 		for _, dependency := range data.Catalog[stackName].DependsOn {
 			if len(assigned[dependency]) == 0 {

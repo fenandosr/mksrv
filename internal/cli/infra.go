@@ -215,6 +215,16 @@ func (a *App) openInfraSession(ctx context.Context, printer ui.Printer, globals 
 	} else {
 		printer.Warn("no SSH public key found (MKSRV_SSH_PUBLIC_KEY or ~/.ssh/id_ed25519.pub); hosts will be reachable only through SSM")
 	}
+	// A cluster stack (Patroni) wants its members spread across AZs; give the
+	// network three subnets when one is assigned, one otherwise.
+	extra["subnet_count"] = 1
+	for _, h := range data.Deployment.Hosts {
+		for _, s := range h.Stacks {
+			if data.Catalog[s].Kind == "cluster" {
+				extra["subnet_count"] = 3
+			}
+		}
+	}
 	varsPath, err := infra.Materialize(data, extra)
 	if err != nil {
 		return nil, err

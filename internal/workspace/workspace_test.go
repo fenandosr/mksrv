@@ -21,7 +21,7 @@ func TestValidateExampleWorkspace(t *testing.T) {
 	if !report.Valid {
 		t.Fatalf("report invalid: %#v", report.Issues)
 	}
-	if report.Hosts != 2 || report.Tenants != 1 || report.Users != 2 || report.CatalogStacks != 10 {
+	if report.Hosts != 2 || report.Tenants != 1 || report.Users != 2 || report.CatalogStacks != 11 {
 		t.Fatalf("counts = hosts:%d tenants:%d users:%d stacks:%d", report.Hosts, report.Tenants, report.Users, report.CatalogStacks)
 	}
 }
@@ -103,6 +103,27 @@ func TestValidateRejectsDNSWithoutZone(t *testing.T) {
 		t.Fatal("expected invalid report")
 	}
 	assertIssueCode(t, report, "tenant.dns.no_zone")
+}
+
+func TestValidateRejectsUndersizedCluster(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	p := filepath.Join(root, "deployment.yaml")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The example has 2 hosts; adding `postgres` (kind: cluster) anywhere is
+	// under the 3-host minimum.
+	updated := strings.Replace(string(data), "stacks: [base, identity, mail]", "stacks: [base, identity, mail, postgres]", 1)
+	if err := os.WriteFile(p, []byte(updated), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid report")
+	}
+	assertIssueCode(t, report, "stack.cluster.count")
 }
 
 func TestValidateRejectsBadMeshRoute(t *testing.T) {
