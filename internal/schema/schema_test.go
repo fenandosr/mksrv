@@ -100,6 +100,33 @@ mesh_routes: [10.1.0.0/24]
 	}
 }
 
+func TestValidateStackKind(t *testing.T) {
+	t.Parallel()
+	validator := New()
+	base := `
+name: pg
+title: PG
+description: cluster
+targets: [cloud]
+per_tenant: false
+apps: [{name: pg, image: ghcr.io/x/pg:1}]
+`
+	_, issues, err := validator.ValidateYAML("stack.v1.json", []byte(base+"kind: cluster\n"))
+	if err != nil {
+		t.Fatalf("ValidateYAML() error = %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("kind: cluster should validate: %#v", issues)
+	}
+	_, issues, err = validator.ValidateYAML("stack.v1.json", []byte(base+"kind: bogus\n"))
+	if err != nil {
+		t.Fatalf("ValidateYAML() error = %v", err)
+	}
+	if len(issues) == 0 {
+		t.Fatal("kind: bogus should fail")
+	}
+}
+
 func TestValidateAcceptsAutoMgmtCIDR(t *testing.T) {
 	t.Parallel()
 	doc := []byte(`

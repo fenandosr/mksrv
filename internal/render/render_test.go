@@ -228,6 +228,67 @@ func TestStackIP(t *testing.T) {
 	}
 }
 
+func TestStackPeersExcludesSelf(t *testing.T) {
+	t.Parallel()
+	ctx := baseContext()
+	ctx.Host.Name = "pg2"
+	ctx.StackMembers = map[string][]Member{"postgres": {
+		{Name: "pg1", PrivateIP: "10.20.0.11"},
+		{Name: "pg2", PrivateIP: "10.20.0.12"},
+		{Name: "pg3", PrivateIP: "10.20.0.13"},
+	}}
+	if len(ctx.StackNodes("postgres")) != 3 {
+		t.Fatalf("StackNodes = %d", len(ctx.StackNodes("postgres")))
+	}
+	peers := ctx.StackPeers("postgres")
+	if len(peers) != 2 || peers[0].Name != "pg1" || peers[1].Name != "pg3" {
+		t.Fatalf("StackPeers wrong: %+v", peers)
+	}
+}
+
+func TestStackRendersPostgresCluster(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	if catalog["postgres"].Kind != "cluster" {
+		t.Fatalf("postgres stack kind = %q", catalog["postgres"].Kind)
+	}
+	members := []Member{
+		{Name: "pg1", PrivateIP: "10.20.0.11"},
+		{Name: "pg2", PrivateIP: "10.20.0.12"},
+		{Name: "pg3", PrivateIP: "10.20.0.13"},
+	}
+	ctx := baseContext()
+	ctx.Host.Name = "pg2"
+	ctx.Host.PrivateIP = "10.20.0.12"
+	ctx.Host.Stacks = []string{"postgres"}
+	ctx.StackMembers = map[string][]Member{"postgres": members}
+
+	files, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), catalog["postgres"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(postgres) error = %v", err)
+	}
+	y := string(files["/var/lib/mksrv/stacks/postgres/patroni.yml"])
+	for _, want := range []string{
+		"name: pg2",
+		"self_addr: 10.20.0.12:2222",
+		"- 10.20.0.11:2222",
+		"- 10.20.0.13:2222",
+	} {
+		if !strings.Contains(y, want) {
+			t.Fatalf("patroni.yml missing %q:\n%s", want, y)
+		}
+	}
+	if strings.Contains(y, "- 10.20.0.12:2222") {
+		t.Fatalf("patroni.yml lists self as a partner:\n%s", y)
+	}
+	if u := string(files["/etc/containers/systemd/mksrv-patroni.container"]); !strings.Contains(u, "PublishPort=10.20.0.12:8008:8008") {
+		t.Fatalf("patroni unit wrong:\n%s", u)
+	}
+}
+
 func TestMonitorOmitsLogsJobWhenAbsent(t *testing.T) {
 	t.Parallel()
 	catalog, err := engine.Catalog(schema.New())

@@ -62,8 +62,19 @@ locals {
 }
 
 module "network" {
-  source = "../modules/network"
-  env    = local.env
+  source       = "../modules/network"
+  env          = local.env
+  subnet_count = var.subnet_count
+}
+
+locals {
+  # Round-robin AWS hosts across the AZ subnets by sorted host name, so a
+  # 3-node cluster (pg1/pg2/pg3) lands one node per AZ.
+  sorted_aws_hosts = sort(keys(local.aws_hosts))
+  host_subnet = {
+    for i, name in local.sorted_aws_hosts :
+    name => module.network.subnet_ids[i % length(module.network.subnet_ids)]
+  }
 }
 
 resource "aws_key_pair" "operator" {
@@ -81,7 +92,7 @@ module "aws_host" {
   env           = local.env
   region        = local.region
   vpc_id        = module.network.vpc_id
-  subnet_id     = module.network.subnet_id
+  subnet_id     = local.host_subnet[each.key]
   vpc_cidr      = module.network.cidr
   instance_type = try(each.value.instance_type, "t4g.small")
   root_gb       = try(each.value.root_gb, 30)

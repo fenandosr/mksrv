@@ -36,19 +36,27 @@ type Endpoints struct {
 	RootDomain string
 }
 
+// Member is one fleet host carrying a stack, for cluster templates.
+type Member struct {
+	Name      string
+	PrivateIP string
+	TailnetIP string
+}
+
 // Context is the data passed to every stack template.
 type Context struct {
-	Env        string
-	Timezone   string
-	ACMEEmail  string
-	Host       HostView
-	Endpoints  Endpoints
-	Images     map[string]string
-	Deployed   []string          // stacks already deployed on this host
-	Peers      map[string]string // mksrv host name -> private VPC IP
-	StackHosts map[string]string // stack name -> private VPC IP of the host carrying it
-	Tenant     *model.Tenant
-	Secrets    map[string]string
+	Env          string
+	Timezone     string
+	ACMEEmail    string
+	Host         HostView
+	Endpoints    Endpoints
+	Images       map[string]string
+	Deployed     []string            // stacks already deployed on this host
+	Peers        map[string]string   // mksrv host name -> private VPC IP
+	StackHosts   map[string]string   // stack name -> private VPC IP of the host carrying it
+	StackMembers map[string][]Member // stack name -> every fleet host carrying it (sorted by Name)
+	Tenant       *model.Tenant
+	Secrets      map[string]string
 }
 
 // Peer returns the private VPC IP of another fleet host, or "" if unknown.
@@ -58,6 +66,22 @@ func (c Context) Peer(host string) string { return c.Peers[host] }
 // stack, or "" when no host does. Used by cross-host templates (an Alloy
 // collector reaching Loki, Prometheus scraping CrowdSec).
 func (c Context) StackIP(stack string) string { return c.StackHosts[stack] }
+
+// StackNodes returns every fleet host carrying the named stack (sorted by Name).
+func (c Context) StackNodes(stack string) []Member { return c.StackMembers[stack] }
+
+// StackPeers returns StackNodes minus the host this context renders for — the
+// other members of a cluster stack.
+func (c Context) StackPeers(stack string) []Member {
+	all := c.StackMembers[stack]
+	peers := make([]Member, 0, len(all))
+	for _, m := range all {
+		if m.Name != c.Host.Name {
+			peers = append(peers, m)
+		}
+	}
+	return peers
+}
 
 // HasStack reports whether the host carries the named stack.
 func (c Context) HasStack(name string) bool {

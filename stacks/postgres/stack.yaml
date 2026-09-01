@@ -1,0 +1,32 @@
+name: postgres
+title: PostgreSQL cluster
+description: "Patroni-managed HA PostgreSQL 16 (raft DCS, automatic failover)"
+kind: cluster
+targets: [cloud]
+per_tenant: false
+apps:
+  - name: postgres
+    image: ghcr.io/fenandosr/mksrv-postgres:latest
+networks: [mksrv-postgres]
+secrets:
+  - /mksrv/{env}/postgres/superpass
+  - /mksrv/{env}/postgres/replication_password
+tailnet_ports: [5432, 8008]
+resources:
+  min_ram_mb: 1024
+  disk_gb: 40
+templates:
+  - src: templates/mksrv-postgres.network.tmpl
+    dst: /etc/containers/systemd/mksrv-postgres.network
+    scope: shared
+  - src: templates/patroni.yml.tmpl
+    dst: /var/lib/mksrv/stacks/postgres/patroni.yml
+    scope: shared
+  - src: templates/patroni.container.tmpl
+    dst: /etc/containers/systemd/mksrv-patroni.container
+    scope: shared
+health:
+  - app: postgres
+    type: http
+    path: /liveness
+    port: 8008

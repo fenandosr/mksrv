@@ -1,0 +1,51 @@
+# Rendered by mksrv, one per cluster node. DCS = raft (pysyncobj) — the Patroni
+# nodes reach consensus among themselves, no external etcd/consul.
+# ${PATRONI_*_PASSWORD} are expanded by Patroni from the container environment.
+scope: mksrv-{{ .Env }}
+name: {{ .Host.Name }}
+
+raft:
+  data_dir: /var/lib/patroni/raft
+  self_addr: {{ .Host.PrivateIP }}:2222
+  partner_addrs:
+{{- range .StackPeers "postgres" }}
+    - {{ .PrivateIP }}:2222
+{{- end }}
+
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: {{ .Host.PrivateIP }}:8008
+
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: {{ .Host.PrivateIP }}:5432
+  data_dir: /var/lib/postgresql/data/pgdata
+  bin_dir: /usr/lib/postgresql/16/bin
+  authentication:
+    superuser:
+      username: postgres
+      password: "${PATRONI_SUPERUSER_PASSWORD}"
+    replication:
+      username: replicator
+      password: "${PATRONI_REPLICATION_PASSWORD}"
+  parameters:
+    shared_buffers: 256MB
+    max_connections: 200
+    wal_level: replica
+    hot_standby: "on"
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    postgresql:
+      use_pg_rewind: true
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  pg_hba:
+    - host replication replicator 10.20.0.0/16 scram-sha-256
+    - host all all 10.20.0.0/16 scram-sha-256
+    - host all all 127.0.0.1/32 scram-sha-256

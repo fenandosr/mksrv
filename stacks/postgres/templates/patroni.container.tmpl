@@ -1,0 +1,35 @@
+[Unit]
+Description=mksrv Patroni PostgreSQL node
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=mksrv-patroni
+Image={{ .Image "postgres" | default "ghcr.io/fenandosr/mksrv-postgres:latest" }}
+Network=mksrv-postgres.network
+# Postgres + Patroni REST + raft, reachable by the other cluster nodes over the
+# VPC (intra_vpc SG rule) and by clients over the tailnet.
+PublishPort={{ .Host.PrivateIP }}:5432:5432
+PublishPort={{ .Host.PrivateIP }}:8008:8008
+PublishPort={{ .Host.PrivateIP }}:2222:2222
+{{- if .Host.TailnetIP }}
+PublishPort={{ .Host.TailnetIP }}:5432:5432
+{{- end }}
+PublishPort=127.0.0.1:5432:5432
+PublishPort=127.0.0.1:8008:8008
+Volume=/var/lib/mksrv/stacks/postgres/patroni.yml:/etc/patroni/patroni.yml:Z,ro
+Volume=mksrv-postgres-pgdata:/var/lib/postgresql/data
+Volume=mksrv-postgres-raft:/var/lib/patroni/raft
+Secret=mksrv-postgres-superpass,type=env,target=PATRONI_SUPERUSER_PASSWORD
+Secret=mksrv-postgres-replication_password,type=env,target=PATRONI_REPLICATION_PASSWORD
+HealthCmd=patronictl -c /etc/patroni/patroni.yml list -f json
+HealthInterval=30s
+HealthRetries=20
+HealthStartPeriod=30s
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

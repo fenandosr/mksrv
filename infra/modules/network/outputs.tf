@@ -3,11 +3,21 @@ output "vpc_id" {
 }
 
 output "subnet_id" {
-  value = aws_subnet.public.id
+  description = "First public subnet — the single-node default."
+  value       = aws_subnet.public[0].id
+}
+
+output "subnet_ids" {
+  description = "All public subnet ids, one per AZ."
+  value       = aws_subnet.public[*].id
+}
+
+output "azs" {
+  value = aws_subnet.public[*].availability_zone
 }
 
 output "availability_zone" {
-  value = aws_subnet.public.availability_zone
+  value = aws_subnet.public[0].availability_zone
 }
 
 output "cidr" {
