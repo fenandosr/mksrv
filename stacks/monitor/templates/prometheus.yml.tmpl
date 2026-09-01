@@ -17,3 +17,15 @@ scrape_configs:
     static_configs:
       - targets: ["mksrv-cadvisor:8080"]
         labels: { host: "{{ .Host.Name }}" }
+{{- if .StackIP "logs" }}
+
+  - job_name: loki
+    static_configs:
+      - targets: ["{{ .StackIP "logs" }}:3100"]
+{{- end }}
+{{- if .StackIP "security" }}
+
+  - job_name: crowdsec
+    static_configs:
+      - targets: ["{{ .StackIP "security" }}:6060"]
+{{- end }}

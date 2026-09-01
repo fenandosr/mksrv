@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — M8
+
+- Added the `logs` stack (Grafana Loki + Alloy journal collector) and the
+  `security` stack (CrowdSec engine + `cs-firewall-bouncer`), both opt-in
+  (ADR 0012). Loki uses filesystem storage and label-based tenant scoping;
+  CrowdSec is CAPI-enrolled and enforces bans via its own nftables tables.
+- `stacks/base` Caddyfile now emits a JSON access log (for Loki and CrowdSec).
+- `render.Context` gains `StackHosts` + `StackIP(name)` — the private IP of the
+  fleet host carrying a stack, for cross-host templates.
+- Bootstrap `BootstrapVersion` 8: podman `log_driver = "journald"` + persistent
+  journal, so all container stdout is collectable from the journal.
+- Fix: `deploy.DeployStack` now exposes resolved stack secrets to `shared`
+  templates as `{{ .Secrets.<leaf> }}` (previously only per-tenant reconcilers
+  set `Context.Secrets`).
+
 ## Unreleased — M7
 
 - Tenant-owned infrastructure (ADR 0011). Three optional tenant-document blocks:

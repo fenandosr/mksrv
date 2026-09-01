@@ -11,9 +11,12 @@ and health checks.
 | `identity` | cloud | yes | base | descriptor |
 | `mail` | cloud | no | base | descriptor |
 | `database` | cloud/local | yes | identity | descriptor |
+| `cache` | cloud/local | yes | identity | implemented |
 | `files` | cloud/local | yes | identity | descriptor |
 | `analytics` | cloud/local | yes | database, identity | descriptor |
 | `monitor` | cloud/local | yes | identity | descriptor |
+| `logs` | cloud/local | yes | monitor | implemented (opt-in) |
+| `security` | cloud/local | no | logs, monitor | implemented (opt-in) |
 
 Templates and hooks are intentionally empty in M0. Their implementation belongs
 to M2–M5 and must be golden-tested.

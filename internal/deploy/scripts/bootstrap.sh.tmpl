@@ -105,6 +105,20 @@ runroot = "/run/containers/storage"
 EOF
 install -d -m 0755 /etc/containers/systemd
 
+# Send container stdout/stderr to the systemd journal so a log collector
+# (Grafana Alloy) and CrowdSec can read every container's output by unit /
+# CONTAINER_NAME without a per-container log-driver override.
+cat >/etc/containers/containers.conf <<EOF
+[containers]
+log_driver = "journald"
+EOF
+
+# Persistent journal so log/security collectors survive reboots and read from a
+# stable path.
+install -d -m 2755 -g systemd-journal /var/log/journal 2>/dev/null || install -d -m 2755 /var/log/journal
+systemd-tmpfiles --create --prefix /var/log/journal 2>/dev/null || true
+systemctl restart systemd-journald || true
+
 # The relocated graphroot must carry the same SELinux labelling as the default
 # podman graphroot (/var/lib/containers/storage), or container processes fail
 # with "cannot change memory protections" and volume writes are denied.

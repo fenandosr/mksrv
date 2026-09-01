@@ -1,0 +1,21 @@
+# Rendered by mksrv. cs-firewall-bouncer enforces CrowdSec decisions as packet
+# DROPs via its own nftables tables (crowdsec / crowdsec6), which coexist with
+# firewalld's table.
+mode: nftables
+update_frequency: 10s
+log_level: warning
+log_mode: stdout
+api_url: http://127.0.0.1:8080
+api_key: {{ .Secrets.bouncer_key }}
+deny_action: DROP
+nftables:
+  ipv4:
+    enabled: true
+    set-only: false
+    table: crowdsec
+    chain: crowdsec-chain
+  ipv6:
+    enabled: true
+    set-only: false
+    table: crowdsec6
+    chain: crowdsec6-chain

@@ -1,0 +1,41 @@
+name: security
+title: Security
+description: "CrowdSec detection engine and firewall remediation"
+targets: [cloud, local]
+per_tenant: false
+depends_on: [logs, monitor]
+apps:
+  - name: crowdsec
+    image: docker.io/crowdsecurity/crowdsec:v1.6.4
+  - name: firewall-bouncer
+    image: docker.io/crowdsecurity/cs-firewall-bouncer:v0.0.31
+networks: [mksrv-security]
+secrets:
+  - /mksrv/{env}/security/bouncer_key
+tailnet_ports: [6060]
+resources:
+  min_ram_mb: 256
+  disk_gb: 5
+templates:
+  - src: templates/mksrv-security.network.tmpl
+    dst: /etc/containers/systemd/mksrv-security.network
+    scope: shared
+  - src: templates/acquis.yaml.tmpl
+    dst: /var/lib/mksrv/stacks/security/acquis.yaml
+    scope: shared
+  - src: templates/crowdsec-config.yaml.tmpl
+    dst: /var/lib/mksrv/stacks/security/config.yaml.local
+    scope: shared
+  - src: templates/crowdsec.container.tmpl
+    dst: /etc/containers/systemd/mksrv-crowdsec.container
+    scope: shared
+  - src: templates/bouncer.yaml.tmpl
+    dst: /var/lib/mksrv/stacks/security/bouncer.yaml
+    scope: shared
+  - src: templates/firewall-bouncer.container.tmpl
+    dst: /etc/containers/systemd/mksrv-crowdsec-fw.container
+    scope: shared
+health:
+  - app: crowdsec
+    type: tcp
+    port: 8080

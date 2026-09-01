@@ -1,0 +1,8 @@
+# Rendered by mksrv, merged over the image's /etc/crowdsec/config.yaml.
+# Exposes the Prometheus endpoint on all interfaces so the monitor host can
+# scrape it over the VPC.
+prometheus:
+  enabled: true
+  level: full
+  listen_addr: 0.0.0.0
+  listen_port: 6060

@@ -1,0 +1,30 @@
+[Unit]
+Description=mksrv CrowdSec engine
+
+[Container]
+ContainerName=mksrv-crowdsec
+Image={{ .Image "crowdsec" | default "docker.io/crowdsecurity/crowdsec:v1.6.4" }}
+Network=mksrv-security.network
+# LAPI on loopback for the host-networked bouncer; metrics on the VPC IP for Prometheus.
+PublishPort=127.0.0.1:8080:8080
+PublishPort={{ .Host.PrivateIP }}:6060:6060
+Environment=COLLECTIONS=crowdsecurity/linux crowdsecurity/sshd crowdsecurity/caddy
+Environment=DISABLE_LOCAL_API=false
+Secret=mksrv-security-bouncer_key,type=env,target=BOUNCER_KEY_firewall
+Volume=/var/log/journal:/var/log/journal:ro
+Volume=/run/log/journal:/run/log/journal:ro
+Volume=/etc/machine-id:/etc/machine-id:ro
+Volume=/var/lib/mksrv/stacks/security/acquis.yaml:/etc/crowdsec/acquis.yaml:Z,ro
+Volume=/var/lib/mksrv/stacks/security/config.yaml.local:/etc/crowdsec/config.yaml.local:Z,ro
+Volume=mksrv-security-crowdsec:/var/lib/crowdsec/data
+HealthCmd=cscli lapi status
+HealthInterval=30s
+HealthRetries=8
+HealthStartPeriod=30s
+
+[Service]
+Restart=always
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

@@ -20,7 +20,8 @@ func TestRenderBootstrapEdge(t *testing.T) {
 		"--add-service=http",
 		`GRAPHROOT="$MARKER_DIR/containers"`,
 		"semanage fcontext -a -e /var/lib/containers/storage",
-		".bootstrap-v7",
+		`log_driver = "journald"`,
+		".bootstrap-v8",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("bootstrap script missing %q", want)

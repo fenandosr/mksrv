@@ -80,6 +80,12 @@ func DeployStack(ctx context.Context, client *ssh.Client, opts Options) (StackRe
 		return result, err
 	}
 
+	// Shared templates can reference resolved secrets by leaf name
+	// ({{ .Secrets.<leaf> }}); make them available to the renderer.
+	if len(opts.Secrets) > 0 && opts.Context.Secrets == nil {
+		opts.Context.Secrets = opts.Secrets
+	}
+
 	files, err := render.Stack(opts.StacksRoot, stack, opts.Context)
 	if err != nil {
 		return result, err

@@ -1,0 +1,20 @@
+[Unit]
+Description=mksrv CrowdSec firewall bouncer
+Requires=mksrv-crowdsec.service
+After=mksrv-crowdsec.service
+
+[Container]
+ContainerName=mksrv-crowdsec-fw
+Image={{ .Image "firewall-bouncer" | default "docker.io/crowdsecurity/cs-firewall-bouncer:v0.0.31" }}
+# Host netns + NET_ADMIN so the bouncer writes the host's nftables ruleset.
+Network=host
+AddCapability=NET_ADMIN
+AddCapability=NET_RAW
+Volume=/var/lib/mksrv/stacks/security/bouncer.yaml:/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml:Z,ro
+
+[Service]
+Restart=always
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

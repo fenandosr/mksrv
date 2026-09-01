@@ -19,7 +19,7 @@ var bootstrapTemplate string
 
 // BootstrapVersion is bumped when the bootstrap script changes in a way that
 // must re-run on already-provisioned hosts.
-const BootstrapVersion = 7
+const BootstrapVersion = 8
 
 // BootstrapParams controls the rendered bootstrap script.
 type BootstrapParams struct {

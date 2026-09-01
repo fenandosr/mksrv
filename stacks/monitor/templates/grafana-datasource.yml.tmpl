@@ -6,3 +6,10 @@ datasources:
     url: http://mksrv-prometheus:9090
     isDefault: true
     editable: false
+{{- if .StackIP "logs" }}
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://{{ .StackIP "logs" }}:3100
+    editable: false
+{{- end }}
