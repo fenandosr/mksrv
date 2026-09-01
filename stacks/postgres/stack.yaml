@@ -15,6 +15,13 @@ tailnet_ports: [5432, 8008]
 resources:
   min_ram_mb: 1024
   disk_gb: 40
+storage:
+  - name: pgdata
+    gb: 40
+    iops: 4000
+    throughput: 250
+  - name: raft
+    gb: 2
 templates:
   - src: templates/mksrv-postgres.network.tmpl
     dst: /etc/containers/systemd/mksrv-postgres.network

@@ -182,6 +182,14 @@ func (a *App) newHostCommand(opts *globalOptions) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(trust)
+	cmd.AddCommand(&cobra.Command{
+		Use:   "migrate-volume HOST STACK [NAME...]",
+		Short: "Copy a stack's named-podman-volume data onto its dedicated EBS volume",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runMigrateVolume(cmd.Context(), a.printer(opts), opts, args[0], args[1], args[2:])
+		},
+	})
 	return cmd
 }
 
@@ -393,6 +401,30 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 		Peers:        peers,
 		StackHosts:   stackHosts,
 		StackMembers: stackMembers,
+		Retention:    f.data.Deployment.Retention.Resolved(),
+	}
+}
+
+// bootstrapParams derives the per-host bootstrap inputs: an adaptive swap size
+// from the host's stack set and instance type, plus the EBS volume ids the
+// bootstrap matches NVMe disks against.
+func (f *fleet) bootstrapParams(ht hostTarget) deploy.BootstrapParams {
+	itype := ht.Host.InstanceType
+	if itype == "" {
+		itype = "t4g.small"
+	}
+	out := f.outputs.Hosts[ht.Name]
+	vols := make([]deploy.VolumeMount, 0, len(out.Volumes))
+	for name := range out.Volumes {
+		vols = append(vols, deploy.VolumeMount{Name: name, VolumeID: out.Volumes[name]})
+	}
+	sort.Slice(vols, func(i, j int) bool { return vols[i].Name < vols[j].Name })
+	return deploy.BootstrapParams{
+		IsEdge:       slices.Contains(ht.Host.Stacks, "base"),
+		Timezone:     f.data.Deployment.Timezone,
+		SwapMB:       model.SwapForStacks(ht.Host.Stacks, f.catalog, itype),
+		DataVolumeID: out.DataVolumeID,
+		Volumes:      vols,
 	}
 }
 
@@ -459,20 +491,6 @@ func (a *App) runFleetApply(ctx context.Context, printer ui.Printer, globals *gl
 	}
 	printer.Success("fleet applied")
 	return nil
-}
-
-// bootstrapParams derives the per-host bootstrap inputs, including an adaptive
-// swap size from the host's stack set and instance type.
-func (f *fleet) bootstrapParams(ht hostTarget) deploy.BootstrapParams {
-	itype := ht.Host.InstanceType
-	if itype == "" {
-		itype = "t4g.small"
-	}
-	return deploy.BootstrapParams{
-		IsEdge:   slices.Contains(ht.Host.Stacks, "base"),
-		Timezone: f.data.Deployment.Timezone,
-		SwapMB:   model.SwapForStacks(ht.Host.Stacks, f.catalog, itype),
-	}
 }
 
 const fleetMeshUser = "mksrv-fleet"

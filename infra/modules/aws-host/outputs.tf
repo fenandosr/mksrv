@@ -24,6 +24,15 @@ output "ebs_device" {
   value       = local.data_device
 }
 
+output "data_volume_id" {
+  value = aws_ebs_volume.data.id
+}
+
+output "volumes" {
+  description = "Dedicated volume name -> EBS volume id, for the bootstrap to match NVMe disks."
+  value       = { for k, v in aws_ebs_volume.extra : k => v.id }
+}
+
 output "security_group_id" {
   value = aws_security_group.host.id
 }

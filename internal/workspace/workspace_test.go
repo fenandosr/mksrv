@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/fenandosr/mksrv/internal/model"
 )
 
 func TestValidateExampleWorkspace(t *testing.T) {
@@ -167,6 +169,24 @@ func TestCapacityOvercommitIsWarningOnly(t *testing.T) {
 		if iss.Code == "capacity.overcommit" {
 			t.Fatalf("unexpected overcommit after upsizing: %s", iss.Message)
 		}
+	}
+}
+
+func TestCheckHostStorageCollision(t *testing.T) {
+	t.Parallel()
+	data := &Data{Catalog: map[string]model.Stack{
+		"a": {Storage: []model.StackVolume{{Name: "data", GB: 10}}},
+		"b": {Storage: []model.StackVolume{{Name: "data", GB: 20}}},
+		"c": {Storage: []model.StackVolume{{Name: "other", GB: 5}}},
+	}}
+	var report Report
+	checkHostStorage(data, &report, "n1", model.Host{Provider: "aws", Stacks: []string{"a", "b", "c"}})
+	assertIssueCode(t, report, "storage.name.collision")
+
+	var clean Report
+	checkHostStorage(data, &clean, "n2", model.Host{Provider: "aws", Stacks: []string{"a", "c"}})
+	if len(clean.Issues) != 0 {
+		t.Fatalf("no collision expected: %#v", clean.Issues)
 	}
 }
 

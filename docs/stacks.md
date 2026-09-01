@@ -7,6 +7,8 @@ and health checks.
 
 A stack's `kind` is `service` (one instance per assigned host, the default) or
 `cluster` (an odd number of hosts ≥ 3, self-organising quorum — see ADR 0013).
+A `storage:` block requests dedicated EBS volumes mounted at
+`/var/lib/mksrv/vol/<name>` (ADR 0014).
 
 | Stack | Kind | Target | Tenant scope | Dependencies | State |
 |---|---|---|---:|---|---|

@@ -33,6 +33,21 @@
         "disk_gb": {"type": "integer", "minimum": 0, "maximum": 1048576}
       }
     },
+    "storage": {
+      "type": "array", "maxItems": 8,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["name", "gb"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+          "gb": {"type": "integer", "minimum": 1, "maximum": 16384},
+          "iops": {"type": "integer", "minimum": 3000, "maximum": 16000},
+          "throughput": {"type": "integer", "minimum": 125, "maximum": 1000},
+          "grows_with": {"type": "string", "enum": ["data", "metrics", "logs"]},
+          "from": {"type": "string", "pattern": "^mksrv-[a-z0-9-]+$"},
+          "unit": {"type": "string", "pattern": "^mksrv-[a-z0-9-]+\\.service$"}
+        }
+      }
+    },
     "templates": {
       "type": "array",
       "items": {

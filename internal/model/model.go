@@ -5,19 +5,53 @@ package model
 
 // Deployment is the decoded deployment.yaml document.
 type Deployment struct {
-	Version   int             `json:"version"`
-	Engine    string          `json:"engine"`
-	Env       string          `json:"env"`
-	Timezone  string          `json:"timezone,omitempty"`
-	MgmtCIDR  string          `json:"mgmt_cidr"`
-	AWS       AWSConfig       `json:"aws"`
-	Backend   BackendConfig   `json:"backend"`
-	DNS       DNSConfig       `json:"dns"`
-	Identity  IdentityConfig  `json:"identity"`
-	Mail      *MailConfig     `json:"mail,omitempty"`
-	Hosts     map[string]Host `json:"hosts"`
-	Telemetry TelemetryConfig `json:"telemetry,omitempty"`
+	Version   int              `json:"version"`
+	Engine    string           `json:"engine"`
+	Env       string           `json:"env"`
+	Timezone  string           `json:"timezone,omitempty"`
+	MgmtCIDR  string           `json:"mgmt_cidr"`
+	AWS       AWSConfig        `json:"aws"`
+	Backend   BackendConfig    `json:"backend"`
+	DNS       DNSConfig        `json:"dns"`
+	Identity  IdentityConfig   `json:"identity"`
+	Mail      *MailConfig      `json:"mail,omitempty"`
+	Hosts     map[string]Host  `json:"hosts"`
+	Retention *RetentionConfig `json:"retention,omitempty"`
+	Telemetry TelemetryConfig  `json:"telemetry,omitempty"`
 }
+
+// RetentionConfig sets how long metrics/logs are kept and the assumed daily
+// growth used to size their volumes.
+type RetentionConfig struct {
+	MetricsDays     int     `json:"metrics_days,omitempty"`
+	LogsDays        int     `json:"logs_days,omitempty"`
+	MetricsGBPerDay float64 `json:"metrics_gb_per_day,omitempty"`
+	LogsGBPerDay    float64 `json:"logs_gb_per_day,omitempty"`
+}
+
+// Resolved returns a copy with defaults applied. Safe to call on a nil receiver.
+func (r *RetentionConfig) Resolved() RetentionConfig {
+	out := RetentionConfig{MetricsDays: 15, LogsDays: 14, MetricsGBPerDay: 0.3, LogsGBPerDay: 2}
+	if r == nil {
+		return out
+	}
+	if r.MetricsDays > 0 {
+		out.MetricsDays = r.MetricsDays
+	}
+	if r.LogsDays > 0 {
+		out.LogsDays = r.LogsDays
+	}
+	if r.MetricsGBPerDay > 0 {
+		out.MetricsGBPerDay = r.MetricsGBPerDay
+	}
+	if r.LogsGBPerDay > 0 {
+		out.LogsGBPerDay = r.LogsGBPerDay
+	}
+	return out
+}
+
+// LogsHours is LogsDays in hours, for the Loki config template.
+func (r RetentionConfig) LogsHours() int { return r.LogsDays * 24 }
 
 type AWSConfig struct {
 	Region  string `json:"region"`
@@ -170,9 +204,22 @@ type Stack struct {
 	Secrets      []string        `json:"secrets,omitempty"`
 	TailnetPorts []int           `json:"tailnet_ports,omitempty"`
 	Resources    StackResources  `json:"resources,omitempty"`
+	Storage      []StackVolume   `json:"storage,omitempty"`
 	Templates    []StackTemplate `json:"templates,omitempty"`
 	Hooks        StackHooks      `json:"hooks,omitempty"`
 	Health       []StackHealth   `json:"health,omitempty"`
+}
+
+// StackVolume is a dedicated EBS volume a stack wants, mounted on the host at
+// /var/lib/mksrv/vol/<name> (referenced from templates via {{ .Volume "<name>" }}).
+type StackVolume struct {
+	Name       string `json:"name"`
+	GB         int    `json:"gb"`
+	IOPS       int    `json:"iops,omitempty"`       // gp3 provisioned; 0 = baseline 3000
+	Throughput int    `json:"throughput,omitempty"` // gp3 MB/s; 0 = baseline 125
+	GrowsWith  string `json:"grows_with,omitempty"` // data | metrics | logs — retention-driven sizing
+	From       string `json:"from,omitempty"`       // legacy named podman volume, for `mksrv host migrate-volume`
+	Unit       string `json:"unit,omitempty"`       // systemd unit to stop while migrating
 }
 
 type StackApp struct {

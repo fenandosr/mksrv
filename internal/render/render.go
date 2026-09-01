@@ -55,12 +55,18 @@ type Context struct {
 	Peers        map[string]string   // mksrv host name -> private VPC IP
 	StackHosts   map[string]string   // stack name -> private VPC IP of the host carrying it
 	StackMembers map[string][]Member // stack name -> every fleet host carrying it (sorted by Name)
+	Retention    model.RetentionConfig
 	Tenant       *model.Tenant
 	Secrets      map[string]string
 }
 
 // Peer returns the private VPC IP of another fleet host, or "" if unknown.
 func (c Context) Peer(host string) string { return c.Peers[host] }
+
+// Volume returns the host mount path of a stack's dedicated EBS volume declared
+// in its `storage:` block. The bootstrap mounts it there; the path is
+// deterministic whether or not the volume is attached yet.
+func (c Context) Volume(name string) string { return "/var/lib/mksrv/vol/" + name }
 
 // StackIP returns the private VPC IP of the fleet host carrying the named
 // stack, or "" when no host does. Used by cross-host templates (an Alloy

@@ -29,7 +29,8 @@ func baseContext() Context {
 			ConfigD:    "cfg.example.com",
 			RootDomain: "example.com",
 		},
-		Images: map[string]string{"caddy": "docker.io/library/caddy:2.8"},
+		Images:    map[string]string{"caddy": "docker.io/library/caddy:2.8"},
+		Retention: (&model.RetentionConfig{}).Resolved(),
 	}
 }
 
@@ -216,6 +217,58 @@ func TestStackRendersLogsAndSecurity(t *testing.T) {
 	}
 	if c := string(secFiles["/etc/containers/systemd/mksrv-crowdsec.container"]); !strings.Contains(c, "target=BOUNCER_KEY_firewall") {
 		t.Fatalf("crowdsec unit missing bouncer key secret:\n%s", c)
+	}
+}
+
+func TestStackStorageAndRetention(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	stacksRoot := filepath.Clean(filepath.Join("..", "..", "stacks"))
+
+	ctx := baseContext()
+	ctx.Host.Name = "data"
+	ctx.Host.PrivateIP = "10.20.0.168"
+	ctx.Host.Stacks = []string{"monitor", "logs"}
+	ctx.Retention = (&model.RetentionConfig{MetricsDays: 30, LogsDays: 21}).Resolved()
+
+	mon, err := Stack(stacksRoot, catalog["monitor"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(monitor) error = %v", err)
+	}
+	pu := string(mon["/etc/containers/systemd/mksrv-prometheus.container"])
+	if !strings.Contains(pu, "Volume=/var/lib/mksrv/vol/tsdb:/prometheus:Z") {
+		t.Fatalf("prometheus unit not on the dedicated volume:\n%s", pu)
+	}
+	if !strings.Contains(pu, "--storage.tsdb.retention.time=30d") {
+		t.Fatalf("prometheus retention not templated:\n%s", pu)
+	}
+
+	lg, err := Stack(stacksRoot, catalog["logs"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(logs) error = %v", err)
+	}
+	if lu := string(lg["/etc/containers/systemd/mksrv-loki.container"]); !strings.Contains(lu, "Volume=/var/lib/mksrv/vol/chunks:/loki:Z") {
+		t.Fatalf("loki unit not on the dedicated volume:\n%s", lu)
+	}
+	if ly := string(lg["/var/lib/mksrv/stacks/logs/loki.yml"]); !strings.Contains(ly, "retention_period: 504h") { // 21 * 24
+		t.Fatalf("loki retention not templated:\n%s", ly)
+	}
+
+	// postgres cluster
+	if s := catalog["postgres"].Storage; len(s) != 2 || s[0].Name != "pgdata" || s[0].IOPS != 4000 {
+		t.Fatalf("postgres storage block: %#v", s)
+	}
+	ctx.Host.Stacks = []string{"postgres"}
+	ctx.StackMembers = map[string][]Member{"postgres": {{Name: "data", PrivateIP: "10.20.0.168"}}}
+	pg, err := Stack(stacksRoot, catalog["postgres"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(postgres) error = %v", err)
+	}
+	if u := string(pg["/etc/containers/systemd/mksrv-patroni.container"]); !strings.Contains(u, "Volume=/var/lib/mksrv/vol/pgdata:/var/lib/postgresql/data:Z") {
+		t.Fatalf("patroni unit not on the dedicated volume:\n%s", u)
 	}
 }
 

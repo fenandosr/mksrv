@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -225,6 +226,9 @@ func (a *App) openInfraSession(ctx context.Context, printer ui.Printer, globals 
 			}
 		}
 	}
+	if hv := hostVolumes(data); len(hv) > 0 {
+		extra["host_volumes"] = hv
+	}
 	varsPath, err := infra.Materialize(data, extra)
 	if err != nil {
 		return nil, err
@@ -268,6 +272,40 @@ func (a *App) openInfraSession(ctx context.Context, printer ui.Printer, globals 
 		planPath: filepath.Join(stateDir, "plan.bin"),
 		stateDir: stateDir,
 	}, nil
+}
+
+// hostVolumes aggregates the dedicated EBS volumes every aws host needs from its
+// stacks' `storage:` blocks, sizing `grows_with` volumes from the retention
+// policy and assigning guest device names (/dev/sdf is the base data volume).
+func hostVolumes(data workspace.Data) map[string][]map[string]any {
+	ret := data.Deployment.Retention.Resolved()
+	out := map[string][]map[string]any{}
+	for name, h := range data.Deployment.Hosts {
+		if h.Provider == "existing" {
+			continue
+		}
+		dev := byte('g')
+		for _, s := range h.Stacks {
+			for _, v := range data.Catalog[s].Storage {
+				gb := v.GB
+				switch v.GrowsWith {
+				case "metrics":
+					gb = v.GB + int(math.Ceil(float64(ret.MetricsDays)*ret.MetricsGBPerDay))
+				case "logs":
+					gb = v.GB + int(math.Ceil(float64(ret.LogsDays)*ret.LogsGBPerDay))
+				}
+				out[name] = append(out[name], map[string]any{
+					"name":       v.Name,
+					"gb":         gb,
+					"iops":       v.IOPS,
+					"throughput": v.Throughput,
+					"device":     "/dev/sd" + string(dev),
+				})
+				dev++
+			}
+		}
+	}
+	return out
 }
 
 func (a *App) runInfraPlan(ctx context.Context, printer ui.Printer, globals *globalOptions) error {

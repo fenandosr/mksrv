@@ -71,6 +71,18 @@ variable "timezone" {
   default = "Etc/UTC"
 }
 
+variable "volumes" {
+  description = "Dedicated gp3 EBS volumes for stacks that declare `storage:`."
+  type = list(object({
+    name       = string
+    gb         = number
+    iops       = optional(number, 0)
+    throughput = optional(number, 0)
+    device     = string
+  }))
+  default = []
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

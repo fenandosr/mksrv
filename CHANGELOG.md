@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — M11
+
+- Per-stack dedicated EBS volumes (ADR 0014): `stack.yaml` `storage: [{name, gb,
+  iops, throughput, grows_with}]`. The CLI aggregates a host's volumes, Terraform
+  attaches a gp3 volume per entry (provisioned IOPS/throughput when set), and the
+  bootstrap (`BootstrapVersion` 10) matches disks by EBS volume id and mounts each
+  at `/var/lib/mksrv/vol/<name>`. Templates use `{{ .Volume "<name>" }}`.
+  `postgres`, `monitor`, and `logs` adopt it.
+- `deployment.yaml` `retention: {metrics_days, logs_days, metrics_gb_per_day,
+  logs_gb_per_day}` — feeds the Prometheus / Loki retention flags (were
+  hardcoded) and the `grows_with` volume sizing.
+- `mksrv host migrate-volume <host> <stack> [name...]` — copies a stack's
+  named-volume data onto its dedicated EBS volume for an existing deployment.
+
 ## Unreleased — M10
 
 - Capacity checks: `mksrv validate` now emits a `capacity.overcommit` **warning**
