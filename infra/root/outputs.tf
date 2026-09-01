@@ -27,10 +27,11 @@ output "hosts" {
 }
 
 output "dns" {
-  description = "Operator-zone DNS records."
+  description = "Operator-zone and per-tenant-zone DNS records."
   value = {
-    created = module.dns_operator.created
-    pending = module.dns_operator.pending
+    created        = module.dns_operator.created
+    pending        = module.dns_operator.pending
+    tenant_created = { for id, m in module.dns_tenant : id => m.created }
   }
 }
 

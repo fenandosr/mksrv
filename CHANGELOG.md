@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — M7
+
+- Tenant-owned infrastructure (ADR 0011). Three optional tenant-document blocks:
+  - `forwards` — per-tenant Cloud-IT VPN forwards (`http`/`tcp`/`ssh`), appended
+    to the configd roster after the built-in fleet forwards. No `configd` or
+    `cloud-it-vpn` change.
+  - `dns` — A/AAAA/CNAME records written into the tenant's own Route53 zone
+    (`dns_override.zone_id`) via a new `module "dns_tenant"`, with
+    `allow_overwrite = false` so mksrv never clobbers a record it did not create.
+  - `mesh_routes` — CIDRs a tenant's nodes may advertise; each gets a Headscale
+    ACL rule (route approval stays manual).
+- `mksrv tenant mesh <id>` — mints a Headscale pre-auth key under the tenant's
+  Headscale user and prints the `tailscale up` command for a tenant-owned node.
+- `headscale.Policy` now takes `[]PolicyTenant` (id + routes) instead of `[]string`.
+
 ## Unreleased — M6
 
 - Added the `cache` stack: one shared Redis 7 on the data host, with a

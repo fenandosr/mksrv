@@ -63,6 +63,43 @@ device_limit: 60
 	}
 }
 
+func TestValidateTenantOwnedBlocks(t *testing.T) {
+	t.Parallel()
+	validator := New()
+	doc := []byte(`
+version: 1
+id: mcps
+display_name: MCPS
+base_domain: mcps.example.com
+dns_override:
+  provider: route53
+  zone_id: Z0EXAMPLE
+stacks: [database]
+forwards:
+  - { id: login, label: "Login node", type: ssh, target: mcps-login.prod.mksrv:22, ssh_alias: mcps-login }
+  - { id: jupyter, label: "JupyterHub", type: http, target: mcps-login.prod.mksrv:8000, open: browser }
+dns:
+  - { name: jupyter, type: A, value: "203.0.113.9" }
+mesh_routes: [10.1.0.0/24]
+`)
+	_, issues, err := validator.ValidateYAML("tenant.v1.json", doc)
+	if err != nil {
+		t.Fatalf("ValidateYAML() error = %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("issues = %#v", issues)
+	}
+
+	bad := []byte(strings.Replace(string(doc), "target: mcps-login.prod.mksrv:22", "target: no-port", 1))
+	_, issues, err = validator.ValidateYAML("tenant.v1.json", bad)
+	if err != nil {
+		t.Fatalf("ValidateYAML() error = %v", err)
+	}
+	if len(issues) == 0 {
+		t.Fatal("expected a forward target validation issue")
+	}
+}
+
 func TestValidateAcceptsAutoMgmtCIDR(t *testing.T) {
 	t.Parallel()
 	doc := []byte(`

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -59,6 +60,21 @@ func (a *App) newTenantCommand(opts *globalOptions) *cobra.Command {
 			return a.runTenantList(cmd.Context(), a.printer(opts), opts)
 		},
 	})
+	mesh := &cobra.Command{
+		Use:   "mesh ID",
+		Short: "Mint a Headscale pre-auth key so a tenant-owned node can join the mesh",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			hostname, _ := cmd.Flags().GetString("hostname")
+			reusable, _ := cmd.Flags().GetBool("reusable")
+			ttl, _ := cmd.Flags().GetDuration("ttl")
+			return a.runTenantMesh(cmd.Context(), a.printer(opts), opts, args[0], hostname, reusable, ttl)
+		},
+	}
+	mesh.Flags().String("hostname", "", "tailnet node name (default: <id>-node)")
+	mesh.Flags().Bool("reusable", false, "mint a reusable key (register several nodes)")
+	mesh.Flags().Duration("ttl", 2*time.Hour, "pre-auth key lifetime")
+	cmd.AddCommand(mesh)
 	return cmd
 }
 
@@ -140,8 +156,8 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 	}
 
 	// Tenant-isolation ACL: tenants reach the fleet on service ports and their
-	// own devices; not each other.
-	policy := headscale.Policy(sortedTenantIDs(f.data.Tenants))
+	// own devices (and their own advertised subnet routes); not each other.
+	policy := headscale.Policy(policyTenants(f.data.Tenants))
 	const policyHost = "/var/lib/mksrv/stacks/identity/headscale/policy.hujson"
 	if err := edgeClient.WriteFileSudo(ctx, policyHost, []byte(policy), 0o644); err != nil {
 		return &ExitError{Code: 1, Err: fmt.Errorf("write headscale policy: %w", err)}
@@ -215,7 +231,7 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 			Primary:       tenantPrimary(tenant),
 			HeadscaleUser: id,
 			ControlURL:    "https://" + dep.Identity.HeadscaleDomain,
-			Forwards:      demoForwards(dep.Env, restPort, cachePort),
+			Forwards:      append(demoForwards(dep.Env, restPort, cachePort), tenantForwards(tenant)...),
 			UpdateFeedURL: fmt.Sprintf("https://%s/appcast.json", tenant.BaseDomain),
 			MinVersion:    "0.1.0",
 		})
@@ -335,6 +351,56 @@ func demoForwards(env string, restPort, cachePort int) []configd.Forward {
 	return forwards
 }
 
+// tenantForwards translates a tenant's declared forwards into configd.Forward,
+// filling in the boilerplate Cloud-IT VPN's validator requires. These are
+// appended to demoForwards in the broker roster.
+func tenantForwards(t model.Tenant) []configd.Forward {
+	out := make([]configd.Forward, 0, len(t.Forwards))
+	for _, fwd := range t.Forwards {
+		open := fwd.Open
+		if open == "" {
+			switch fwd.Type {
+			case "http":
+				open = "browser"
+			case "ssh":
+				open = "ssh-terminal"
+			default:
+				open = "none"
+			}
+		}
+		health := configd.HealthCheck{Kind: "tcp", IntervalSec: 30}
+		if fwd.Type == "http" {
+			path := fwd.Path
+			if path == "" {
+				path = "/"
+			}
+			health = configd.HealthCheck{Kind: "http", Path: path, IntervalSec: 30}
+		}
+		cf := configd.Forward{
+			ID:           fwd.ID,
+			Label:        fwd.Label,
+			Type:         fwd.Type,
+			Listen:       configd.Listen{Host: "127.0.0.1", Port: 0},
+			PortStrategy: "auto",
+			Target:       fwd.Target,
+			OpenAction:   configd.OpenAction{Kind: open, Path: fwd.Path},
+			HealthCheck:  health,
+			MaxConns:     16,
+		}
+		if fwd.Type == "ssh" {
+			host, _, _ := net.SplitHostPort(fwd.Target)
+			cf.SSH = &configd.SSH{
+				HostKeyAlias:   host,
+				WriteConfig:    true,
+				ConfigAlias:    fwd.SSHAlias,
+				KnownHostsFile: fwd.SSHAlias,
+			}
+		}
+		out = append(out, cf)
+	}
+	return out
+}
+
 func (f *fleet) identityHost() *hostTarget {
 	for i := range f.targets {
 		if slices.Contains(f.targets[i].Host.Stacks, "identity") {
@@ -364,6 +430,14 @@ func sortedTenantIDs(tenants map[string]model.Tenant) []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+func policyTenants(tenants map[string]model.Tenant) []headscale.PolicyTenant {
+	out := make([]headscale.PolicyTenant, 0, len(tenants))
+	for _, id := range sortedTenantIDs(tenants) {
+		out = append(out, headscale.PolicyTenant{ID: id, Routes: tenants[id].MeshRoutes})
+	}
+	return out
 }
 
 func tenantRealm(t model.Tenant) string {

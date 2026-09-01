@@ -2,6 +2,9 @@ version: 1
 id: acme
 display_name: "ACME Corp"
 base_domain: acme.example.com
+dns_override:
+  provider: route53
+  zone_id: ZEXAMPLEACMEZONEID
 keycloak:
   realm: acme
 mail:
@@ -9,6 +12,22 @@ mail:
   inbound: false
   dmarc_rua: dmarc@acme.example.com
 stacks: [database, files, analytics, monitor]
+forwards:
+  - id: login
+    label: "Login node"
+    type: tcp
+    target: acme-login.prod.mksrv:22
+  - id: notebook
+    label: "JupyterHub"
+    type: http
+    target: acme-login.prod.mksrv:8000
+    open: browser
+dns:
+  - name: notebook
+    type: A
+    value: "203.0.113.20"
+mesh_routes:
+  - 10.90.0.0/24
 device_limit: 60
 branding:
   primary: "#0C6D77"

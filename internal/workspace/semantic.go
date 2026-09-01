@@ -119,6 +119,9 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 				semanticError(report, tenantFile, stackPath, "tenant.stack.unassigned", fmt.Sprintf("tenant consumes %q, but no host carries that stack", stackName))
 			}
 		}
+		checkTenantForwards(report, tenantFile, tenant)
+		checkTenantDNS(report, tenantFile, tenant)
+		checkTenantMeshRoutes(report, tenantFile, tenant)
 	}
 
 	for tenantID, users := range data.Users {
@@ -171,7 +174,67 @@ func checkDomainWithinRoot(report *Report, file, valuePath, domain, root string)
 		return
 	}
 	if domain != root && !strings.HasSuffix(domain, "."+root) {
-		semanticError(report, file, valuePath, "domain.outside_root", fmt.Sprintf("%q must equal or be a subdomain of %q until per-tenant DNS overrides arrive in M6", domain, root))
+		semanticError(report, file, valuePath, "domain.outside_root", fmt.Sprintf("%q must equal or be a subdomain of %q; set dns_override to use an independent apex domain", domain, root))
+	}
+}
+
+// reservedForwardIDs are the forward ids demoForwards emits for every tenant; a
+// tenant forward may not collide with them.
+var reservedForwardIDs = map[string]bool{"edge-health": true, "database": true, "rest": true, "cache": true}
+
+func checkTenantForwards(report *Report, file string, tenant model.Tenant) {
+	seen := make(map[string]int, len(tenant.Forwards))
+	for i, fwd := range tenant.Forwards {
+		path := fmt.Sprintf("$.forwards[%d]", i)
+		if reservedForwardIDs[fwd.ID] {
+			semanticError(report, file, path+".id", "forward.reserved", fmt.Sprintf("forward id %q is reserved by mksrv", fwd.ID))
+		}
+		if first, dup := seen[fwd.ID]; dup {
+			semanticError(report, file, path+".id", "forward.duplicate", fmt.Sprintf("forward id %q duplicates forwards[%d]", fwd.ID, first))
+		} else {
+			seen[fwd.ID] = i
+		}
+		if _, _, err := net.SplitHostPort(fwd.Target); err != nil {
+			semanticError(report, file, path+".target", "forward.target", fmt.Sprintf("target %q must be host:port", fwd.Target))
+		}
+		if fwd.Type == "ssh" && strings.TrimSpace(fwd.SSHAlias) == "" {
+			semanticError(report, file, path+".ssh_alias", "forward.ssh_alias", "an ssh forward requires ssh_alias")
+		}
+	}
+	// demoForwards emits at most 4 built-in forwards; Cloud-IT VPN caps at 32.
+	if len(tenant.Forwards)+4 > 32 {
+		semanticError(report, file, "$.forwards", "forward.count", fmt.Sprintf("%d tenant forwards plus mksrv's built-ins exceed the 32-forward limit", len(tenant.Forwards)))
+	}
+}
+
+func checkTenantDNS(report *Report, file string, tenant model.Tenant) {
+	if len(tenant.DNS) == 0 {
+		return
+	}
+	if tenant.DNSOverride == nil || tenant.DNSOverride.Provider != "route53" || strings.TrimSpace(tenant.DNSOverride.ZoneID) == "" {
+		semanticError(report, file, "$.dns", "tenant.dns.no_zone", "dns records require dns_override with provider route53 and a zone_id")
+		return
+	}
+	for i, rec := range tenant.DNS {
+		path := fmt.Sprintf("$.dns[%d]", i)
+		switch rec.Type {
+		case "A", "AAAA":
+			if net.ParseIP(rec.Value) == nil {
+				semanticError(report, file, path+".value", "tenant.dns.value", fmt.Sprintf("%s record value %q is not an IP address", rec.Type, rec.Value))
+			}
+		case "CNAME":
+			if net.ParseIP(rec.Value) != nil {
+				semanticError(report, file, path+".value", "tenant.dns.value", "CNAME record value must be a hostname, not an IP")
+			}
+		}
+	}
+}
+
+func checkTenantMeshRoutes(report *Report, file string, tenant model.Tenant) {
+	for i, route := range tenant.MeshRoutes {
+		if _, _, err := net.ParseCIDR(route); err != nil {
+			semanticError(report, file, fmt.Sprintf("$.mesh_routes[%d]", i), "tenant.mesh_route", fmt.Sprintf("%q is not a valid CIDR", route))
+		}
 	}
 }
 

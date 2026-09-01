@@ -44,6 +44,27 @@ func TestEnsureUserParsesNumericID(t *testing.T) {
 	}
 }
 
+func TestPolicyIsolatesTenantsAndAddsRoutes(t *testing.T) {
+	t.Parallel()
+	got := Policy([]PolicyTenant{
+		{ID: "bitabit"},
+		{ID: "mcps", Routes: []string{"10.1.0.0/24"}},
+	})
+	for _, want := range []string{
+		`"src": ["mksrv-fleet@"], "dst": ["mksrv-fleet@:*"]`,
+		`"src": ["bitabit@"], "dst": ["bitabit@:*"]`,
+		`"src": ["mcps@"], "dst": ["mksrv-fleet@:22,80,443,3000,3010-3019,5050,5432,6379,8090,9090"]`,
+		`"src": ["mcps@"], "dst": ["10.1.0.0/24:*"]`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("policy missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `"dst": ["bitabit@:*"], "src": ["mcps@"]`) || strings.Contains(got, `"src": ["mcps@"], "dst": ["bitabit@`) {
+		t.Fatalf("policy allows cross-tenant access:\n%s", got)
+	}
+}
+
 func TestPreAuthKeyExtractsKey(t *testing.T) {
 	t.Parallel()
 	fake := &fakeRunner{responses: map[string]string{
