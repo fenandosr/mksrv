@@ -137,6 +137,39 @@ func TestValidateRejectsBadMeshRoute(t *testing.T) {
 	assertIssueCode(t, report, "tenant.mesh_route")
 }
 
+func TestCapacityOvercommitIsWarningOnly(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	// The example edge (base+identity+mail = 3584 MiB min) on the default
+	// t4g.small (2048 MiB) is already over budget.
+	report := revalidate(t, root)
+	if !report.Valid {
+		t.Fatalf("overcommit must not invalidate: %#v", report.Issues)
+	}
+	assertIssueCode(t, report, "capacity.overcommit")
+	for _, iss := range report.Issues {
+		if iss.Code == "capacity.overcommit" && iss.Severity != "warning" {
+			t.Fatalf("capacity.overcommit severity = %q, want warning", iss.Severity)
+		}
+	}
+
+	// A roomy instance_type clears it.
+	p := filepath.Join(root, "deployment.yaml")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patched := strings.Replace(string(data), "stacks: [base, identity, mail]", "instance_type: t4g.large\n    stacks: [base, identity, mail]", 1)
+	if err := os.WriteFile(p, []byte(patched), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, iss := range revalidate(t, root).Issues {
+		if iss.Code == "capacity.overcommit" {
+			t.Fatalf("unexpected overcommit after upsizing: %s", iss.Message)
+		}
+	}
+}
+
 func patchTenant(t *testing.T, root, old, new string) {
 	t.Helper()
 	p := filepath.Join(root, "tenants", "acme.yaml")

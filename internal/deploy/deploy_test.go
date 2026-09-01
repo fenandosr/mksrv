@@ -9,19 +9,20 @@ import (
 
 func TestRenderBootstrapEdge(t *testing.T) {
 	t.Parallel()
-	script, err := RenderBootstrap(BootstrapParams{IsEdge: true, Timezone: "America/Mexico_City"})
+	script, err := RenderBootstrap(BootstrapParams{IsEdge: true, Timezone: "America/Mexico_City", SwapMB: 1024})
 	if err != nil {
 		t.Fatalf("RenderBootstrap() error = %v", err)
 	}
 	for _, want := range []string{
 		"IS_EDGE=1",
 		`TIMEZONE="America/Mexico_City"`,
+		"TARGET_SWAP_MB=1024",
 		"SELINUX=enforcing",
 		"--add-service=http",
 		`GRAPHROOT="$MARKER_DIR/containers"`,
 		"semanage fcontext -a -e /var/lib/containers/storage",
 		`log_driver = "journald"`,
-		".bootstrap-v8",
+		".bootstrap-v9",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("bootstrap script missing %q", want)

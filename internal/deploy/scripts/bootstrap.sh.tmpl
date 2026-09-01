@@ -53,6 +53,29 @@ if ! mountpoint -q "$MARKER_DIR"; then
 fi
 mkdir -p "$MARKER_DIR/containers" "$MARKER_DIR/stacks"
 
+# ---------------------------------------------------------------------------
+# 1b. Swap -> /swapfile, sized to the host's stack set (reconciled every run)
+# ---------------------------------------------------------------------------
+TARGET_SWAP_MB={{ .SwapMB }}
+current_swap_mb=$(( $(stat -c %s /swapfile 2>/dev/null || echo 0) / 1048576 ))
+if [ "$TARGET_SWAP_MB" -gt 0 ] && [ "$current_swap_mb" != "$TARGET_SWAP_MB" ]; then
+  log "resizing swap: ${current_swap_mb}M -> ${TARGET_SWAP_MB}M"
+  swapoff /swapfile 2>/dev/null || true
+  rm -f /swapfile
+  fallocate -l "${TARGET_SWAP_MB}M" /swapfile || dd if=/dev/zero of=/swapfile bs=1M count="$TARGET_SWAP_MB" status=none
+  chmod 600 /swapfile
+  mkswap -q /swapfile
+  swapon /swapfile
+  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >>/etc/fstab
+  echo 'vm.swappiness=10' >/etc/sysctl.d/90-mksrv-swap.conf
+  sysctl -q -w vm.swappiness=10
+elif [ "$TARGET_SWAP_MB" -eq 0 ] && [ -e /swapfile ]; then
+  log "removing swap"
+  swapoff /swapfile 2>/dev/null || true
+  rm -f /swapfile
+  sed -i '\#^/swapfile #d' /etc/fstab
+fi
+
 if [ -f "$MARKER" ]; then
   log "already bootstrapped ($MARKER); nothing to do"
   exit 0

@@ -159,10 +159,13 @@ resource "aws_instance" "host" {
     http_put_response_hop_limit = 2
   }
 
+  # Swap and the full host bootstrap are managed by the mksrv CLI over SSH
+  # (adaptive to the host's stack set); a user_data change must not replace a
+  # running instance.
+  user_data_replace_on_change = false
   user_data_base64 = base64encode(templatefile("${path.module}/user_data.sh.tftpl", {
     hostname = "${var.name}.${var.env}.mksrv"
     timezone = var.timezone
-    swap_mb  = var.swap_mb
   }))
 
   tags        = merge(local.tags, { Name = local.name })
