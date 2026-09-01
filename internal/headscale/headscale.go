@@ -176,19 +176,32 @@ func (c *Client) SetPolicyFile(ctx context.Context, containerPath string) error 
 	return nil
 }
 
+// PolicyTenant is one tenant's input to Policy: its id plus any subnet routes
+// its own mesh nodes are allowed to advertise.
+type PolicyTenant struct {
+	ID     string
+	Routes []string
+}
+
 // Policy renders the tenant-isolation HuJSON ACL: fleet hosts reach everything,
-// each tenant reaches its own devices freely and the fleet on service ports
-// only, and tenants cannot reach each other.
-func Policy(tenantIDs []string) string {
+// each tenant reaches its own devices (and its own advertised subnet routes)
+// freely and the fleet on service ports only, and tenants cannot reach each
+// other. Route approval itself (headscale nodes approve-routes) stays manual.
+func Policy(tenants []PolicyTenant) string {
 	const fleetPorts = "22,80,443,3000,3010-3019,5050,5432,6379,8090,9090"
 	rules := []string{
 		fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s@:*"] }`, fleetUser, fleetUser),
 	}
-	for _, id := range tenantIDs {
+	for _, t := range tenants {
 		rules = append(rules,
-			fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s@:*"] }`, id, id),
-			fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s@:%s"] }`, id, fleetUser, fleetPorts),
+			fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s@:*"] }`, t.ID, t.ID),
+			fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s@:%s"] }`, t.ID, fleetUser, fleetPorts),
 		)
+		for _, cidr := range t.Routes {
+			rules = append(rules,
+				fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s:*"] }`, t.ID, cidr),
+			)
+		}
 	}
 	return "{\n  \"acls\": [\n    " + strings.Join(rules, ",\n    ") + "\n  ]\n}\n"
 }

@@ -31,6 +31,39 @@
       }
     },
     "stacks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"}},
+    "forwards": {
+      "type": "array", "maxItems": 24,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "label", "type", "target"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,31}$"},
+          "label": {"type": "string", "minLength": 1, "maxLength": 128},
+          "type": {"type": "string", "enum": ["http", "tcp", "ssh"]},
+          "target": {"type": "string", "maxLength": 320, "pattern": "^[A-Za-z0-9.-]+:[0-9]{1,5}$"},
+          "open": {"type": "string", "enum": ["browser", "none", "ssh-terminal", "copy"]},
+          "path": {"type": "string", "maxLength": 2048},
+          "ssh_alias": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"}
+        }
+      }
+    },
+    "dns": {
+      "type": "array", "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "type", "value"],
+        "properties": {
+          "name": {"type": "string", "maxLength": 63, "pattern": "^(@|[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*)$"},
+          "type": {"type": "string", "enum": ["A", "AAAA", "CNAME"]},
+          "value": {"type": "string", "minLength": 1, "maxLength": 255},
+          "ttl": {"type": "integer", "minimum": 60, "maximum": 86400, "default": 300}
+        }
+      }
+    },
+    "mesh_routes": {
+      "type": "array", "uniqueItems": true, "maxItems": 16,
+      "items": {"type": "string", "pattern": "^[0-9A-Fa-f:.]+/[0-9]{1,3}$"}
+    },
     "device_limit": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 50},
     "branding": {
       "type": "object", "additionalProperties": false,

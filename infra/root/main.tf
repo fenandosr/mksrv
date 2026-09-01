@@ -25,6 +25,24 @@ locals {
     if contains(try(t.stacks, []), "database")
   ]
 
+  # Records mksrv writes into each tenant's own hosted zone (never the operator
+  # zone). allow_overwrite is false downstream, so a name that already exists in
+  # the tenant zone fails the apply instead of being clobbered.
+  tenant_dns = {
+    for id, t in var.tenants : id => {
+      zone_id = try(t.dns_override.zone_id, "")
+      records = [
+        for r in try(t.dns, []) : {
+          fqdn  = r.name == "@" ? t.base_domain : "${r.name}.${t.base_domain}"
+          type  = r.type
+          value = r.value
+          ttl   = try(r.ttl, 300)
+        }
+      ]
+    }
+    if try(t.dns_override.provider, "") == "route53" && length(try(t.dns, [])) > 0
+  }
+
   # Shared operator endpoints, all fronted by the edge.
   operator_fqdns = distinct(concat([
     local.d.identity.keycloak_domain,
@@ -97,4 +115,15 @@ module "dns_operator" {
   # mksrv owns auth./vpn./cfg. in the operator zone; adopt them if a prior
   # partial apply already created them.
   allow_overwrite = true
+}
+
+module "dns_tenant" {
+  source   = "../modules/dns"
+  for_each = local.tenant_dns
+
+  records         = each.value.records
+  provider_config = { kind = "route53", zone_id = each.value.zone_id }
+  # Tenant zones hold the tenant's own live records (mail included); never
+  # overwrite a name mksrv did not create.
+  allow_overwrite = false
 }

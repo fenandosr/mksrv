@@ -95,8 +95,13 @@ for path in sorted(root.rglob('*')):
     if path.suffix in {'.yaml', '.yml', '.json', '.toml', '.tf', '.md'}:
         for match in domain_assignment.finditer(text):
             domain = match.group(1).lower().rstrip('.')
-            # Skip HCL expression references like local.d.dns.root_domain.
-            if domain.split('.', 1)[0] in {'local', 'var', 'module', 'data', 'each', 'self', 'path'}:
+            head, _, tail = domain.partition('.')
+            # Skip HCL expression references: named scopes (local.d.dns...),
+            # comprehension loop vars (r.name, t.base_domain), and any ref whose
+            # trailing segment is a snake_case attribute rather than a TLD.
+            if head in {'local', 'var', 'module', 'data', 'each', 'self', 'path'}:
+                continue
+            if path.suffix == '.tf' and len(head) == 1 and '_' not in head:
                 continue
             if not any(domain == suffix or domain.endswith('.' + suffix) for suffix in allowed_domain_suffixes):
                 findings.append(f'{rel}: configured domain {domain!r} is not synthetic')

@@ -115,6 +115,18 @@ accepts (tenant binding, freshness, structure all pass).
 Verified live: `grafana.` and `pgadmin.` serve over TLS; `psql` as a tenant
 role into its own database works; Postgres is reachable on the tailnet.
 
-Still deferred: table-level RLS policies (application concern), per-tenant DNS
-records under the real tenant domains, Grafana OIDC, mail (SES), a
-GHCR-published configd image, signing-key rotation, and `mksrv destroy`.
+Still deferred: table-level RLS policies (application concern), Grafana OIDC,
+mail (SES), and signing-key rotation.
+
+## M7 — implemented
+
+- Tenant-owned infrastructure (ADR 0011): tenant-document blocks `forwards`
+  (per-tenant Cloud-IT VPN forwards → configd roster), `dns` (records written
+  into the tenant's own Route53 zone via `module "dns_tenant"`,
+  `allow_overwrite = false`), and `mesh_routes` (ACL rules for tenant-advertised
+  subnets). New `mksrv tenant mesh <id>` mints a Headscale pre-auth key for a
+  tenant-owned node.
+
+Still deferred: automatic subnet-route approval, mksrv terminating TLS for
+tenant web endpoints (Model A), Keycloak↔cluster identity federation,
+non-route53 tenant DNS providers.

@@ -83,16 +83,40 @@ type TelemetryConfig struct {
 
 // Tenant is a tenants/<id>.yaml document.
 type Tenant struct {
-	Version     int            `json:"version"`
-	ID          string         `json:"id"`
-	DisplayName string         `json:"display_name"`
-	BaseDomain  string         `json:"base_domain"`
-	DNSOverride *DNSOverride   `json:"dns_override,omitempty"`
-	Keycloak    TenantKeycloak `json:"keycloak,omitempty"`
-	Mail        *TenantMail    `json:"mail,omitempty"`
-	Stacks      []string       `json:"stacks"`
-	DeviceLimit int            `json:"device_limit,omitempty"`
-	Branding    Branding       `json:"branding,omitempty"`
+	Version     int               `json:"version"`
+	ID          string            `json:"id"`
+	DisplayName string            `json:"display_name"`
+	BaseDomain  string            `json:"base_domain"`
+	DNSOverride *DNSOverride      `json:"dns_override,omitempty"`
+	Keycloak    TenantKeycloak    `json:"keycloak,omitempty"`
+	Mail        *TenantMail       `json:"mail,omitempty"`
+	Stacks      []string          `json:"stacks"`
+	Forwards    []TenantForward   `json:"forwards,omitempty"`
+	DNS         []TenantDNSRecord `json:"dns,omitempty"`
+	MeshRoutes  []string          `json:"mesh_routes,omitempty"`
+	DeviceLimit int               `json:"device_limit,omitempty"`
+	Branding    Branding          `json:"branding,omitempty"`
+}
+
+// TenantForward is one Cloud-IT VPN forward a tenant exposes to its members. It
+// is translated to configd.Forward and appended to the broker roster.
+type TenantForward struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Type     string `json:"type"`           // http | tcp | ssh
+	Target   string `json:"target"`         // host:port, a MagicDNS name of a tenant mesh node
+	Open     string `json:"open,omitempty"` // browser | none | ssh-terminal | copy
+	Path     string `json:"path,omitempty"`
+	SSHAlias string `json:"ssh_alias,omitempty"`
+}
+
+// TenantDNSRecord is one record mksrv writes into the tenant's own hosted zone
+// (dns_override.zone_id), never the operator zone.
+type TenantDNSRecord struct {
+	Name  string `json:"name"` // label/subdomain under base_domain, or "@" for the apex
+	Type  string `json:"type"` // A | AAAA | CNAME
+	Value string `json:"value"`
+	TTL   int    `json:"ttl,omitempty"`
 }
 
 // TenantMail declares the mail identities and policy for a tenant. It drives

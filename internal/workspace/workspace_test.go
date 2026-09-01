@@ -83,6 +83,63 @@ func TestDiscoverWalksUp(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsReservedForwardID(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	patchTenant(t, root, "id: login\n    label:", "id: database\n    label:")
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid report")
+	}
+	assertIssueCode(t, report, "forward.reserved")
+}
+
+func TestValidateRejectsDNSWithoutZone(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	patchTenant(t, root, "dns_override:\n  provider: route53\n  zone_id: ZEXAMPLEACMEZONEID\n", "")
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid report")
+	}
+	assertIssueCode(t, report, "tenant.dns.no_zone")
+}
+
+func TestValidateRejectsBadMeshRoute(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	patchTenant(t, root, "- 10.90.0.0/24", "- 10.90.0.0/99")
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid report")
+	}
+	assertIssueCode(t, report, "tenant.mesh_route")
+}
+
+func patchTenant(t *testing.T, root, old, new string) {
+	t.Helper()
+	p := filepath.Join(root, "tenants", "acme.yaml")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), old) {
+		t.Fatalf("acme.yaml missing %q", old)
+	}
+	if err := os.WriteFile(p, []byte(strings.Replace(string(data), old, new, 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func revalidate(t *testing.T, root string) Report {
+	t.Helper()
+	_, report, err := Validate(context.Background(), root, ValidateOptions{RunningVersion: "dev"})
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	return report
+}
+
 func copyExample(t *testing.T) string {
 	t.Helper()
 	source := filepath.Clean(filepath.Join("..", "..", "examples", "workspace"))
