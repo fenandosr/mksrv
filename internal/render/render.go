@@ -38,20 +38,26 @@ type Endpoints struct {
 
 // Context is the data passed to every stack template.
 type Context struct {
-	Env       string
-	Timezone  string
-	ACMEEmail string
-	Host      HostView
-	Endpoints Endpoints
-	Images    map[string]string
-	Deployed  []string          // stacks already deployed on this host
-	Peers     map[string]string // mksrv host name -> tailnet IPv4
-	Tenant    *model.Tenant
-	Secrets   map[string]string
+	Env        string
+	Timezone   string
+	ACMEEmail  string
+	Host       HostView
+	Endpoints  Endpoints
+	Images     map[string]string
+	Deployed   []string          // stacks already deployed on this host
+	Peers      map[string]string // mksrv host name -> private VPC IP
+	StackHosts map[string]string // stack name -> private VPC IP of the host carrying it
+	Tenant     *model.Tenant
+	Secrets    map[string]string
 }
 
-// Peer returns the tailnet IPv4 of another fleet host, or "" if unknown.
+// Peer returns the private VPC IP of another fleet host, or "" if unknown.
 func (c Context) Peer(host string) string { return c.Peers[host] }
+
+// StackIP returns the private VPC IP of the fleet host carrying the named
+// stack, or "" when no host does. Used by cross-host templates (an Alloy
+// collector reaching Loki, Prometheus scraping CrowdSec).
+func (c Context) StackIP(stack string) string { return c.StackHosts[stack] }
 
 // HasStack reports whether the host carries the named stack.
 func (c Context) HasStack(name string) bool {

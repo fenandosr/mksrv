@@ -1,0 +1,37 @@
+name: logs
+title: Logs
+description: "Grafana Loki with a host journal collector (Alloy)"
+targets: [cloud, local]
+per_tenant: true
+depends_on: [monitor]
+apps:
+  - name: loki
+    image: docker.io/grafana/loki:3.4.2
+  - name: alloy
+    image: docker.io/grafana/alloy:v1.5.1
+networks: [mksrv-logs]
+tailnet_ports: [3100]
+resources:
+  min_ram_mb: 512
+  disk_gb: 20
+templates:
+  - src: templates/mksrv-logs.network.tmpl
+    dst: /etc/containers/systemd/mksrv-logs.network
+    scope: shared
+  - src: templates/loki.yml.tmpl
+    dst: /var/lib/mksrv/stacks/logs/loki.yml
+    scope: shared
+  - src: templates/loki.container.tmpl
+    dst: /etc/containers/systemd/mksrv-loki.container
+    scope: shared
+  - src: templates/config.alloy.tmpl
+    dst: /var/lib/mksrv/stacks/logs/config.alloy
+    scope: shared
+  - src: templates/alloy.container.tmpl
+    dst: /etc/containers/systemd/mksrv-alloy.container
+    scope: shared
+health:
+  - app: loki
+    type: http
+    path: /ready
+    port: 3100

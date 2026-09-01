@@ -1,6 +1,10 @@
 {
 	admin 127.0.0.1:2019
 	email {{ .ACMEEmail }}
+	log {
+		output stdout
+		format json
+	}
 }
 
 # Plain-HTTP health endpoint, reachable by IP for load-balancer style checks.

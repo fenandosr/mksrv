@@ -1,0 +1,13 @@
+# Rendered by mksrv. CrowdSec reads the host journal (persistent) for sshd auth
+# and the Caddy access log (JSON, emitted to stdout -> journald).
+source: journalctl
+journalctl_filter:
+  - "_SYSTEMD_UNIT=sshd.service"
+labels:
+  type: syslog
+---
+source: journalctl
+journalctl_filter:
+  - "CONTAINER_NAME=mksrv-caddy"
+labels:
+  type: caddy

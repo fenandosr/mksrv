@@ -130,3 +130,13 @@ mail (SES), and signing-key rotation.
 Still deferred: automatic subnet-route approval, mksrv terminating TLS for
 tenant web endpoints (Model A), Keycloak↔cluster identity federation,
 non-route53 tenant DNS providers.
+
+## M8 — implemented
+
+- `logs` stack (Grafana Loki + Alloy) and `security` stack (CrowdSec engine +
+  firewall bouncer), both opt-in (ADR 0012). `render.Context.StackIP` helper.
+  `BootstrapVersion` 8 (journald log driver + persistent journal). Caddy JSON
+  access log. `DeployStack` exposes stack secrets to shared templates.
+
+Still deferred: edge log collection into Loki, per-tenant Loki retention,
+CrowdSec Grafana dashboard auto-provisioning, CrowdSec AppSec/Caddy bouncer.

@@ -1,0 +1,22 @@
+[Unit]
+Description=mksrv Alloy log collector
+After=mksrv-loki.service
+
+[Container]
+ContainerName=mksrv-alloy
+Image={{ .Image "alloy" | default "docker.io/grafana/alloy:v1.5.1" }}
+Network=mksrv-logs.network
+# Read-only access to the host journal (host units + all container stdout).
+Volume=/var/log/journal:/var/log/journal:ro
+Volume=/run/log/journal:/run/log/journal:ro
+Volume=/etc/machine-id:/etc/machine-id:ro
+Volume=/var/lib/mksrv/stacks/logs/config.alloy:/etc/alloy/config.alloy:Z,ro
+Volume=mksrv-logs-alloy:/var/lib/alloy/data
+Exec=run --server.http.listen-addr=127.0.0.1:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+
+[Service]
+Restart=always
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

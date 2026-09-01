@@ -160,6 +160,93 @@ func TestStackRendersDataPlane(t *testing.T) {
 	}
 }
 
+func TestStackRendersLogsAndSecurity(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	stacksRoot := filepath.Clean(filepath.Join("..", "..", "stacks"))
+
+	ctx := baseContext()
+	ctx.Host.Name = "data"
+	ctx.Host.Role = "data"
+	ctx.Host.PrivateIP = "10.20.0.168"
+	ctx.Host.Stacks = []string{"monitor", "logs"}
+	ctx.StackHosts = map[string]string{"logs": "10.20.0.168", "security": "10.20.0.113"}
+
+	logFiles, err := Stack(stacksRoot, catalog["logs"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(logs) error = %v", err)
+	}
+	if u := string(logFiles["/etc/containers/systemd/mksrv-loki.container"]); !strings.Contains(u, "PublishPort=10.20.0.168:3100:3100") {
+		t.Fatalf("loki unit wrong:\n%s", u)
+	}
+	if a := string(logFiles["/var/lib/mksrv/stacks/logs/config.alloy"]); !strings.Contains(a, `url = "http://10.20.0.168:3100/loki/api/v1/push"`) {
+		t.Fatalf("alloy config wrong:\n%s", a)
+	}
+
+	// prometheus.yml and the grafana datasource pick up the extra scrape/source.
+	monFiles, err := Stack(stacksRoot, catalog["monitor"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(monitor) error = %v", err)
+	}
+	if p := string(monFiles["/var/lib/mksrv/stacks/monitor/prometheus.yml"]); !strings.Contains(p, "job_name: loki") || !strings.Contains(p, "10.20.0.113:6060") {
+		t.Fatalf("prometheus.yml missing logs/security jobs:\n%s", p)
+	}
+	if d := string(monFiles["/var/lib/mksrv/stacks/monitor/grafana-datasource.yml"]); !strings.Contains(d, "type: loki") {
+		t.Fatalf("grafana datasource missing Loki:\n%s", d)
+	}
+
+	// security stack on the edge.
+	ectx := baseContext()
+	ectx.Host.Name = "edge"
+	ectx.Host.PrivateIP = "10.20.0.113"
+	ectx.Host.Stacks = []string{"base", "security"}
+	ectx.Secrets = map[string]string{"bouncer_key": "s3cr3t-key"}
+	secFiles, err := Stack(stacksRoot, catalog["security"], ectx)
+	if err != nil {
+		t.Fatalf("Stack(security) error = %v", err)
+	}
+	if b := string(secFiles["/etc/containers/systemd/mksrv-crowdsec-fw.container"]); !strings.Contains(b, "Network=host") || !strings.Contains(b, "AddCapability=NET_ADMIN") {
+		t.Fatalf("firewall bouncer unit wrong:\n%s", b)
+	}
+	if y := string(secFiles["/var/lib/mksrv/stacks/security/bouncer.yaml"]); !strings.Contains(y, "api_key: s3cr3t-key") {
+		t.Fatalf("bouncer.yaml missing key:\n%s", y)
+	}
+	if c := string(secFiles["/etc/containers/systemd/mksrv-crowdsec.container"]); !strings.Contains(c, "target=BOUNCER_KEY_firewall") {
+		t.Fatalf("crowdsec unit missing bouncer key secret:\n%s", c)
+	}
+}
+
+func TestStackIP(t *testing.T) {
+	t.Parallel()
+	ctx := baseContext()
+	ctx.StackHosts = map[string]string{"monitor": "10.0.0.5"}
+	if ctx.StackIP("monitor") != "10.0.0.5" || ctx.StackIP("logs") != "" {
+		t.Fatalf("StackIP wrong: %q %q", ctx.StackIP("monitor"), ctx.StackIP("logs"))
+	}
+}
+
+func TestMonitorOmitsLogsJobWhenAbsent(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	ctx := baseContext()
+	ctx.Host.Name = "data"
+	ctx.Host.PrivateIP = "10.20.0.168"
+	ctx.Host.Stacks = []string{"monitor"}
+	files, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), catalog["monitor"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(monitor) error = %v", err)
+	}
+	if p := string(files["/var/lib/mksrv/stacks/monitor/prometheus.yml"]); strings.Contains(p, "job_name: loki") {
+		t.Fatalf("prometheus.yml has a loki job with no logs stack:\n%s", p)
+	}
+}
+
 func TestContextHelpers(t *testing.T) {
 	t.Parallel()
 	ctx := baseContext()

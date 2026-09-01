@@ -1,0 +1,37 @@
+// Rendered by mksrv. Ships the host's systemd journal (host units + every
+// podman container's stdout, thanks to log_driver=journald) to Loki. Query
+// scoping is by the `unit` / `container` labels.
+
+loki.write "default" {
+	endpoint {
+		url = "http://{{ .StackIP "logs" }}:3100/loki/api/v1/push"
+	}
+	external_labels = {
+		env  = "{{ .Env }}",
+		host = "{{ .Host.Name }}",
+	}
+}
+
+loki.relabel "journal" {
+	forward_to = []
+
+	rule {
+		source_labels = ["__journal__systemd_unit"]
+		target_label  = "unit"
+	}
+	rule {
+		source_labels = ["__journal_container_name"]
+		target_label  = "container"
+	}
+	rule {
+		source_labels = ["__journal_priority_keyword"]
+		target_label  = "level"
+	}
+}
+
+loki.source.journal "host" {
+	max_age       = "12h"
+	labels        = { job = "journal" }
+	relabel_rules = loki.relabel.journal.rules
+	forward_to    = [loki.write.default.receiver]
+}

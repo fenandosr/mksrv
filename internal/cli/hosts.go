@@ -358,6 +358,17 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 			peers[name] = out.PrivateIP
 		}
 	}
+	// StackHosts: which fleet host carries each stack, by private VPC IP.
+	stackHosts := map[string]string{}
+	for _, t := range f.targets {
+		ip := f.outputs.Hosts[t.Name].PrivateIP
+		if ip == "" {
+			continue
+		}
+		for _, s := range t.Host.Stacks {
+			stackHosts[s] = ip
+		}
+	}
 	return render.Context{
 		Env:       dep.Env,
 		Timezone:  dep.Timezone,
@@ -377,8 +388,9 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 			ConfigD:    "cfg." + dep.DNS.RootDomain,
 			RootDomain: dep.DNS.RootDomain,
 		},
-		Images: images,
-		Peers:  peers,
+		Images:     images,
+		Peers:      peers,
+		StackHosts: stackHosts,
 	}
 }
 
