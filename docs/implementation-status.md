@@ -179,5 +179,14 @@ bootstrap`, and a `deployment.yaml` `topology` field.
   `tenant-<id>` policy with the `transit/{encrypt,decrypt,rewrap,datakey}/<id>`
   paths. `tenantPolicyHCL` / `ensureBaoEngines` / `provisionOpenBaoTenants`.
 
-Still deferred: OIDC auth wired to Keycloak realms (M15), and a consumer stack
-reading DB credentials from OpenBao instead of raw SSM (M16).
+## M15 — implemented
+
+- Human login to OpenBao via Keycloak OIDC. `mksrv tenant apply` adds a
+  confidential `openbao` OIDC client to each consuming tenant's realm and a
+  per-tenant `oidc-<id>/` auth mount with a `tenant-<id>` role bound to the
+  `tenant-<id>` policy. `bao login -method=oidc -path=oidc-<id>`.
+  `provisionOpenBaoTenants` gained the `*keycloak.Client` argument;
+  `oidcConfigArgs` / `oidcRoleArgs` helpers.
+
+Still deferred: a consumer stack reading DB credentials from OpenBao instead of
+raw SSM (M16); OpenBao-role scoping by realm group.

@@ -82,10 +82,12 @@ stacks: [database, monitor, cache, openbao]
 - a policy **`tenant-<id>`** granting access to `kv/tenants/<id>/*` and the
   tenant's own Transit key, and nothing else;
 - an **AppRole `tenant-<id>`** bound to that policy (`token_ttl 1h`,
-  `token_max_ttl 4h`);
+  `token_max_ttl 4h`) — for services;
 - the AppRole's RoleID and SecretID in SSM;
 - a **Transit key `transit/keys/<id>`** (`aes256-gcm96`, non-exportable,
-  auto-rotated every 90 days) for PII-column encryption.
+  auto-rotated every 90 days) for PII-column encryption;
+- an **OIDC auth mount `oidc-<id>/`** wired to the tenant's Keycloak realm — for
+  humans.
 
 | Path | Content |
 |---|---|
@@ -124,6 +126,22 @@ encrypt rows locally with the plaintext key, store the wrapped key, discard the
 plaintext. Key rotation (`transit/keys/acme/rotate`, or the 90-day auto-rotate)
 re-keys new writes; `transit/rewrap/acme` upgrades old ciphertexts.
 
-Still forthcoming: OIDC auth wired to the tenant's Keycloak realm (M15), and
-consumer stacks (`database` / `postgrest`) reading their credentials from
-`kv/tenants/<id>/…` instead of raw SSM (M16).
+## Human login (OIDC)
+
+`mksrv tenant apply` adds a confidential `openbao` client to the tenant's
+Keycloak realm and an `oidc-<id>/` auth mount on the cluster. Any member of the
+realm logs in and gets the `tenant-<id>` policy — the realm is the isolation
+boundary:
+
+```
+export BAO_ADDR=http://<node-tailnet-ip>:8200
+bao login -method=oidc -path=oidc-<id>
+# opens the browser to Keycloak, returns on http://localhost:8250/oidc/callback
+bao kv get kv/tenants/<id>/db
+```
+
+Refining access by realm group (a subset of the team gets write, the rest read)
+is a later enhancement; today every realm member gets the full tenant policy.
+
+Still forthcoming: consumer stacks (`database` / `postgrest`) reading their
+credentials from `kv/tenants/<id>/…` instead of raw SSM (M16).

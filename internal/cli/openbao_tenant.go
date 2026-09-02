@@ -8,9 +8,38 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/fenandosr/mksrv/internal/keycloak"
 	sshx "github.com/fenandosr/mksrv/internal/ssh"
 	"github.com/fenandosr/mksrv/internal/ui"
 )
+
+// openbaoOIDCRedirect is the loopback callback `bao login -method=oidc` uses.
+const openbaoOIDCRedirect = "http://localhost:8250/oidc/callback"
+
+// oidcConfigArgs builds the `bao write auth/oidc-<id>/config ...` arguments.
+func oidcConfigArgs(id, discoveryURL, clientSecret string) []string {
+	return []string{
+		"write", "auth/oidc-" + id + "/config",
+		"oidc_discovery_url=" + discoveryURL,
+		"oidc_client_id=" + openbaoClientID,
+		"oidc_client_secret=" + clientSecret,
+		"default_role=tenant-" + id,
+	}
+}
+
+// oidcRoleArgs builds the `bao write auth/oidc-<id>/role/tenant-<id> ...`
+// arguments: any authenticated member of the tenant realm gets the tenant
+// policy (the realm boundary is the isolation).
+func oidcRoleArgs(id string) []string {
+	return []string{
+		"write", "auth/oidc-" + id + "/role/tenant-" + id,
+		"user_claim=sub",
+		"allowed_redirect_uris=" + openbaoOIDCRedirect,
+		"token_policies=tenant-" + id,
+		"token_ttl=1h", "token_max_ttl=4h",
+		"oidc_scopes=openid",
+	}
+}
 
 // tenantPolicyHCL is the OpenBao policy for tenant id: full access to its own
 // KV v2 subtree and Transit key, and nothing else.
@@ -52,10 +81,11 @@ type baoDataSecretID struct {
 }
 
 // provisionOpenBaoTenants reconciles, for every selected tenant that consumes
-// the `openbao` stack: a `tenant-<id>` policy over `kv/tenants/<id>/*`, an
-// AppRole bound to it, and the RoleID/SecretID in SSM. It is idempotent and
-// never regenerates a live SecretID.
-func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer, tenants []string) error {
+// the `openbao` stack: a `tenant-<id>` policy over `kv/tenants/<id>/*` and the
+// tenant's Transit key, an AppRole bound to it (RoleID/SecretID in SSM), a
+// Transit key for PII, and an OIDC auth mount wired to the tenant's Keycloak
+// realm. It is idempotent and never regenerates a live SecretID.
+func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer, kc *keycloak.Client, tenants []string) error {
 	if f.openbaoMembers() == nil {
 		return nil
 	}
@@ -92,6 +122,15 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 		return dialError(leader.Name, err)
 	}
 	defer client.Close()
+
+	authRes, err := client.Run(ctx, baoExec(rootToken, "auth", "list", "-format=json"))
+	if err != nil {
+		return fmt.Errorf("openbao: list auth methods: %w", err)
+	}
+	var authMounts map[string]any
+	_ = json.Unmarshal([]byte(authRes.Stdout), &authMounts)
+
+	keycloakDomain := f.data.Deployment.Identity.KeycloakDomain
 
 	for _, id := range consumers {
 		role := "tenant-" + id
@@ -144,7 +183,30 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 				return fmt.Errorf("openbao %s: store secret-id: %w", id, err)
 			}
 		}
-		printer.Success("tenant %s: openbao policy + approle + transit key (kv/tenants/%s/*, transit/keys/%s)", id, id, id)
+
+		// OIDC: humans log in with their Keycloak identity via
+		// `bao login -method=oidc -path=oidc-<id>`.
+		realm := tenantRealm(f.data.Tenants[id])
+		clientSecret, err := kc.EnsureClient(ctx, realm, keycloak.ClientSpec{
+			ClientID: openbaoClientID, Public: false, RedirectURIs: openbaoRedirectURIs,
+		})
+		if err != nil {
+			return fmt.Errorf("openbao %s: keycloak client: %w", id, err)
+		}
+		if _, ok := authMounts["oidc-"+id+"/"]; !ok {
+			if _, err := client.Run(ctx, baoExec(rootToken, "auth", "enable", "-path=oidc-"+id, "oidc")); err != nil {
+				return fmt.Errorf("openbao %s: enable oidc: %w", id, err)
+			}
+		}
+		discoveryURL := "https://" + keycloakDomain + "/realms/" + realm
+		if _, err := client.Run(ctx, baoExec(rootToken, oidcConfigArgs(id, discoveryURL, clientSecret)...)); err != nil {
+			return fmt.Errorf("openbao %s: oidc config: %w", id, err)
+		}
+		if _, err := client.Run(ctx, baoExec(rootToken, oidcRoleArgs(id)...)); err != nil {
+			return fmt.Errorf("openbao %s: oidc role: %w", id, err)
+		}
+
+		printer.Success("tenant %s: openbao policy + approle + transit + oidc (realm %s)", id, realm)
 	}
 	return nil
 }
