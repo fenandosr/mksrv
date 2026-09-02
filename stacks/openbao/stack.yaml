@@ -3,7 +3,7 @@ title: Secrets (OpenBao)
 description: "OpenBao on Integrated Storage (Raft HA) with AWS KMS auto-unseal; KV v2 + AppRole"
 kind: cluster
 targets: [cloud]
-per_tenant: false
+per_tenant: true
 depends_on: [identity]
 apps:
   - name: openbao

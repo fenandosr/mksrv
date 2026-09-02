@@ -67,9 +67,39 @@ bao auth list           # approle/
 - **Lost quorum:** restore from a Raft snapshot (`bao operator raft snapshot
   restore`); snapshots are an operator responsibility until M13.
 
-## Per-tenant model (M13, not yet implemented)
+## Per-tenant secrets
 
-`kv/tenants/<id>/*` with a `tenant-<id>` policy and a per-tenant AppRole whose
-`role_id` / `secret_id` land in SSM. A Transit key `transit/keys/<id>` backs
-PII-column encryption. OIDC auth is wired to the tenant's Keycloak realm so team
-members log in with their existing identity.
+A tenant opts in by listing `openbao` in its `stacks:` (like `cache` or
+`database`):
+
+```yaml
+# tenants/acme.yaml
+stacks: [database, monitor, cache, openbao]
+```
+
+`mksrv tenant apply <id>` then reconciles, idempotently:
+
+- a policy **`tenant-<id>`** granting full access to `kv/tenants/<id>/*` and
+  nothing else;
+- an **AppRole `tenant-<id>`** bound to that policy (`token_ttl 1h`,
+  `token_max_ttl 4h`);
+- the AppRole's RoleID and SecretID in SSM.
+
+| Path | Content |
+|---|---|
+| `/mksrv/<env>/openbao/approle_<id>_role_id` | AppRole RoleID (stable) |
+| `/mksrv/<env>/openbao/approle_<id>_secret_id` | AppRole SecretID (written once; re-running `tenant apply` never rotates it) |
+
+A tenant service authenticates and reads its own secrets:
+
+```
+bao write auth/approle/login role_id=<role_id> secret_id=<secret_id>   # -> token
+BAO_TOKEN=<token> bao kv put  kv/tenants/acme/db  url=postgres://...
+BAO_TOKEN=<token> bao kv get  kv/tenants/acme/db
+# kv/tenants/<other>/* -> 403
+```
+
+Still forthcoming: a Transit key `transit/keys/<id>` for PII-column encryption
+(M14), OIDC auth wired to the tenant's Keycloak realm (M15), and consumer stacks
+(`database` / `postgrest`) reading their credentials from `kv/tenants/<id>/…`
+instead of raw SSM (M16).
