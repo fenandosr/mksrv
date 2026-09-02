@@ -188,5 +188,13 @@ bootstrap`, and a `deployment.yaml` `topology` field.
   `provisionOpenBaoTenants` gained the `*keycloak.Client` argument;
   `oidcConfigArgs` / `oidcRoleArgs` helpers.
 
-Still deferred: a consumer stack reading DB credentials from OpenBao instead of
-raw SSM (M16); OpenBao-role scoping by realm group.
+## M16 — implemented
+
+- `mksrv tenant apply` mirrors each tenant's Postgres and Redis connection
+  secrets into `kv/tenants/<id>/{database,cache}` (only for tenants that consume
+  those stacks). SSM stays the source of truth; the mirror is rewritten only on
+  drift. `mirrorTenantSecret` / `tenant{DB,Cache}SecretFields` in
+  `provisionOpenBaoTenants`.
+
+Still deferred: a `bao` agent sidecar / dynamic DB credentials (containers
+pulling secrets at runtime); OpenBao-role scoping by realm group.

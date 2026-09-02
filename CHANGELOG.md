@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — M16
+
+- `mksrv tenant apply` mirrors each tenant's own Postgres and Redis connection
+  secrets into `kv/tenants/<id>/database` and `kv/tenants/<id>/cache` (for
+  tenants that consume those stacks and `openbao`), so a team reads its
+  credentials with its AppRole/OIDC token instead of via the operator. SSM
+  stays mksrv's source of truth; the mirror is only rewritten when the stored
+  value has drifted, keeping KV version history quiet.
+
 ## Unreleased — M15
 
 - Human login to OpenBao via Keycloak OIDC (ADR 0015 M15 update). For each
