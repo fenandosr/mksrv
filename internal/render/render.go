@@ -45,19 +45,21 @@ type Member struct {
 
 // Context is the data passed to every stack template.
 type Context struct {
-	Env          string
-	Timezone     string
-	ACMEEmail    string
-	Host         HostView
-	Endpoints    Endpoints
-	Images       map[string]string
-	Deployed     []string            // stacks already deployed on this host
-	Peers        map[string]string   // mksrv host name -> private VPC IP
-	StackHosts   map[string]string   // stack name -> private VPC IP of the host carrying it
-	StackMembers map[string][]Member // stack name -> every fleet host carrying it (sorted by Name)
-	Retention    model.RetentionConfig
-	Tenant       *model.Tenant
-	Secrets      map[string]string
+	Env             string
+	Region          string // AWS region, for cloud-service stanzas (e.g. OpenBao awskms seal)
+	Timezone        string
+	ACMEEmail       string
+	OpenBaoKMSKeyID string // KMS key this host's OpenBao auto-unseals with
+	Host            HostView
+	Endpoints       Endpoints
+	Images          map[string]string
+	Deployed        []string            // stacks already deployed on this host
+	Peers           map[string]string   // mksrv host name -> private VPC IP
+	StackHosts      map[string]string   // stack name -> private VPC IP of the host carrying it
+	StackMembers    map[string][]Member // stack name -> every fleet host carrying it (sorted by Name)
+	Retention       model.RetentionConfig
+	Tenant          *model.Tenant
+	Secrets         map[string]string
 }
 
 // Peer returns the private VPC IP of another fleet host, or "" if unknown.

@@ -47,6 +47,7 @@ type fleet struct {
 	resolver   *secretsx.Resolver
 	meshIPs    map[string]string
 	postgres   postgresCluster
+	openbao    openbaoCluster
 }
 
 // ensureSecrets loads AWS config and builds the SSM-backed secret resolver.
@@ -127,6 +128,7 @@ func (a *App) openFleet(ctx context.Context, printer ui.Printer, globals *global
 	}
 	f.loadMeshIPs()
 	f.loadPostgres()
+	f.loadOpenBao()
 	names := make([]string, 0, len(data.Deployment.Hosts))
 	for name := range data.Deployment.Hosts {
 		names = append(names, name)
@@ -379,9 +381,11 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 		}
 	}
 	return render.Context{
-		Env:       dep.Env,
-		Timezone:  dep.Timezone,
-		ACMEEmail: dep.Identity.ACMEEmail,
+		Env:             dep.Env,
+		Region:          dep.AWS.Region,
+		Timezone:        dep.Timezone,
+		ACMEEmail:       dep.Identity.ACMEEmail,
+		OpenBaoKMSKeyID: hostOut.OpenBaoKMSKeyID,
 		Host: render.HostView{
 			Name:      ht.Name,
 			Role:      role,

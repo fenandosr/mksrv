@@ -149,6 +149,20 @@ CrowdSec Grafana dashboard auto-provisioning, CrowdSec AppSec/Caddy bouncer.
   Image built by `.github/workflows/postgres-image.yaml`. See ADR 0013.
 
 Still deferred: pgBackRest (S3 + IAM + WAL archiving), the consumer refactor
-(Keycloak/PostgREST/`provisionDatabases` → cluster), the OpenBao cluster stack,
+(Keycloak/PostgREST/`provisionDatabases` → cluster),
 `identity`/`monitor` distributed rendering, `apply` integration of `postgres
 bootstrap`, and a `deployment.yaml` `topology` field.
+
+## M12 — implemented (opt-in)
+
+- `openbao` stack: `kind: cluster` OpenBao on Integrated Storage (Raft) with AWS
+  KMS auto-unseal. Terraform creates a fleet KMS key + a scoped IAM grant;
+  `render.Context` gains `Region` / `OpenBaoKMSKeyID`, `infra.HostOutput` gains
+  `openbao_kms_key_id`. `mksrv openbao bootstrap` initialises the cluster, stores
+  recovery keys + root token in SSM, waits for auto-unseal + raft quorum, and
+  enables KV v2 + AppRole. `mksrv openbao status`. See ADR 0015.
+
+Still deferred (→ M13): per-tenant policies + AppRole (`role_id`/`secret_id` to
+SSM), Transit engine + per-tenant keys for PII, internal PKI, OIDC auth wired to
+Keycloak realms, `mksrv tenant apply` integration, and a consumer stack reading
+from OpenBao instead of raw SSM.

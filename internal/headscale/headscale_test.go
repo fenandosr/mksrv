@@ -53,7 +53,7 @@ func TestPolicyIsolatesTenantsAndAddsRoutes(t *testing.T) {
 	for _, want := range []string{
 		`"src": ["mksrv-fleet@"], "dst": ["mksrv-fleet@:*"]`,
 		`"src": ["bitabit@"], "dst": ["bitabit@:*"]`,
-		`"src": ["mcps@"], "dst": ["mksrv-fleet@:22,80,443,3000,3010-3019,5050,5432,6379,8090,9090"]`,
+		`"src": ["mcps@"], "dst": ["mksrv-fleet@:22,80,443,3000,3010-3019,5050,5432,6379,8090,8200,9090"]`,
 		`"src": ["mcps@"], "dst": ["10.1.0.0/24:*"]`,
 	} {
 		if !strings.Contains(got, want) {

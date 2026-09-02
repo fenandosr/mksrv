@@ -188,7 +188,7 @@ type PolicyTenant struct {
 // freely and the fleet on service ports only, and tenants cannot reach each
 // other. Route approval itself (headscale nodes approve-routes) stays manual.
 func Policy(tenants []PolicyTenant) string {
-	const fleetPorts = "22,80,443,3000,3010-3019,5050,5432,6379,8090,9090"
+	const fleetPorts = "22,80,443,3000,3010-3019,5050,5432,6379,8090,8200,9090"
 	rules := []string{
 		fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s@:*"] }`, fleetUser, fleetUser),
 	}

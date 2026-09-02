@@ -342,6 +342,63 @@ func TestStackRendersPostgresCluster(t *testing.T) {
 	}
 }
 
+func TestStackRendersOpenBaoCluster(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	if catalog["openbao"].Kind != "cluster" {
+		t.Fatalf("openbao stack kind = %q", catalog["openbao"].Kind)
+	}
+	members := []Member{
+		{Name: "bao1", PrivateIP: "10.20.0.21", TailnetIP: "100.64.0.21"},
+		{Name: "bao2", PrivateIP: "10.20.0.22", TailnetIP: "100.64.0.22"},
+		{Name: "bao3", PrivateIP: "10.20.0.23", TailnetIP: "100.64.0.23"},
+	}
+	ctx := baseContext()
+	ctx.Region = "us-east-1"
+	ctx.OpenBaoKMSKeyID = "arn:aws:kms:us-east-1:0:key/abc-123"
+	ctx.Host.Name = "bao2"
+	ctx.Host.PrivateIP = "10.20.0.22"
+	ctx.Host.TailnetIP = "100.64.0.22"
+	ctx.Host.Stacks = []string{"openbao"}
+	ctx.StackMembers = map[string][]Member{"openbao": members}
+
+	files, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), catalog["openbao"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(openbao) error = %v", err)
+	}
+	hcl := string(files["/var/lib/mksrv/stacks/openbao/openbao.hcl"])
+	for _, want := range []string{
+		`node_id = "bao2"`,
+		`leader_api_addr = "http://10.20.0.21:8200"`,
+		`leader_api_addr = "http://10.20.0.23:8200"`,
+		`seal "awskms"`,
+		`region     = "us-east-1"`,
+		`kms_key_id = "arn:aws:kms:us-east-1:0:key/abc-123"`,
+		`api_addr     = "http://10.20.0.22:8200"`,
+	} {
+		if !strings.Contains(hcl, want) {
+			t.Fatalf("openbao.hcl missing %q:\n%s", want, hcl)
+		}
+	}
+	if strings.Count(hcl, "retry_join") != 3 {
+		t.Fatalf("openbao.hcl want 3 retry_join, got %d:\n%s", strings.Count(hcl, "retry_join"), hcl)
+	}
+	unit := string(files["/etc/containers/systemd/mksrv-openbao.container"])
+	for _, want := range []string{
+		"AddCapability=IPC_LOCK",
+		"Volume=/var/lib/mksrv/vol/baoraft:/openbao/data:Z",
+		"PublishPort=10.20.0.22:8200:8200",
+		"PublishPort=100.64.0.22:8200:8200",
+	} {
+		if !strings.Contains(unit, want) {
+			t.Fatalf("openbao unit missing %q:\n%s", want, unit)
+		}
+	}
+}
+
 func TestMonitorOmitsLogsJobWhenAbsent(t *testing.T) {
 	t.Parallel()
 	catalog, err := engine.Catalog(schema.New())

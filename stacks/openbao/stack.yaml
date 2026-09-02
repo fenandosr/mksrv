@@ -1,0 +1,32 @@
+name: openbao
+title: Secrets (OpenBao)
+description: "OpenBao on Integrated Storage (Raft HA) with AWS KMS auto-unseal; KV v2 + AppRole"
+kind: cluster
+targets: [cloud]
+per_tenant: false
+depends_on: [identity]
+apps:
+  - name: openbao
+    image: ghcr.io/openbao/openbao:2.6.1
+networks: [mksrv-openbao]
+tailnet_ports: [8200]
+resources:
+  min_ram_mb: 512
+  disk_gb: 10
+storage:
+  - name: baoraft
+    gb: 10
+templates:
+  - src: templates/mksrv-openbao.network.tmpl
+    dst: /etc/containers/systemd/mksrv-openbao.network
+    scope: shared
+  - src: templates/openbao.hcl.tmpl
+    dst: /var/lib/mksrv/stacks/openbao/openbao.hcl
+    scope: shared
+  - src: templates/openbao.container.tmpl
+    dst: /etc/containers/systemd/mksrv-openbao.container
+    scope: shared
+health:
+  - app: openbao
+    type: tcp
+    port: 8200

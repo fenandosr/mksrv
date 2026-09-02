@@ -3,28 +3,30 @@ output "hosts" {
   value = merge(
     {
       for name, host in module.aws_host : name => {
-        provider       = "aws"
-        management_ip  = host.management_ip
-        private_ip     = host.private_ip
-        public_ip      = host.public_ip
-        instance_id    = host.instance_id
-        ebs_device     = host.ebs_device
-        data_volume_id = host.data_volume_id
-        volumes        = host.volumes
-        az             = host.availability_zone
+        provider           = "aws"
+        management_ip      = host.management_ip
+        private_ip         = host.private_ip
+        public_ip          = host.public_ip
+        instance_id        = host.instance_id
+        ebs_device         = host.ebs_device
+        data_volume_id     = host.data_volume_id
+        volumes            = host.volumes
+        openbao_kms_key_id = host.openbao_kms_key_id
+        az                 = host.availability_zone
       }
     },
     {
       for name, host in module.existing_host : name => {
-        provider       = "existing"
-        management_ip  = host.management_ip
-        private_ip     = null
-        public_ip      = null
-        instance_id    = null
-        ebs_device     = null
-        data_volume_id = null
-        volumes        = tomap({})
-        az             = null
+        provider           = "existing"
+        management_ip      = host.management_ip
+        private_ip         = null
+        public_ip          = null
+        instance_id        = null
+        ebs_device         = null
+        data_volume_id     = null
+        volumes            = tomap({})
+        openbao_kms_key_id = ""
+        az                 = null
       }
     },
   )

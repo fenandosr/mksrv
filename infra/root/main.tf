@@ -84,6 +84,26 @@ resource "aws_key_pair" "operator" {
   tags       = { "mksrv:env" = local.env }
 }
 
+# OpenBao auto-unseal: one KMS key for the whole fleet; only hosts carrying the
+# `openbao` stack get the kms:Encrypt/Decrypt grant (in the aws-host module).
+locals {
+  openbao_hosts = { for name, h in local.aws_hosts : name => h if contains(h.stacks, "openbao") }
+}
+
+resource "aws_kms_key" "openbao" {
+  count                   = length(local.openbao_hosts) > 0 ? 1 : 0
+  description             = "mksrv ${local.env} OpenBao auto-unseal"
+  enable_key_rotation     = true
+  deletion_window_in_days = 14
+  tags                    = { "mksrv:env" = local.env }
+}
+
+resource "aws_kms_alias" "openbao" {
+  count         = length(local.openbao_hosts) > 0 ? 1 : 0
+  name          = "alias/mksrv-${local.env}-openbao"
+  target_key_id = aws_kms_key.openbao[0].key_id
+}
+
 module "aws_host" {
   source   = "../modules/aws-host"
   for_each = local.aws_hosts
@@ -102,6 +122,8 @@ module "aws_host" {
   timezone      = local.timezone
   key_name      = var.ssh_public_key != "" ? aws_key_pair.operator[0].key_name : ""
   volumes       = try(var.host_volumes[each.key], [])
+
+  openbao_kms_key_arn = contains(each.value.stacks, "openbao") && length(local.openbao_hosts) > 0 ? aws_kms_key.openbao[0].arn : ""
 
   advertise_exitnode = try(each.value.advertise_exitnode, false)
 }

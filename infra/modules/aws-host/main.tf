@@ -132,6 +132,21 @@ resource "aws_iam_role_policy_attachment" "ssm_core" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# OpenBao auto-unseal: only hosts carrying the `openbao` stack receive this grant.
+resource "aws_iam_role_policy" "openbao_kms" {
+  count       = var.openbao_kms_key_arn != "" ? 1 : 0
+  name_prefix = "mksrv-openbao-kms-"
+  role        = aws_iam_role.host.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["kms:Encrypt", "kms:Decrypt", "kms:DescribeKey"]
+      Resource = var.openbao_kms_key_arn
+    }]
+  })
+}
+
 resource "aws_iam_instance_profile" "host" {
   name_prefix = "${local.name}-"
   role        = aws_iam_role.host.name

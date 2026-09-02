@@ -62,15 +62,16 @@ const OutputsFile = "outputs.json"
 
 // HostOutput is the connection data the Terraform root exposes per host.
 type HostOutput struct {
-	Provider     string            `json:"provider"`
-	ManagementIP string            `json:"management_ip"`
-	PrivateIP    string            `json:"private_ip"`
-	PublicIP     string            `json:"public_ip"`
-	InstanceID   string            `json:"instance_id"`
-	EBSDevice    string            `json:"ebs_device"`
-	DataVolumeID string            `json:"data_volume_id"`
-	Volumes      map[string]string `json:"volumes"` // stack storage name -> EBS volume id
-	AZ           string            `json:"az"`
+	Provider        string            `json:"provider"`
+	ManagementIP    string            `json:"management_ip"`
+	PrivateIP       string            `json:"private_ip"`
+	PublicIP        string            `json:"public_ip"`
+	InstanceID      string            `json:"instance_id"`
+	EBSDevice       string            `json:"ebs_device"`
+	DataVolumeID    string            `json:"data_volume_id"`
+	Volumes         map[string]string `json:"volumes"` // stack storage name -> EBS volume id
+	OpenBaoKMSKeyID string            `json:"openbao_kms_key_id"`
+	AZ              string            `json:"az"`
 }
 
 // Outputs is the decoded outputs.json.

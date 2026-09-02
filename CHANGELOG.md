@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — M12
+
+- Added the `openbao` stack (opt-in, `kind: cluster`, ADR 0015): an OpenBao
+  cluster on Integrated Storage (Raft) with **AWS KMS auto-unseal**. Terraform
+  creates a fleet KMS key (`alias/mksrv-<env>-openbao`) and grants
+  `kms:Encrypt`/`Decrypt` only to hosts carrying the stack; the listener is
+  plaintext behind the mesh/VPC (as Patroni). A dedicated `baoraft` gp3 volume
+  backs the raft store.
+- `mksrv openbao bootstrap` — initialises the cluster, writes the recovery keys
+  and root token to SSM (`/mksrv/<env>/openbao/{recovery_keys,root_token}`),
+  waits for auto-unseal + a converged raft, and enables **KV v2** and
+  **AppRole**. `mksrv openbao status` reports seal/raft/engine state.
+- `infra.HostOutput` gains `openbao_kms_key_id`; `render.Context` gains `Region`
+  and `OpenBaoKMSKeyID`. Headscale's fleet service-port ACL gains `8200`.
+- Per-tenant policies/AppRoles, Transit (PII), PKI, and OIDC-via-Keycloak are
+  M13.
+
 ## Unreleased — M11
 
 - Per-stack dedicated EBS volumes (ADR 0014): `stack.yaml` `storage: [{name, gb,
