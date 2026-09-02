@@ -87,7 +87,10 @@ stacks: [database, monitor, cache, openbao]
 - a **Transit key `transit/keys/<id>`** (`aes256-gcm96`, non-exportable,
   auto-rotated every 90 days) for PII-column encryption;
 - an **OIDC auth mount `oidc-<id>/`** wired to the tenant's Keycloak realm — for
-  humans.
+  humans;
+- the tenant's own **connection secrets mirrored** into `kv/tenants/<id>/database`
+  and `kv/tenants/<id>/cache` (when the tenant also consumes those stacks), so
+  the team reads them with their own token instead of asking the operator.
 
 | Path | Content |
 |---|---|
@@ -98,10 +101,16 @@ A tenant service authenticates and reads its own secrets:
 
 ```
 bao write auth/approle/login role_id=<role_id> secret_id=<secret_id>   # -> token
-BAO_TOKEN=<token> bao kv put  kv/tenants/acme/db  url=postgres://...
-BAO_TOKEN=<token> bao kv get  kv/tenants/acme/db
+BAO_TOKEN=<token> bao kv get  kv/tenants/acme/database   # mirrored by mksrv: host, port, dbname, username, password, url
+BAO_TOKEN=<token> bao kv get  kv/tenants/acme/cache      # redis: host, port, username, password, url
+BAO_TOKEN=<token> bao kv put  kv/tenants/acme/app  api_key=...   # the team's own keys
 # kv/tenants/<other>/* -> 403
 ```
+
+`kv/tenants/<id>/database` and `.../cache` are written by `mksrv tenant apply`
+from the SSM source of truth — the same password mksrv provisions on the
+database. mksrv only rewrites the mirror when the value drifts, so KV version
+history stays quiet.
 
 ## Encrypting PII columns (Transit)
 
@@ -143,5 +152,7 @@ bao kv get kv/tenants/<id>/db
 Refining access by realm group (a subset of the team gets write, the rest read)
 is a later enhancement; today every realm member gets the full tenant policy.
 
-Still forthcoming: consumer stacks (`database` / `postgrest`) reading their
-credentials from `kv/tenants/<id>/…` instead of raw SSM (M16).
+The mksrv reconcilers themselves still read from SSM (they always have SSM
+access and it avoids an ordering dependency on the cluster). Having a service
+*container* pull its secrets from OpenBao at runtime — a `bao` agent sidecar, or
+dynamic short-lived database credentials — is a possible future step.

@@ -57,6 +57,36 @@ func TestOIDCArgs(t *testing.T) {
 	}
 }
 
+func TestTenantSecretFields(t *testing.T) {
+	t.Parallel()
+	db := strings.Join(tenantDBSecretFields("acme", "p-w_1"), " ")
+	for _, want := range []string{
+		"dbname=db_acme", "username=acme", "password=p-w_1",
+		"url=postgres://acme:p-w_1@mksrv-postgres:5432/db_acme",
+	} {
+		if !strings.Contains(db, want) {
+			t.Fatalf("db fields missing %q: %s", want, db)
+		}
+	}
+	cache := strings.Join(tenantCacheSecretFields("acme", "p-w_1"), " ")
+	if !strings.Contains(cache, "url=redis://acme:p-w_1@mksrv-redis:6379") {
+		t.Fatalf("cache fields wrong: %s", cache)
+	}
+}
+
+func TestBaoKVPasswordField(t *testing.T) {
+	t.Parallel()
+	if got := baoKVPasswordField(`{"data":{"data":{"password":"abc","url":"x"}}}`); got != "abc" {
+		t.Fatalf("password = %q", got)
+	}
+	if got := baoKVPasswordField(`not json`); got != "" {
+		t.Fatalf("expected empty on bad input, got %q", got)
+	}
+	if got := baoKVPasswordField(`{"data":{"data":{}}}`); got != "" {
+		t.Fatalf("expected empty when absent, got %q", got)
+	}
+}
+
 func TestBaoRoleAndSecretIDParse(t *testing.T) {
 	t.Parallel()
 	var rid baoDataRoleID

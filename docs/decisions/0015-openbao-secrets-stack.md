@@ -99,5 +99,15 @@ the `bao login -method=oidc` loopback) and creates a per-tenant `oidc-<id>/`
 auth mount pointed at `https://<keycloak>/realms/<realm>` with a `tenant-<id>`
 role bound to the `tenant-<id>` policy. One mount per tenant realm (not a single
 shared mount) keeps the isolation model consistent; every realm member gets the
-full tenant policy (group-scoped refinement is deferred). The consumer refactor
-(M16) remains out of scope.
+full tenant policy (group-scoped refinement is deferred).
+
+## M16 update
+
+`mksrv tenant apply` now mirrors a tenant's own connection secrets into
+`kv/tenants/<id>/database` and `kv/tenants/<id>/cache` (when the tenant consumes
+those stacks) so the team reads them with its own AppRole/OIDC token. SSM
+remains mksrv's source of truth — the mksrv reconcilers keep reading SSM (they
+always have SSM access, and it avoids an ordering dependency on the cluster);
+the mirror is only rewritten when the value drifts. A `bao` agent sidecar or
+dynamic database credentials (a service container pulling secrets at runtime)
+are a possible future step, not part of this milestone.

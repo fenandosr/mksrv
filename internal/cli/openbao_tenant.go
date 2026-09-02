@@ -41,6 +41,51 @@ func oidcRoleArgs(id string) []string {
 	}
 }
 
+// tenantDBSecretFields returns the KV fields for a tenant's Postgres connection.
+func tenantDBSecretFields(id, password string) []string {
+	return []string{
+		"host=mksrv-postgres", "port=5432", "dbname=db_" + id, "username=" + id,
+		"password=" + password,
+		"url=postgres://" + id + ":" + password + "@mksrv-postgres:5432/db_" + id,
+	}
+}
+
+// tenantCacheSecretFields returns the KV fields for a tenant's Redis connection.
+func tenantCacheSecretFields(id, password string) []string {
+	return []string{
+		"host=mksrv-redis", "port=6379", "username=" + id,
+		"password=" + password,
+		"url=redis://" + id + ":" + password + "@mksrv-redis:6379",
+	}
+}
+
+// baoKVPasswordField pulls the current `password` value from a `bao kv get
+// -format=json` document, or "" when absent.
+func baoKVPasswordField(stdout string) string {
+	var doc struct {
+		Data struct {
+			Data map[string]string `json:"data"`
+		} `json:"data"`
+	}
+	if json.Unmarshal([]byte(stdout), &doc) != nil {
+		return ""
+	}
+	return doc.Data.Data["password"]
+}
+
+// mirrorTenantSecret writes fields to kv/tenants/<id>/<name>, skipping the write
+// when the stored `password` already matches (KV v2 keeps a version per write).
+func mirrorTenantSecret(ctx context.Context, client *sshx.Client, token, id, name, password string, fields []string) error {
+	path := "kv/tenants/" + id + "/" + name
+	if cur, _ := client.Run(ctx, baoExec(token, "kv", "get", "-format=json", path)); baoKVPasswordField(cur.Stdout) == password {
+		return nil
+	}
+	if _, err := client.Run(ctx, baoExec(token, append([]string{"kv", "put", path}, fields...)...)); err != nil {
+		return fmt.Errorf("openbao %s: mirror %s secret: %w", id, name, err)
+	}
+	return nil
+}
+
 // tenantPolicyHCL is the OpenBao policy for tenant id: full access to its own
 // KV v2 subtree and Transit key, and nothing else.
 func tenantPolicyHCL(id string) string {
@@ -206,7 +251,31 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 			return fmt.Errorf("openbao %s: oidc role: %w", id, err)
 		}
 
-		printer.Success("tenant %s: openbao policy + approle + transit + oidc (realm %s)", id, realm)
+		// Mirror the tenant's own connection secrets into its KV path so the
+		// team can read them with their AppRole / OIDC token. SSM stays mksrv's
+		// source of truth; the passwords are write-once, so a mirror is only
+		// written when it is missing or has drifted.
+		stacks := f.data.Tenants[id].Stacks
+		if slices.Contains(stacks, "database") {
+			pw, err := f.resolver.Get(ctx, "/mksrv/{env}/database/tenant_"+id+"_password")
+			if err != nil {
+				return fmt.Errorf("openbao %s: database password: %w (provision databases first)", id, err)
+			}
+			if err := mirrorTenantSecret(ctx, client, rootToken, id, "database", pw, tenantDBSecretFields(id, pw)); err != nil {
+				return err
+			}
+		}
+		if slices.Contains(stacks, "cache") {
+			pw, err := f.resolver.Get(ctx, "/mksrv/{env}/cache/redis_"+id+"_password")
+			if err != nil {
+				return fmt.Errorf("openbao %s: cache password: %w (provision redis first)", id, err)
+			}
+			if err := mirrorTenantSecret(ctx, client, rootToken, id, "cache", pw, tenantCacheSecretFields(id, pw)); err != nil {
+				return err
+			}
+		}
+
+		printer.Success("tenant %s: openbao policy + approle + transit + oidc + secrets (realm %s)", id, realm)
 	}
 	return nil
 }
