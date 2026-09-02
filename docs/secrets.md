@@ -79,11 +79,13 @@ stacks: [database, monitor, cache, openbao]
 
 `mksrv tenant apply <id>` then reconciles, idempotently:
 
-- a policy **`tenant-<id>`** granting full access to `kv/tenants/<id>/*` and
-  nothing else;
+- a policy **`tenant-<id>`** granting access to `kv/tenants/<id>/*` and the
+  tenant's own Transit key, and nothing else;
 - an **AppRole `tenant-<id>`** bound to that policy (`token_ttl 1h`,
   `token_max_ttl 4h`);
-- the AppRole's RoleID and SecretID in SSM.
+- the AppRole's RoleID and SecretID in SSM;
+- a **Transit key `transit/keys/<id>`** (`aes256-gcm96`, non-exportable,
+  auto-rotated every 90 days) for PII-column encryption.
 
 | Path | Content |
 |---|---|
@@ -99,7 +101,29 @@ BAO_TOKEN=<token> bao kv get  kv/tenants/acme/db
 # kv/tenants/<other>/* -> 403
 ```
 
-Still forthcoming: a Transit key `transit/keys/<id>` for PII-column encryption
-(M14), OIDC auth wired to the tenant's Keycloak realm (M15), and consumer stacks
-(`database` / `postgrest`) reading their credentials from `kv/tenants/<id>/…`
-instead of raw SSM (M16).
+## Encrypting PII columns (Transit)
+
+The Transit engine is encryption-as-a-service: the key never leaves OpenBao, the
+app sends plaintext and stores the returned `vault:v1:…` ciphertext in the
+column.
+
+```
+# encrypt (plaintext must be base64)
+BAO_TOKEN=<token> bao write transit/encrypt/acme \
+  plaintext=$(printf 'jane@acme.example.com' | base64)
+# -> ciphertext = vault:v1:xxxx   (store this in the DB)
+
+# decrypt
+BAO_TOKEN=<token> bao write transit/decrypt/acme ciphertext='vault:v1:xxxx'
+# -> plaintext (base64)
+```
+
+For high-volume columns use envelope encryption: `bao write
+transit/datakey/plaintext/acme` returns a one-off data key (plaintext + wrapped);
+encrypt rows locally with the plaintext key, store the wrapped key, discard the
+plaintext. Key rotation (`transit/keys/acme/rotate`, or the 90-day auto-rotate)
+re-keys new writes; `transit/rewrap/acme` upgrades old ciphertexts.
+
+Still forthcoming: OIDC auth wired to the tenant's Keycloak realm (M15), and
+consumer stacks (`database` / `postgrest`) reading their credentials from
+`kv/tenants/<id>/…` instead of raw SSM (M16).

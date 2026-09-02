@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — M14
+
+- OpenBao Transit engine for PII-column encryption (ADR 0015 M14 update).
+  `mksrv openbao bootstrap` now also enables `transit/`. `mksrv tenant apply`
+  creates a non-exportable `transit/keys/<id>` (`aes256-gcm96`, 90-day
+  auto-rotate) per tenant that consumes `openbao`, and the `tenant-<id>` policy
+  gains `transit/{encrypt,decrypt,rewrap,datakey/plaintext}/<id>` (update) and
+  `transit/keys/<id>` (read). Apps encrypt PII via the API; the key never leaves
+  the cluster.
+
 ## Unreleased — M13
 
 - Per-tenant OpenBao (ADR 0015 M13 update). The `openbao` stack is now

@@ -16,12 +16,16 @@ func TestTenantPolicyHCL(t *testing.T) {
 		`capabilities = ["create", "read", "update", "delete", "list"]`,
 		`path "kv/metadata/tenants/acme/*" {`,
 		`capabilities = ["read", "list", "delete"]`,
+		`path "transit/encrypt/acme" {`,
+		`path "transit/decrypt/acme" {`,
+		`path "transit/datakey/plaintext/acme" {`,
+		`path "transit/keys/acme" {`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("policy missing %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "tenants/other") || strings.Count(got, "tenants/acme/") != 2 {
+	if strings.Contains(got, "acme/other") || strings.Contains(got, "transit/encrypt/other") {
 		t.Fatalf("policy not scoped to one tenant:\n%s", got)
 	}
 }

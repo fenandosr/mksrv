@@ -13,15 +13,30 @@ import (
 )
 
 // tenantPolicyHCL is the OpenBao policy for tenant id: full access to its own
-// KV v2 subtree and nothing else.
+// KV v2 subtree and Transit key, and nothing else.
 func tenantPolicyHCL(id string) string {
-	return fmt.Sprintf(`path "kv/data/tenants/%s/*" {
+	return fmt.Sprintf(`path "kv/data/tenants/%[1]s/*" {
   capabilities = ["create", "read", "update", "delete", "list"]
 }
-path "kv/metadata/tenants/%s/*" {
+path "kv/metadata/tenants/%[1]s/*" {
   capabilities = ["read", "list", "delete"]
 }
-`, id, id)
+path "transit/encrypt/%[1]s" {
+  capabilities = ["update"]
+}
+path "transit/decrypt/%[1]s" {
+  capabilities = ["update"]
+}
+path "transit/rewrap/%[1]s" {
+  capabilities = ["update"]
+}
+path "transit/datakey/plaintext/%[1]s" {
+  capabilities = ["update"]
+}
+path "transit/keys/%[1]s" {
+  capabilities = ["read"]
+}
+`, id)
 }
 
 type baoDataRoleID struct {
@@ -95,6 +110,15 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 			return fmt.Errorf("openbao %s: write approle: %w", id, err)
 		}
 
+		// Transit key for PII-column encryption. Non-convergent (same plaintext
+		// -> different ciphertext), non-exportable, auto-rotated every 90 days.
+		if _, err := client.Run(ctx, baoExec(rootToken,
+			"write", "-f", "transit/keys/"+id,
+			"type=aes256-gcm96", "auto_rotate_period=2160h",
+		)); err != nil {
+			return fmt.Errorf("openbao %s: write transit key: %w", id, err)
+		}
+
 		res, err := client.Run(ctx, baoExec(rootToken, "read", "-format=json", "auth/approle/role/"+role+"/role-id"))
 		if err != nil {
 			return fmt.Errorf("openbao %s: read role-id: %w", id, err)
@@ -120,7 +144,7 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 				return fmt.Errorf("openbao %s: store secret-id: %w", id, err)
 			}
 		}
-		printer.Success("tenant %s: openbao policy + approle (kv/tenants/%s/*)", id, id)
+		printer.Success("tenant %s: openbao policy + approle + transit key (kv/tenants/%s/*, transit/keys/%s)", id, id, id)
 	}
 	return nil
 }
