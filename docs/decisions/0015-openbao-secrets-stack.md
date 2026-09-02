@@ -71,5 +71,14 @@ secrets.
   carries `openbao`. Destroying the stack leaves the key in its 14-day deletion
   window.
 - Headscale's fleet service-port ACL gains `8200`.
-- Deferred: TLS on the listener (auto-issued via the M13 PKI), dynamic database
+- Deferred: TLS on the listener (auto-issued via a later PKI), dynamic database
   credentials, `bao` agent sidecars, per-node Raft snapshots to S3.
+
+## M13 update
+
+Per-tenant scoping landed: the descriptor is now `per_tenant: true` (a tenant
+opts in via its `stacks:` list, like `cache`), and `mksrv tenant apply`
+reconciles a `tenant-<id>` policy over `kv/tenants/<id>/*`, an AppRole bound to
+it, and the RoleID/SecretID in SSM
+(`/mksrv/<env>/openbao/approle_<id>_{role_id,secret_id}`). Transit (M14), OIDC
+(M15), and the consumer refactor (M16) remain out of scope.

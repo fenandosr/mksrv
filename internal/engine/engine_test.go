@@ -22,6 +22,10 @@ func TestCatalog(t *testing.T) {
 			t.Errorf("catalog missing %q", expected)
 		}
 	}
+	// openbao is a shared cluster that tenants opt into via their `stacks:` list.
+	if !catalog["openbao"].PerTenant {
+		t.Errorf("openbao stack must be per_tenant so tenants can consume it")
+	}
 }
 
 func TestExtract(t *testing.T) {

@@ -179,6 +179,10 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 		return &ExitError{Code: 1, Err: err}
 	}
 
+	if err := f.provisionOpenBaoTenants(ctx, printer, selected); err != nil {
+		return &ExitError{Code: 1, Err: err}
+	}
+
 	pubPEM, err := a.reconcileConfigd(ctx, printer, f, hs, edgeClient, *edge)
 	if err != nil {
 		return err

@@ -128,6 +128,19 @@ func TestValidateRejectsUndersizedCluster(t *testing.T) {
 	assertIssueCode(t, report, "stack.cluster.count")
 }
 
+func TestValidateTenantConsumesOpenBao(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	// A tenant may list openbao only when a host carries it.
+	patchTenant(t, root, "stacks: [database, files, analytics, monitor]",
+		"stacks: [database, files, analytics, monitor, openbao]")
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid: no host carries openbao")
+	}
+	assertIssueCode(t, report, "tenant.stack.unassigned")
+}
+
 func TestValidateRejectsBadMeshRoute(t *testing.T) {
 	t.Parallel()
 	root := copyExample(t)
