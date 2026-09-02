@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — M15
+
+- Human login to OpenBao via Keycloak OIDC (ADR 0015 M15 update). For each
+  tenant that consumes `openbao`, `mksrv tenant apply` adds a confidential
+  `openbao` OIDC client to the tenant's realm (loopback callback
+  `http://localhost:8250/oidc/callback`) and a per-tenant `oidc-<id>/` auth
+  mount pointed at the realm, with a `tenant-<id>` role bound to the
+  `tenant-<id>` policy. `bao login -method=oidc -path=oidc-<id>`.
+
 ## Unreleased — M14
 
 - OpenBao Transit engine for PII-column encryption (ADR 0015 M14 update).

@@ -89,5 +89,15 @@ tenant apply` creates a non-exportable `transit/keys/<id>` (`aes256-gcm96`,
 90-day auto-rotate) per consuming tenant and extends the `tenant-<id>` policy
 with `transit/{encrypt,decrypt,rewrap,datakey/plaintext}/<id>` (update) and
 `transit/keys/<id>` (read). Apps encrypt PII columns via the API — the key never
-leaves the cluster. OIDC (M15) and the consumer refactor (M16) remain out of
-scope.
+leaves the cluster.
+
+## M15 update
+
+Human login via OIDC. `mksrv tenant apply` adds a confidential `openbao` client
+to the tenant's Keycloak realm (callback `http://localhost:8250/oidc/callback`,
+the `bao login -method=oidc` loopback) and creates a per-tenant `oidc-<id>/`
+auth mount pointed at `https://<keycloak>/realms/<realm>` with a `tenant-<id>`
+role bound to the `tenant-<id>` policy. One mount per tenant realm (not a single
+shared mount) keeps the isolation model consistent; every realm member gets the
+full tenant policy (group-scoped refinement is deferred). The consumer refactor
+(M16) remains out of scope.

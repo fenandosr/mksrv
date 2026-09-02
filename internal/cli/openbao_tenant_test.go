@@ -30,6 +30,33 @@ func TestTenantPolicyHCL(t *testing.T) {
 	}
 }
 
+func TestOIDCArgs(t *testing.T) {
+	t.Parallel()
+	cfg := strings.Join(oidcConfigArgs("acme", "https://auth.example.com/realms/acme", "s3cr3t"), " ")
+	for _, want := range []string{
+		"write auth/oidc-acme/config",
+		"oidc_discovery_url=https://auth.example.com/realms/acme",
+		"oidc_client_id=openbao",
+		"oidc_client_secret=s3cr3t",
+		"default_role=tenant-acme",
+	} {
+		if !strings.Contains(cfg, want) {
+			t.Fatalf("oidc config args missing %q: %s", want, cfg)
+		}
+	}
+	role := strings.Join(oidcRoleArgs("acme"), " ")
+	for _, want := range []string{
+		"write auth/oidc-acme/role/tenant-acme",
+		"token_policies=tenant-acme",
+		"allowed_redirect_uris=http://localhost:8250/oidc/callback",
+		"user_claim=sub",
+	} {
+		if !strings.Contains(role, want) {
+			t.Fatalf("oidc role args missing %q: %s", want, role)
+		}
+	}
+}
+
 func TestBaoRoleAndSecretIDParse(t *testing.T) {
 	t.Parallel()
 	var rid baoDataRoleID
