@@ -227,18 +227,13 @@ func (a *App) runBootstrap(ctx context.Context, printer ui.Printer, globals *glo
 	if err != nil {
 		return &ExitError{Code: 2, Err: err}
 	}
-	timezone := f.data.Deployment.Timezone
 	for _, ht := range hosts {
 		client, err := sshx.Dial(ctx, ht.Target, f.knownHosts)
 		if err != nil {
 			return dialError(ht.Name, err)
 		}
-		params := deploy.BootstrapParams{
-			IsEdge:   slices.Contains(ht.Host.Stacks, "base"),
-			Timezone: timezone,
-		}
 		printer.Info("%s: bootstrapping", ht.Name)
-		res, err := deploy.Bootstrap(ctx, client, params)
+		res, err := deploy.Bootstrap(ctx, client, f.bootstrapParams(ht))
 		_ = client.Close()
 		if err != nil {
 			return &ExitError{Code: 1, Err: fmt.Errorf("%s: %w", ht.Name, err), Printed: false}
@@ -451,10 +446,7 @@ func (a *App) runFleetApply(ctx context.Context, printer ui.Printer, globals *gl
 		}
 
 		printer.Info("%s: bootstrapping", ht.Name)
-		if _, err := deploy.Bootstrap(ctx, client, deploy.BootstrapParams{
-			IsEdge:   slices.Contains(ht.Host.Stacks, "base"),
-			Timezone: f.data.Deployment.Timezone,
-		}); err != nil {
+		if _, err := deploy.Bootstrap(ctx, client, f.bootstrapParams(ht)); err != nil {
 			_ = client.Close()
 			return &ExitError{Code: 1, Err: fmt.Errorf("%s: %w", ht.Name, err), Printed: false}
 		}
@@ -467,6 +459,20 @@ func (a *App) runFleetApply(ctx context.Context, printer ui.Printer, globals *gl
 	}
 	printer.Success("fleet applied")
 	return nil
+}
+
+// bootstrapParams derives the per-host bootstrap inputs, including an adaptive
+// swap size from the host's stack set and instance type.
+func (f *fleet) bootstrapParams(ht hostTarget) deploy.BootstrapParams {
+	itype := ht.Host.InstanceType
+	if itype == "" {
+		itype = "t4g.small"
+	}
+	return deploy.BootstrapParams{
+		IsEdge:   slices.Contains(ht.Host.Stacks, "base"),
+		Timezone: f.data.Deployment.Timezone,
+		SwapMB:   model.SwapForStacks(ht.Host.Stacks, f.catalog, itype),
+	}
 }
 
 const fleetMeshUser = "mksrv-fleet"

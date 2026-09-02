@@ -19,12 +19,13 @@ var bootstrapTemplate string
 
 // BootstrapVersion is bumped when the bootstrap script changes in a way that
 // must re-run on already-provisioned hosts.
-const BootstrapVersion = 8
+const BootstrapVersion = 9
 
 // BootstrapParams controls the rendered bootstrap script.
 type BootstrapParams struct {
 	IsEdge        bool
 	Timezone      string
+	SwapMB        int
 	MarkerVersion int
 }
 

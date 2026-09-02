@@ -64,6 +64,7 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 				identityHosts = append(identityHosts, hostName)
 			}
 		}
+		checkHostCapacity(data, report, hostName, host)
 	}
 	if len(baseHosts) != 1 {
 		semanticError(report, "deployment.yaml", "$.hosts", "stack.base.count", fmt.Sprintf("exactly one host must carry base; found %d (%s)", len(baseHosts), strings.Join(baseHosts, ", ")))
@@ -318,6 +319,38 @@ func parseSemver(value string) ([3]int, error) {
 
 func semanticError(report *Report, file, path, code, message string) {
 	addIssue(report, Issue{Severity: "error", File: file, Path: path, Code: code, Message: message})
+}
+
+// checkHostCapacity warns (not errors) when a host's assigned stacks' declared
+// min_ram_mb exceeds the instance memory. Unknown instance types are skipped.
+func checkHostCapacity(data *Data, report *Report, hostName string, host model.Host) {
+	if host.Provider != "aws" {
+		return
+	}
+	itype := host.InstanceType
+	if itype == "" {
+		itype = "t4g.small"
+	}
+	have, known := model.InstanceRAMMB(itype)
+	if !known {
+		return
+	}
+	want := 0
+	for _, s := range host.Stacks {
+		want += data.Catalog[s].Resources.MinRAMMB
+	}
+	if want <= have {
+		return
+	}
+	swap := model.SwapForStacks(host.Stacks, data.Catalog, itype)
+	addIssue(report, Issue{
+		Severity: "warning",
+		File:     "deployment.yaml",
+		Path:     "$.hosts." + hostName,
+		Code:     "capacity.overcommit",
+		Message: fmt.Sprintf("host %q stacks want ~%d MiB RAM; %s has %d MiB (+ %d MiB adaptive swap) — consider a larger instance_type",
+			hostName, want, itype, have, swap),
+	})
 }
 
 func contains(values []string, expected string) bool {

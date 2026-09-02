@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — M10
+
+- Capacity checks: `mksrv validate` now emits a `capacity.overcommit` **warning**
+  (validity unaffected) when an AWS host's stacks' `resources.min_ram_mb` sum
+  exceeds the instance memory. `internal/model` gains `InstanceRAMMB` (a table of
+  the t/m/c/r families) and `SwapForStacks`.
+- Adaptive swap: swap moves from first-boot Terraform (`swap_mb`, never
+  reconciled) to the re-runnable bootstrap script (`BootstrapVersion` 9). The
+  size is derived per host from `sum(min_ram_mb) + 512 headroom − instance RAM`,
+  rounded to 512, capped at `min(RAM, 4 GiB)`. `aws_instance` sets
+  `user_data_replace_on_change = false` so the swap removal is not a replacement.
+- New `docs/capacity.md` — the sizing model and a per-instance-type table for the
+  distributed profile.
+
 ## Unreleased — M9
 
 - Added `kind: cluster` stacks (ADR 0013): a stack that must be assigned to an
