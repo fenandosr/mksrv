@@ -186,6 +186,28 @@ resource "aws_volume_attachment" "data" {
   instance_id = aws_instance.host.id
 }
 
+# Dedicated gp3 volumes for stacks with a `storage:` block. Provisioned IOPS /
+# throughput only when set (gp3 baseline is 3000 / 125).
+resource "aws_ebs_volume" "extra" {
+  for_each = { for v in var.volumes : v.name => v }
+
+  availability_zone = aws_instance.host.availability_zone
+  size              = each.value.gb
+  type              = "gp3"
+  iops              = each.value.iops > 0 ? each.value.iops : null
+  throughput        = each.value.throughput > 0 ? each.value.throughput : null
+  encrypted         = true
+  tags              = merge(local.tags, { Name = "${local.name}-${each.value.name}", "mksrv:volume" = each.value.name })
+}
+
+resource "aws_volume_attachment" "extra" {
+  for_each = aws_ebs_volume.extra
+
+  device_name = { for v in var.volumes : v.name => v.device }[each.key]
+  volume_id   = each.value.id
+  instance_id = aws_instance.host.id
+}
+
 resource "aws_eip" "host" {
   domain   = "vpc"
   instance = aws_instance.host.id

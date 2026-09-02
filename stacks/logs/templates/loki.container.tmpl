@@ -11,7 +11,7 @@ PublishPort={{ .Host.TailnetIP }}:3100:3100
 {{- end }}
 PublishPort=127.0.0.1:3100:3100
 Volume=/var/lib/mksrv/stacks/logs/loki.yml:/etc/loki/loki.yml:Z,ro
-Volume=mksrv-logs-loki:/loki
+Volume={{ .Volume "chunks" }}:/loki:Z
 Exec=-config.file=/etc/loki/loki.yml
 HealthCmd=wget -q -O /dev/null http://127.0.0.1:3100/ready
 HealthInterval=15s

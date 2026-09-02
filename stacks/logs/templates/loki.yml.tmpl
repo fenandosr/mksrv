@@ -30,7 +30,7 @@ schema_config:
         period: 24h
 
 limits_config:
-  retention_period: 336h
+  retention_period: {{ .Retention.LogsHours }}h
   ingestion_rate_mb: 8
   ingestion_burst_size_mb: 16
   reject_old_samples: true

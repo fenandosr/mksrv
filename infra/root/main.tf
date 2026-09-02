@@ -101,6 +101,7 @@ module "aws_host" {
   stacks        = toset(each.value.stacks)
   timezone      = local.timezone
   key_name      = var.ssh_public_key != "" ? aws_key_pair.operator[0].key_name : ""
+  volumes       = try(var.host_volumes[each.key], [])
 
   advertise_exitnode = try(each.value.advertise_exitnode, false)
 }

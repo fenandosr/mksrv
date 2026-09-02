@@ -20,6 +20,12 @@ tailnet_ports: [9090, 3000, 9100, 8080]
 resources:
   min_ram_mb: 1024
   disk_gb: 20
+storage:
+  - name: tsdb
+    gb: 8
+    grows_with: metrics
+    from: mksrv-monitor-prometheus
+    unit: mksrv-prometheus.service
 templates:
   - src: templates/mksrv-monitor.network.tmpl
     dst: /etc/containers/systemd/mksrv-monitor.network

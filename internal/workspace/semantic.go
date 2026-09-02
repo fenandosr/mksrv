@@ -65,6 +65,7 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 			}
 		}
 		checkHostCapacity(data, report, hostName, host)
+		checkHostStorage(data, report, hostName, host)
 	}
 	if len(baseHosts) != 1 {
 		semanticError(report, "deployment.yaml", "$.hosts", "stack.base.count", fmt.Sprintf("exactly one host must carry base; found %d (%s)", len(baseHosts), strings.Join(baseHosts, ", ")))
@@ -351,6 +352,31 @@ func checkHostCapacity(data *Data, report *Report, hostName string, host model.H
 		Message: fmt.Sprintf("host %q stacks want ~%d MiB RAM; %s has %d MiB (+ %d MiB adaptive swap) — consider a larger instance_type",
 			hostName, want, itype, have, swap),
 	})
+}
+
+// checkHostStorage verifies a host's aggregated stack storage: unique volume
+// names and at most 10 (the /dev/sd[g-p] guest device range).
+func checkHostStorage(data *Data, report *Report, hostName string, host model.Host) {
+	if host.Provider == "existing" {
+		return
+	}
+	seen := map[string]string{}
+	total := 0
+	for _, stackName := range host.Stacks {
+		for _, v := range data.Catalog[stackName].Storage {
+			total++
+			if owner, dup := seen[v.Name]; dup {
+				semanticError(report, "deployment.yaml", "$.hosts."+hostName, "storage.name.collision",
+					fmt.Sprintf("stacks %q and %q both request a %q volume on host %q", owner, stackName, v.Name, hostName))
+			} else {
+				seen[v.Name] = stackName
+			}
+		}
+	}
+	if total > 10 {
+		semanticError(report, "deployment.yaml", "$.hosts."+hostName, "storage.count",
+			fmt.Sprintf("host %q needs %d dedicated volumes; the maximum is 10", hostName, total))
+	}
 }
 
 func contains(values []string, expected string) bool {

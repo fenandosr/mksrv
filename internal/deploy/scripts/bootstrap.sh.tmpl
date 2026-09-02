@@ -10,6 +10,31 @@ TIMEZONE="{{ .Timezone }}"
 
 log() { printf '[mksrv-bootstrap] %s\n' "$*"; }
 
+# Echo the /dev path of the NVMe disk whose EBS volume id matches $1 (Nitro
+# instances expose the volume id, dashes stripped, as the controller serial).
+mksrv_disk_by_serial() {
+  local want serial dev
+  want="$(printf '%s' "$1" | tr -dc 'A-Za-z0-9')"
+  for dev in /dev/nvme*n1; do
+    [ -e "$dev" ] || continue
+    serial="$(cat "/sys/block/$(basename "$dev")/device/serial" 2>/dev/null | tr -dc 'A-Za-z0-9')"
+    [ "$serial" = "$want" ] && { printf '%s' "$dev"; return 0; }
+  done
+  return 1
+}
+
+# Format (if blank) and fstab-mount $1 at $2.
+mksrv_mount_xfs() {
+  local dev="$1" mnt="$2" uuid
+  blkid "$dev" >/dev/null 2>&1 || { log "formatting $dev as xfs"; mkfs.xfs -q "$dev"; }
+  mkdir -p "$mnt"
+  uuid="$(blkid -s UUID -o value "$dev")"
+  grep -q "$uuid" /etc/fstab || echo "UUID=$uuid $mnt xfs defaults,noatime 0 2" >>/etc/fstab
+  systemctl daemon-reload
+  mount "$mnt"
+  log "mounted $dev ($uuid) at $mnt"
+}
+
 if [ "$(id -u)" -ne 0 ]; then
   echo "bootstrap must run as root" >&2
   exit 1
@@ -19,33 +44,27 @@ fi
 # 1. Data volume -> /var/lib/mksrv
 # ---------------------------------------------------------------------------
 if ! mountpoint -q "$MARKER_DIR"; then
-  root_disk="$(lsblk -ndo PKNAME "$(findmnt -no SOURCE /)" 2>/dev/null || true)"
   data_dev=""
-  while read -r name type mnt; do
-    [ "$type" = "disk" ] || continue
-    [ "$name" = "$root_disk" ] && continue
-    [ -n "$mnt" ] && continue
-    # skip disks that already hold partitions
-    if lsblk -nro NAME,TYPE "/dev/$name" | awk '$2=="part"{f=1} END{exit !f}'; then
-      continue
-    fi
-    data_dev="/dev/$name"
-    break
-  done < <(lsblk -nro NAME,TYPE,MOUNTPOINT)
+{{- if .DataVolumeID }}
+  data_dev="$(mksrv_disk_by_serial '{{ .DataVolumeID }}' || true)"
+{{- end }}
+  if [ -z "$data_dev" ]; then
+    root_disk="$(lsblk -ndo PKNAME "$(findmnt -no SOURCE /)" 2>/dev/null || true)"
+    while read -r name type mnt; do
+      [ "$type" = "disk" ] || continue
+      [ "$name" = "$root_disk" ] && continue
+      [ -n "$mnt" ] && continue
+      # skip disks that already hold partitions
+      if lsblk -nro NAME,TYPE "/dev/$name" | awk '$2=="part"{f=1} END{exit !f}'; then
+        continue
+      fi
+      data_dev="/dev/$name"
+      break
+    done < <(lsblk -nro NAME,TYPE,MOUNTPOINT)
+  fi
 
   if [ -n "$data_dev" ]; then
-    if ! blkid "$data_dev" >/dev/null 2>&1; then
-      log "formatting $data_dev as xfs"
-      mkfs.xfs -q "$data_dev"
-    fi
-    mkdir -p "$MARKER_DIR"
-    uuid="$(blkid -s UUID -o value "$data_dev")"
-    if ! grep -q "$uuid" /etc/fstab; then
-      echo "UUID=$uuid $MARKER_DIR xfs defaults,noatime 0 2" >>/etc/fstab
-    fi
-    systemctl daemon-reload
-    mount "$MARKER_DIR"
-    log "mounted $data_dev ($uuid) at $MARKER_DIR"
+    mksrv_mount_xfs "$data_dev" "$MARKER_DIR"
   else
     log "no separate data volume found; using root filesystem for $MARKER_DIR"
     mkdir -p "$MARKER_DIR"
@@ -75,6 +94,18 @@ elif [ "$TARGET_SWAP_MB" -eq 0 ] && [ -e /swapfile ]; then
   rm -f /swapfile
   sed -i '\#^/swapfile #d' /etc/fstab
 fi
+
+# ---------------------------------------------------------------------------
+# 1c. Dedicated stack volumes -> /var/lib/mksrv/vol/<name>
+# ---------------------------------------------------------------------------
+{{- range .Volumes }}
+vdev="$(mksrv_disk_by_serial '{{ .VolumeID }}' || true)"
+if [ -n "$vdev" ] && ! mountpoint -q "$MARKER_DIR/vol/{{ .Name }}"; then
+  mksrv_mount_xfs "$vdev" "$MARKER_DIR/vol/{{ .Name }}"
+elif [ -z "$vdev" ]; then
+  log "volume {{ .Name }} ({{ .VolumeID }}) is not attached yet; skipping"
+fi
+{{- end }}
 
 if [ -f "$MARKER" ]; then
   log "already bootstrapped ($MARKER); nothing to do"

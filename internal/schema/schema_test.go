@@ -125,6 +125,47 @@ apps: [{name: pg, image: ghcr.io/x/pg:1}]
 	if len(issues) == 0 {
 		t.Fatal("kind: bogus should fail")
 	}
+
+	_, issues, err = validator.ValidateYAML("stack.v1.json", []byte(base+
+		"storage:\n  - { name: pgdata, gb: 40, iops: 4000, throughput: 250 }\n"))
+	if err != nil {
+		t.Fatalf("ValidateYAML() error = %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("storage block should validate: %#v", issues)
+	}
+	_, issues, err = validator.ValidateYAML("stack.v1.json", []byte(base+
+		"storage:\n  - { name: x, gb: 40, iops: 500 }\n")) // iops below the gp3 floor
+	if err != nil {
+		t.Fatalf("ValidateYAML() error = %v", err)
+	}
+	if len(issues) == 0 {
+		t.Fatal("iops below 3000 should fail")
+	}
+}
+
+func TestValidateRetention(t *testing.T) {
+	t.Parallel()
+	doc := []byte(`
+version: 1
+engine: dev
+env: prod
+mgmt_cidr: auto
+aws: { region: us-east-1 }
+backend: { type: s3, bucket: mksrv-prod-tfstate, dynamodb_table: mksrv-prod-lock }
+dns: { provider: route53, root_domain: example.com, route53: { zone_id: Z0000000000000000000 } }
+identity: { keycloak_domain: auth.example.com, headscale_domain: vpn.example.com, acme_email: ops@example.com }
+retention: { metrics_days: 30, logs_days: 21, metrics_gb_per_day: 0.5 }
+hosts:
+  edge: { provider: aws, stacks: [base] }
+`)
+	_, issues, err := New().ValidateYAML("deployment.v1.json", doc)
+	if err != nil {
+		t.Fatalf("ValidateYAML() error = %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("retention block should validate: %#v", issues)
+	}
 }
 
 func TestValidateAcceptsAutoMgmtCIDR(t *testing.T) {

@@ -14,6 +14,12 @@ tailnet_ports: [3100]
 resources:
   min_ram_mb: 512
   disk_gb: 20
+storage:
+  - name: chunks
+    gb: 10
+    grows_with: logs
+    from: mksrv-logs-loki
+    unit: mksrv-loki.service
 templates:
   - src: templates/mksrv-logs.network.tmpl
     dst: /etc/containers/systemd/mksrv-logs.network

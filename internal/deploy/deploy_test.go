@@ -9,7 +9,13 @@ import (
 
 func TestRenderBootstrapEdge(t *testing.T) {
 	t.Parallel()
-	script, err := RenderBootstrap(BootstrapParams{IsEdge: true, Timezone: "America/Mexico_City", SwapMB: 1024})
+	script, err := RenderBootstrap(BootstrapParams{
+		IsEdge:       true,
+		Timezone:     "America/Mexico_City",
+		SwapMB:       1024,
+		DataVolumeID: "vol-0base",
+		Volumes:      []VolumeMount{{Name: "tsdb", VolumeID: "vol-0abc-123"}},
+	})
 	if err != nil {
 		t.Fatalf("RenderBootstrap() error = %v", err)
 	}
@@ -22,7 +28,10 @@ func TestRenderBootstrapEdge(t *testing.T) {
 		`GRAPHROOT="$MARKER_DIR/containers"`,
 		"semanage fcontext -a -e /var/lib/containers/storage",
 		`log_driver = "journald"`,
-		".bootstrap-v9",
+		"mksrv_disk_by_serial 'vol-0base'",
+		"mksrv_disk_by_serial 'vol-0abc-123'",
+		`$MARKER_DIR/vol/tsdb`,
+		".bootstrap-v10",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("bootstrap script missing %q", want)

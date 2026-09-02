@@ -20,3 +20,15 @@ variable "subnet_count" {
   type        = number
   default     = 1
 }
+
+variable "host_volumes" {
+  description = "Per-host dedicated EBS volumes, aggregated by the CLI from stacks' `storage:` blocks."
+  type = map(list(object({
+    name       = string
+    gb         = number
+    iops       = optional(number, 0)
+    throughput = optional(number, 0)
+    device     = string
+  })))
+  default = {}
+}
