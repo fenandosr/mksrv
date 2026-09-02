@@ -362,5 +362,14 @@ func ensureBaoEngines(ctx context.Context, printer ui.Printer, client *sshx.Clie
 		}
 		printer.Success("enabled AppRole auth")
 	}
-	return []string{"kv", "approle"}, nil
+
+	// Transit: encryption-as-a-service for PII columns. Per-tenant keys live at
+	// transit/keys/<id> and are created by `mksrv tenant apply`.
+	if _, ok := mounts["transit/"]; !ok {
+		if _, err := client.Run(ctx, baoExec(token, "secrets", "enable", "transit")); err != nil {
+			return nil, fmt.Errorf("enable transit: %w", err)
+		}
+		printer.Success("enabled Transit at transit/")
+	}
+	return []string{"kv", "approle", "transit"}, nil
 }

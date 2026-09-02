@@ -80,5 +80,14 @@ Per-tenant scoping landed: the descriptor is now `per_tenant: true` (a tenant
 opts in via its `stacks:` list, like `cache`), and `mksrv tenant apply`
 reconciles a `tenant-<id>` policy over `kv/tenants/<id>/*`, an AppRole bound to
 it, and the RoleID/SecretID in SSM
-(`/mksrv/<env>/openbao/approle_<id>_{role_id,secret_id}`). Transit (M14), OIDC
-(M15), and the consumer refactor (M16) remain out of scope.
+(`/mksrv/<env>/openbao/approle_<id>_{role_id,secret_id}`).
+
+## M14 update
+
+Transit engine landed. `mksrv openbao bootstrap` enables `transit/`; `mksrv
+tenant apply` creates a non-exportable `transit/keys/<id>` (`aes256-gcm96`,
+90-day auto-rotate) per consuming tenant and extends the `tenant-<id>` policy
+with `transit/{encrypt,decrypt,rewrap,datakey/plaintext}/<id>` (update) and
+`transit/keys/<id>` (read). Apps encrypt PII columns via the API — the key never
+leaves the cluster. OIDC (M15) and the consumer refactor (M16) remain out of
+scope.

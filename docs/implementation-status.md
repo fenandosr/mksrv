@@ -171,6 +171,13 @@ bootstrap`, and a `deployment.yaml` `topology` field.
   New `internal/cli/openbao_tenant.go` (`provisionOpenBaoTenants`), called next
   to `provisionRedis`.
 
-Still deferred: Transit engine + per-tenant keys for PII (M14), OIDC auth wired
-to Keycloak realms (M15), and a consumer stack reading DB credentials from
-OpenBao instead of raw SSM (M16).
+## M14 — implemented
+
+- Transit engine for PII encryption. `mksrv openbao bootstrap` enables
+  `transit/`; `mksrv tenant apply` creates `transit/keys/<id>` (`aes256-gcm96`,
+  non-exportable, 90-day auto-rotate) per consuming tenant and extends the
+  `tenant-<id>` policy with the `transit/{encrypt,decrypt,rewrap,datakey}/<id>`
+  paths. `tenantPolicyHCL` / `ensureBaoEngines` / `provisionOpenBaoTenants`.
+
+Still deferred: OIDC auth wired to Keycloak realms (M15), and a consumer stack
+reading DB credentials from OpenBao instead of raw SSM (M16).
