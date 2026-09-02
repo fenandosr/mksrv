@@ -54,3 +54,8 @@ A "minimum good dev" distributed fleet (~5 concurrent, 40 users): 3× `t4g.small
 core (Patroni + Bao + agents) + 2× `t4g.medium` app (Keycloak + Caddy +
 Prometheus + Grafana + Loki). ~$70–100/mo on-demand, ~$50/mo with a 1-year
 Savings Plan.
+
+Both `postgres` and `openbao` are `kind: cluster` (odd ≥ 3) and are meant to
+co-reside on the same 3 core hosts — one Patroni node and one OpenBao node per
+host. OpenBao adds ~40–120 MiB idle and a small `baoraft` gp3 volume; it does
+not change the instance sizing above.

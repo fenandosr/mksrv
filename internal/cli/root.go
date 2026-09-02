@@ -144,6 +144,7 @@ func (a *App) newRootCommand(opts *globalOptions) *cobra.Command {
 		a.newDeployCommand(opts),
 		a.newMeshCommand(opts),
 		a.newPostgresCommand(opts),
+		a.newOpenBaoCommand(opts),
 		a.newTenantCommand(opts),
 		a.newUsersCommand(opts),
 		a.newStatusCommand(opts),

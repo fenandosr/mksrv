@@ -17,7 +17,7 @@ func TestCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Catalog() error = %v", err)
 	}
-	for _, expected := range []string{"base", "identity", "mail", "database", "postgres", "cache", "logs", "security", "files", "analytics", "monitor"} {
+	for _, expected := range []string{"base", "identity", "mail", "database", "postgres", "openbao", "cache", "logs", "security", "files", "analytics", "monitor"} {
 		if _, exists := catalog[expected]; !exists {
 			t.Errorf("catalog missing %q", expected)
 		}

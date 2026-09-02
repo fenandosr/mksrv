@@ -33,6 +33,11 @@ output "volumes" {
   value       = { for k, v in aws_ebs_volume.extra : k => v.id }
 }
 
+output "openbao_kms_key_id" {
+  description = "KMS key ARN this host's OpenBao uses for auto-unseal (empty when not an openbao host)."
+  value       = var.openbao_kms_key_arn
+}
+
 output "security_group_id" {
   value = aws_security_group.host.id
 }

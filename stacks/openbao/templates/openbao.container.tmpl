@@ -1,0 +1,33 @@
+[Unit]
+Description=mksrv OpenBao node
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=mksrv-openbao
+Image={{ .Image "openbao" | default "ghcr.io/openbao/openbao:2.6.1" }}
+Network=mksrv-openbao.network
+AddCapability=IPC_LOCK
+Environment=BAO_ADDR=http://127.0.0.1:8200
+Exec=server -config=/openbao/config/openbao.hcl
+# Raft + cluster traffic to the other nodes over the VPC (intra_vpc SG rule),
+# API to operators and services over the tailnet; never 0.0.0.0.
+PublishPort={{ .Host.PrivateIP }}:8200:8200
+PublishPort={{ .Host.PrivateIP }}:8201:8201
+{{- if .Host.TailnetIP }}
+PublishPort={{ .Host.TailnetIP }}:8200:8200
+{{- end }}
+PublishPort=127.0.0.1:8200:8200
+Volume=/var/lib/mksrv/stacks/openbao/openbao.hcl:/openbao/config/openbao.hcl:Z,ro
+Volume={{ .Volume "baoraft" }}:/openbao/data:Z
+HealthCmd=sh -c 'bao status; test $? -ne 1'
+HealthInterval=30s
+HealthRetries=10
+HealthStartPeriod=15s
+
+[Service]
+Restart=always
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

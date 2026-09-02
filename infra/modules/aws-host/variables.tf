@@ -83,6 +83,12 @@ variable "volumes" {
   default = []
 }
 
+variable "openbao_kms_key_arn" {
+  description = "KMS key ARN for OpenBao auto-unseal; empty on hosts that do not carry the `openbao` stack."
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
