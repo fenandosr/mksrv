@@ -162,7 +162,15 @@ bootstrap`, and a `deployment.yaml` `topology` field.
   recovery keys + root token in SSM, waits for auto-unseal + raft quorum, and
   enables KV v2 + AppRole. `mksrv openbao status`. See ADR 0015.
 
-Still deferred (→ M13): per-tenant policies + AppRole (`role_id`/`secret_id` to
-SSM), Transit engine + per-tenant keys for PII, internal PKI, OIDC auth wired to
-Keycloak realms, `mksrv tenant apply` integration, and a consumer stack reading
-from OpenBao instead of raw SSM.
+## M13 — implemented (opt-in)
+
+- Per-tenant OpenBao: the `openbao` descriptor is now `per_tenant: true`; a
+  tenant opts in via its `stacks:` list. `mksrv tenant apply` reconciles a
+  `tenant-<id>` policy over `kv/tenants/<id>/*`, an AppRole bound to it, and the
+  RoleID/SecretID in SSM (`/mksrv/<env>/openbao/approle_<id>_{role_id,secret_id}`).
+  New `internal/cli/openbao_tenant.go` (`provisionOpenBaoTenants`), called next
+  to `provisionRedis`.
+
+Still deferred: Transit engine + per-tenant keys for PII (M14), OIDC auth wired
+to Keycloak realms (M15), and a consumer stack reading DB credentials from
+OpenBao instead of raw SSM (M16).

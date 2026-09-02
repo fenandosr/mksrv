@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — M13
+
+- Per-tenant OpenBao (ADR 0015 M13 update). The `openbao` stack is now
+  `per_tenant: true` — a tenant opts in by listing `openbao` in its `stacks:`.
+  `mksrv tenant apply` reconciles, per consuming tenant: a `tenant-<id>` policy
+  scoped to `kv/tenants/<id>/*`, an AppRole bound to it, and its RoleID/SecretID
+  in SSM (`/mksrv/<env>/openbao/approle_<id>_{role_id,secret_id}`, SecretID
+  written once). The reconcile no-ops until `mksrv openbao bootstrap` has run.
+
 ## Unreleased — M12
 
 - Added the `openbao` stack (opt-in, `kind: cluster`, ADR 0015): an OpenBao
