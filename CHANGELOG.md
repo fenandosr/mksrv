@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — M21
+
+- Added the `backup` stack (ADR 0018): restic → S3, daily on a systemd timer.
+  Captures `pg_dump` of every tenant DB from the Patroni primary, an OpenBao
+  raft snapshot, Keycloak realm exports, and the stack / podman volumes.
+  Terraform creates a versioned, encrypted `mksrv-<env>-backups` bucket and
+  grants the backup host's instance role S3 access (no keys — IMDS). The restic
+  password is a podman secret; the OpenBao token is a raft-snapshot-only
+  periodic token. `mksrv backup run` / `mksrv backup list`; restore is
+  documented (`docs/backup.md`). `mksrv tenant apply` writes `backup.env`.
+
 ## Unreleased — M20
 
 - `database` runs on the Patroni cluster when a `postgres` cluster is in the

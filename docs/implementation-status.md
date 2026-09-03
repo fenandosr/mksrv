@@ -237,3 +237,12 @@ mapping.
 
 Still deferred: Keycloak's own Postgres onto the cluster; folding
 `postgres bootstrap` into `apply`.
+
+## M21 — implemented (opt-in)
+
+- `backup` stack (ADR 0018): restic → S3 on a daily systemd timer — `pg_dump` of
+  tenant DBs, OpenBao raft snapshot, Keycloak realm exports, stack/podman
+  volumes. Terraform `aws_s3_bucket.backups` + a scoped instance-role policy;
+  restic password as a podman secret; a raft-snapshot-only periodic OpenBao
+  token. `internal/cli/backup.go` (`provisionBackup`, `mksrv backup run/list`).
+  Restore is documented (`docs/backup.md`), not automated.

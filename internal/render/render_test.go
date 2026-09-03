@@ -354,6 +354,39 @@ func TestStackRendersPostgresCluster(t *testing.T) {
 	}
 }
 
+func TestStackRendersBackup(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	ctx := baseContext()
+	ctx.Host.Name = "appd"
+	ctx.Host.Stacks = []string{"backup"}
+	files, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), catalog["backup"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(backup) error = %v", err)
+	}
+	sh := string(files["/var/lib/mksrv/stacks/backup/backup.sh"])
+	for _, want := range []string{
+		"pg_dump -Fc",
+		"bao operator raft snapshot save",
+		"partial-export?exportClients=true",
+		"restic forget --tag mksrv --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune",
+		"--secret mksrv-backup-restic_password,type=env,target=RESTIC_PASSWORD",
+	} {
+		if !strings.Contains(sh, want) {
+			t.Fatalf("backup.sh missing %q", want)
+		}
+	}
+	if svc := string(files["/etc/systemd/system/mksrv-backup.service"]); !strings.Contains(svc, "Type=oneshot") {
+		t.Fatalf("backup service wrong:\n%s", svc)
+	}
+	if tmr := string(files["/etc/systemd/system/mksrv-backup.timer"]); !strings.Contains(tmr, "OnCalendar=*-*-* 06:00:00") {
+		t.Fatalf("backup timer wrong:\n%s", tmr)
+	}
+}
+
 func TestStackRendersOpenBaoCluster(t *testing.T) {
 	t.Parallel()
 	catalog, err := engine.Catalog(schema.New())
