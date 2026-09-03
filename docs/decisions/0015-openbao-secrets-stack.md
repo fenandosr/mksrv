@@ -111,3 +111,13 @@ always have SSM access, and it avoids an ordering dependency on the cluster);
 the mirror is only rewritten when the value drifts. A `bao` agent sidecar or
 dynamic database credentials (a service container pulling secrets at runtime)
 are a possible future step, not part of this milestone.
+
+## M18 update
+
+Per-group access (ADR 0016). The single `tenant-<id>` policy/role is replaced by
+`tenant-<id>-admin` (full KV control + version destroy + Transit key rotate) and
+`tenant-<id>-dev` (read-only KV, read/write `kv/tenants/<id>/dev/*`, Transit
+encrypt/decrypt). The `oidc-<id>/` mount gets a role per group with
+`bound_claims` on `groups`: `tenant-<id>-dev` (dev **or** admin, the
+`default_role`) and `tenant-<id>-admin` (admin, `-role=`-selected). The AppRole
+is repointed to `tenant-<id>-dev`. `apps`/`vpn`-only members cannot log in.

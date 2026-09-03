@@ -8,25 +8,40 @@ import (
 	"testing"
 )
 
-func TestTenantPolicyHCL(t *testing.T) {
+func TestTenantPolicies(t *testing.T) {
 	t.Parallel()
-	got := tenantPolicyHCL("acme")
+	admin := tenantAdminPolicyHCL("acme")
 	for _, want := range []string{
 		`path "kv/data/tenants/acme/*" {`,
 		`capabilities = ["create", "read", "update", "delete", "list"]`,
-		`path "kv/metadata/tenants/acme/*" {`,
-		`capabilities = ["read", "list", "delete"]`,
-		`path "transit/encrypt/acme" {`,
-		`path "transit/decrypt/acme" {`,
-		`path "transit/datakey/plaintext/acme" {`,
-		`path "transit/keys/acme" {`,
+		`path "kv/destroy/tenants/acme/*" {`,
+		`path "transit/keys/acme/rotate" {`,
 	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("policy missing %q:\n%s", want, got)
+		if !strings.Contains(admin, want) {
+			t.Fatalf("admin policy missing %q:\n%s", want, admin)
 		}
 	}
-	if strings.Contains(got, "acme/other") || strings.Contains(got, "transit/encrypt/other") {
-		t.Fatalf("policy not scoped to one tenant:\n%s", got)
+
+	dev := tenantDevPolicyHCL("acme")
+	if !strings.Contains(dev, `path "kv/data/tenants/acme/dev/*" {`) ||
+		!strings.Contains(dev, `path "transit/encrypt/acme" {`) {
+		t.Fatalf("dev policy wrong:\n%s", dev)
+	}
+	// dev must not be able to destroy versions or rotate the key.
+	if strings.Contains(dev, "kv/destroy") || strings.Contains(dev, "keys/acme/rotate") {
+		t.Fatalf("dev policy is too permissive:\n%s", dev)
+	}
+	// the base KV grant is read-only for dev.
+	base := dev[strings.Index(dev, `"kv/data/tenants/acme/*"`):]
+	base = base[:strings.Index(base, "}")]
+	if strings.Contains(base, "create") || strings.Contains(base, "update") {
+		t.Fatalf("dev base KV grant should be read-only:\n%s", base)
+	}
+
+	for _, p := range []string{admin, dev} {
+		if strings.Contains(p, "tenants/other") || strings.Contains(p, "transit/encrypt/other") {
+			t.Fatalf("policy not scoped to one tenant:\n%s", p)
+		}
 	}
 }
 
@@ -36,24 +51,28 @@ func TestOIDCArgs(t *testing.T) {
 	for _, want := range []string{
 		"write auth/oidc-acme/config",
 		"oidc_discovery_url=https://auth.example.com/realms/acme",
-		"oidc_client_id=openbao",
 		"oidc_client_secret=s3cr3t",
-		"default_role=tenant-acme",
+		"default_role=tenant-acme-dev",
 	} {
 		if !strings.Contains(cfg, want) {
 			t.Fatalf("oidc config args missing %q: %s", want, cfg)
 		}
 	}
-	role := strings.Join(oidcRoleArgs("acme"), " ")
+
+	dev := strings.Join(oidcGroupRoleArgs("acme", "dev", []string{"dev", "admin"}, "tenant-acme-dev"), " ")
 	for _, want := range []string{
-		"write auth/oidc-acme/role/tenant-acme",
-		"token_policies=tenant-acme",
+		"write auth/oidc-acme/role/tenant-acme-dev",
+		`bound_claims={"groups":["dev","admin"]}`,
+		"token_policies=tenant-acme-dev",
 		"allowed_redirect_uris=http://localhost:8250/oidc/callback",
-		"user_claim=sub",
 	} {
-		if !strings.Contains(role, want) {
-			t.Fatalf("oidc role args missing %q: %s", want, role)
+		if !strings.Contains(dev, want) {
+			t.Fatalf("oidc dev role args missing %q: %s", want, dev)
 		}
+	}
+	adm := strings.Join(oidcGroupRoleArgs("acme", "admin", []string{"admin"}, "tenant-acme-admin"), " ")
+	if !strings.Contains(adm, `bound_claims={"groups":["admin"]}`) || !strings.Contains(adm, "token_policies=tenant-acme-admin") {
+		t.Fatalf("oidc admin role args wrong: %s", adm)
 	}
 }
 
