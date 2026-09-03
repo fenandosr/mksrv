@@ -106,6 +106,12 @@ func (s *Server) clientConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !claims.VPNEntitled() {
+		s.log.Info("token has no VPN group", "tenant", tenant.Tenant, "sub", claims.Subject, "groups", claims.Groups)
+		writeError(w, http.StatusForbidden, "your account is not in a VPN-enabled group (vpn, dev, or admin)")
+		return
+	}
+
 	preauth, err := s.headscale.PreAuthKey(ctx, tenant.HeadscaleUser, 15*time.Minute)
 	if err != nil {
 		s.log.Error("preauth key", "tenant", tenant.Tenant, "error", err)

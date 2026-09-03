@@ -16,7 +16,17 @@ type RealmSpec struct {
 	DisplayName string
 	Groups      []string
 	Clients     []ClientSpec
+	// AdminGroup, when set and present in Groups, is granted the realm's
+	// fine-grained user-management roles (manage-users, query-users,
+	// query-groups) so a tenant admin runs their own team from the Keycloak
+	// console without operator involvement.
+	AdminGroup string
 }
+
+// adminGroupRoles are the realm-management client roles the AdminGroup receives:
+// enough to manage the team, not enough to touch clients, mappers, or realm
+// settings.
+var adminGroupRoles = []string{"manage-users", "query-users", "query-groups", "view-users"}
 
 // ClientSpec describes an OIDC client.
 type ClientSpec struct {
@@ -29,6 +39,10 @@ type ClientSpec struct {
 	// (claim name -> string value) to the access token. Used to stamp the
 	// PostgREST `role` claim with the tenant's database role.
 	HardcodedClaims map[string]string
+	// GroupsClaim adds an oidc-group-membership-mapper so the token carries a
+	// flat `groups` array (the tenant RBAC groups). Consumed by configd (VPN
+	// entitlement) and OpenBao (per-group OIDC roles).
+	GroupsClaim bool
 }
 
 // RealmResult reports what EnsureRealm changed.
@@ -76,6 +90,12 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 		result.GroupsCreated = append(result.GroupsCreated, name)
 	}
 
+	if spec.AdminGroup != "" {
+		if err := c.grantTeamManagement(ctx, spec.Realm, spec.AdminGroup); err != nil {
+			return result, err
+		}
+	}
+
 	existingClients, err := c.clientUUIDs(ctx, spec.Realm)
 	if err != nil {
 		return result, err
@@ -116,13 +136,13 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 	return result, nil
 }
 
-// applyClaimMappers ensures each client's HardcodedClaims are present as
-// oidc-hardcoded-claim protocol mappers. It is additive and idempotent: a
-// mapper is created only when no mapper of the same name exists yet.
+// applyClaimMappers ensures each client's HardcodedClaims and GroupsClaim are
+// present as protocol mappers. It is additive and idempotent: a mapper is
+// created only when no mapper of the same name exists yet.
 func (c *Client) applyClaimMappers(ctx context.Context, realm string, clients []ClientSpec) error {
 	var uuids map[string]string
 	for _, cs := range clients {
-		if len(cs.HardcodedClaims) == 0 {
+		if len(cs.HardcodedClaims) == 0 && !cs.GroupsClaim {
 			continue
 		}
 		if uuids == nil {
@@ -145,13 +165,11 @@ func (c *Client) applyClaimMappers(ctx context.Context, realm string, clients []
 		for _, m := range existing {
 			have[m.Name] = true
 		}
+
+		mappers := make([]map[string]any, 0, len(cs.HardcodedClaims)+1)
 		for claim, value := range cs.HardcodedClaims {
-			name := "mksrv-" + claim
-			if have[name] {
-				continue
-			}
-			body := map[string]any{
-				"name":           name,
+			mappers = append(mappers, map[string]any{
+				"name":           "mksrv-" + claim,
 				"protocol":       "openid-connect",
 				"protocolMapper": "oidc-hardcoded-claim-mapper",
 				"config": map[string]string{
@@ -163,6 +181,25 @@ func (c *Client) applyClaimMappers(ctx context.Context, realm string, clients []
 					"userinfo.token.claim":       "false",
 					"access.tokenResponse.claim": "false",
 				},
+			})
+		}
+		if cs.GroupsClaim {
+			mappers = append(mappers, map[string]any{
+				"name":           "mksrv-groups",
+				"protocol":       "openid-connect",
+				"protocolMapper": "oidc-group-membership-mapper",
+				"config": map[string]string{
+					"claim.name":           "groups",
+					"full.path":            "false",
+					"access.token.claim":   "true",
+					"id.token.claim":       "true",
+					"userinfo.token.claim": "true",
+				},
+			})
+		}
+		for _, body := range mappers {
+			if have[body["name"].(string)] {
+				continue
 			}
 			if _, err := c.do(ctx, http.MethodPost, "/realms/"+realm+"/clients/"+uuid+"/protocol-mappers/models", body, nil); err != nil {
 				return err
@@ -170,6 +207,65 @@ func (c *Client) applyClaimMappers(ctx context.Context, realm string, clients []
 		}
 	}
 	return nil
+}
+
+// grantTeamManagement assigns the fine-grained realm-management roles in
+// adminGroupRoles to the named group, so its members manage the tenant's users
+// from the Keycloak console. Idempotent: an already-assigned role is skipped.
+func (c *Client) grantTeamManagement(ctx context.Context, realm, group string) error {
+	groups, err := c.groupIDs(ctx, realm)
+	if err != nil {
+		return err
+	}
+	gid, ok := groups[group]
+	if !ok {
+		return fmt.Errorf("admin group %q not found in realm %s", group, realm)
+	}
+	clients, err := c.clientUUIDs(ctx, realm)
+	if err != nil {
+		return err
+	}
+	rmUUID, ok := clients["realm-management"]
+	if !ok {
+		return fmt.Errorf("realm-management client not found in realm %s", realm)
+	}
+
+	var clientRoles []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if _, err := c.do(ctx, http.MethodGet, "/realms/"+realm+"/clients/"+rmUUID+"/roles", nil, &clientRoles); err != nil {
+		return err
+	}
+	byName := make(map[string]string, len(clientRoles))
+	for _, r := range clientRoles {
+		byName[r.Name] = r.ID
+	}
+
+	var assigned []struct {
+		Name string `json:"name"`
+	}
+	if _, err := c.do(ctx, http.MethodGet, "/realms/"+realm+"/groups/"+gid+"/role-mappings/clients/"+rmUUID, nil, &assigned); err != nil {
+		return err
+	}
+	has := make(map[string]bool, len(assigned))
+	for _, r := range assigned {
+		has[r.Name] = true
+	}
+
+	var want []map[string]string
+	for _, name := range adminGroupRoles {
+		id, ok := byName[name]
+		if !ok || has[name] {
+			continue
+		}
+		want = append(want, map[string]string{"id": id, "name": name})
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	_, err = c.do(ctx, http.MethodPost, "/realms/"+realm+"/groups/"+gid+"/role-mappings/clients/"+rmUUID, want, nil)
+	return err
 }
 
 // EnsureClient creates or updates a single OIDC client in an existing realm and

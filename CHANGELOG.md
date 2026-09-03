@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — M17
+
+- Per-tenant RBAC groups `admin` / `dev` / `apps` / `vpn` (ADR 0016, `docs/rbac.md`).
+  `mksrv tenant apply` creates the four groups, adds an
+  `oidc-group-membership-mapper` (`groups` claim) to the `cloud-it-vpn-desktop`
+  and `openbao` clients, and grants the `admin` group Keycloak's fine-grained
+  team-management roles (`manage-users` / `query-users` / `query-groups` /
+  `view-users`) so a tenant admin runs their own users from the console.
+- configd now requires a VPN-enabled group: `/v1/clientconfig` returns 403
+  unless the token's `groups` claim contains `vpn`, `dev`, or `admin`.
+  `keycloak.RealmSpec.AdminGroup` / `keycloak.ClientSpec.GroupsClaim`.
+- OpenBao per-group policies (M18) and the Postgres `<id>_app` role / group-derived
+  `role` claim (M19) are follow-ups; until then every authenticated tenant user
+  keeps `role: <id>`.
+
 ## Unreleased — M16
 
 - `mksrv tenant apply` mirrors each tenant's own Postgres and Redis connection

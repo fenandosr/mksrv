@@ -93,3 +93,34 @@ func TestPublicKeyPEM(t *testing.T) {
 		t.Fatalf("PublicKeyPEM() = %q, err=%v", pemStr, err)
 	}
 }
+
+func TestClaimsVPNEntitled(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		groups []string
+		want   bool
+	}{
+		{nil, false},
+		{[]string{"apps"}, false},
+		{[]string{"apps", "vpn"}, true},
+		{[]string{"dev"}, true},
+		{[]string{"admin"}, true},
+		{[]string{"other"}, false},
+	}
+	for _, tc := range cases {
+		if got := (Claims{Groups: tc.groups}).VPNEntitled(); got != tc.want {
+			t.Errorf("VPNEntitled(%v) = %v, want %v", tc.groups, got, tc.want)
+		}
+	}
+}
+
+func TestClaimsUnmarshalGroups(t *testing.T) {
+	t.Parallel()
+	var c Claims
+	if err := json.Unmarshal([]byte(`{"iss":"x","groups":["dev","vpn"]}`), &c); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Groups) != 2 || c.Groups[0] != "dev" {
+		t.Fatalf("groups = %v", c.Groups)
+	}
+}
