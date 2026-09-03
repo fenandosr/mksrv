@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — M20
+
+- `database` runs on the Patroni cluster when a `postgres` cluster is in the
+  fleet (ADR 0017), auto-detected from `.mksrv/postgres.json`. Standalone
+  Postgres is kept for single-host / `local` dev. `provisionDatabases` targets
+  the Patroni primary; PostgREST connects with a libpq multi-host DSN
+  (`target_session_attrs=read-write`); pgAdmin registers the primary IP.
+- A stack template that renders to whitespace is now dropped
+  (`deploy.dropEmpty`), so `postgres.container.tmpl` self-disables when a cluster
+  exists.
+- `stacks/postgres` `pgdata` volume: 40 GiB @ 4000 IOPS → 20 GiB baseline.
+
 ## Unreleased — M19
 
 - Postgres access per RBAC group (ADR 0016), completing the model. `mksrv

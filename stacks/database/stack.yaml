@@ -17,7 +17,7 @@ secrets:
   - /mksrv/{env}/database/pgadmin_pass
 tailnet_ports: [5432, 5050, 3010]
 resources:
-  min_ram_mb: 1024
+  min_ram_mb: 768
   disk_gb: 20
 templates:
   - src: templates/mksrv-database.network.tmpl
