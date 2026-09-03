@@ -33,8 +33,11 @@ users:
 | Change what's published (`forwards`, `dns`, mesh nodes, `stacks`) | ✅³ | — | — | — |
 
 ¹ subject to the tenant's Headscale ACL.
-² `apps` gets `SELECT` by default; the dev opens `INSERT`/`UPDATE`/`DELETE`
-per-table with `GRANT` / RLS (M19).
+² `apps` requests land on the `<id>_app` Postgres role, which has `SELECT` on
+`app` by default; the dev opens `INSERT`/`UPDATE`/`DELETE` per-table with `GRANT`
+/ RLS. PostgREST picks the role from the token's `groups` claim via a
+`db-pre-request` function (`admin`/`dev` → `<id>`, `apps` → `<id>_app`,
+token-less → `<id>_anon`).
 ³ via a reviewed PR to `tenants/<id>.yaml` — the admin is the CODEOWNER; there is
 no runtime "publish" API.
 
@@ -61,7 +64,7 @@ clients, protocol mappers, or realm settings.
   management. *Done.*
 - **M18** — OpenBao per-group policies (`tenant-<id>-admin` / `-dev`) and OIDC
   roles bound on the `groups` claim. *Done.*
-- **M19** — Postgres `<id>_app` role; `role` claim from group membership.
+- **M19** — Postgres `<id>_app` role; PostgREST resolves the effective role from
+  the token's `groups` claim (`db-pre-request` function). *Done.*
 
-Until M19 the `role` claim is `<id>` for every authenticated tenant user, so
-`apps` users still have full DB access.
+The RBAC model is fully enforced across Keycloak, the VPN, OpenBao, and Postgres.

@@ -20,6 +20,8 @@ Environment=PGRST_DB_POOL=4
 Environment=PGRST_DB_CONFIG=false
 Environment=PGRST_SERVER_PORT=3000
 Environment=PGRST_JWT_ROLE_CLAIM_KEY=.role
+# db-pre-request narrows {{ .Tenant.ID }}_web to <id> / <id>_app / <id>_anon by the token's RBAC groups.
+Environment=PGRST_DB_PRE_REQUEST=app.pgrst_pre_request
 Environment=PGRST_OPENAPI_SERVER_PROXY_URI=https://{{ .Secrets.rest_fqdn }}
 Secret=mksrv-database-postgrest-{{ .Tenant.ID }}-dburi,type=env,target=PGRST_DB_URI
 Secret=mksrv-database-postgrest-{{ .Tenant.ID }}-jwt,type=env,target=PGRST_JWT_SECRET

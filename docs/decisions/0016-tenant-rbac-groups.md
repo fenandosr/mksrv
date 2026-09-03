@@ -48,13 +48,20 @@ Four additive groups per tenant realm. A user is in any combination.
   token carries one of `{vpn, dev, admin}`. Image rebuilt by CI on merge.
 - **OpenBao** (M18): per-group OIDC roles + policies bound on the `groups` claim,
   replacing the single `tenant-<id>` role.
-- **Postgres / PostgREST** (M19): a `<id>_app` role (SELECT default), and the
-  `role` claim derived from group membership instead of the hardcoded `<id>`.
+- **Postgres / PostgREST** (M19): roles `<id>` (dev/admin), `<id>_app` (SELECT
+  default + dev-granted writes), `<id>_anon` (token-less), and `<id>_web` — the
+  claim PostgREST impersonates (`role: <id>_web`, one hardcoded mapper, no
+  conditionals in Keycloak). `<id>_web` is `NOINHERIT` and a member of the other
+  three; a `db-pre-request` plpgsql function reads `request.jwt.claims->groups`
+  and `SET LOCAL ROLE`s to `<id>` / `<id>_app` / `<id>_anon`. The group→role
+  logic lives in SQL, not Keycloak.
 
 ## Consequences
 
 - `*.users.yaml`: `both` → `admin` for the existing tenant-admin seed users.
-- The `role` claim still resolves to `<id>` for everyone until M19; `apps` users
-  keep full DB access in the interim.
+- On an **already-provisioned** realm the `mksrv-role` hardcoded-claim mapper
+  keeps its old `<id>` value (`applyClaimMappers` is create-if-absent) — delete
+  it once so `tenant apply` recreates it as `<id>_web`. A fresh install is
+  unaffected.
 - Deferred: a self-service `mksrv publish` command; Grafana OIDC role mapping;
   group→policy scoping finer than the four groups.

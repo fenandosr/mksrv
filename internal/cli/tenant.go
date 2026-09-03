@@ -146,7 +146,7 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 				ClientID:        vpnClientID,
 				Public:          true,
 				RedirectURIs:    vpnRedirectURIs,
-				HardcodedClaims: map[string]string{"role": id},
+				HardcodedClaims: map[string]string{"role": id + "_web"},
 				GroupsClaim:     true,
 			},
 			{ClientID: configdClientID, Public: false, RedirectURIs: []string{}},

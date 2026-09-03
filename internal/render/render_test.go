@@ -140,6 +140,7 @@ func TestStackRendersDataPlane(t *testing.T) {
 		"PublishPort=10.20.0.168:3010:3000",
 		"PublishPort=100.64.0.1:3010:3000",
 		"PGRST_DB_ANON_ROLE=bitabit_anon",
+		"PGRST_DB_PRE_REQUEST=app.pgrst_pre_request",
 		"mksrv-database-postgrest-bitabit-jwt,type=env,target=PGRST_JWT_SECRET",
 	} {
 		if !strings.Contains(pgrst, want) {
