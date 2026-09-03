@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Fix: the `cache` stack's `users.acl` seed carried a leading comment block.
+  Redis's external `aclfile` parser accepts only `user …` and blank lines, so
+  Redis aborted startup ("Aborting Redis startup because of ACL errors … should
+  start with user keyword"). The seed template is now comment-free.
+- Fix (infra): the `aws-host` module's `openbao_kms` / `backup_s3` IAM policy
+  `count` depended on the KMS-key / S3-bucket ARN (unknown until apply), which
+  broke the first real `apply` of a fleet with `openbao` assigned. `count` now
+  keys off plan-time booleans (`openbao_kms_enabled` / `backup_enabled`).
+
 ## v0.1.0 — 2026-09-03
 
 First tagged release. Everything below (M0–M21) ships in `v0.1.0`: the CLI +

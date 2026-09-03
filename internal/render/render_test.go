@@ -167,6 +167,9 @@ func TestStackRendersDataPlane(t *testing.T) {
 	}
 	if acl := string(cacheFiles["/var/lib/mksrv/stacks/cache/users.acl"]); !strings.Contains(acl, "user mksrv on >adminpw ~* &* +@all") {
 		t.Fatalf("cache users.acl seed wrong:\n%s", acl)
+	} else if strings.Contains(acl, "#") {
+		// Redis's aclfile parser rejects comment lines and aborts startup.
+		t.Fatalf("cache users.acl must not contain comments:\n%s", acl)
 	}
 	if unit := string(cacheFiles["/etc/containers/systemd/mksrv-redis.container"]); !strings.Contains(unit, "PublishPort=100.64.0.1:6379:6379") {
 		t.Fatalf("redis unit missing tailnet publish:\n%s", unit)
