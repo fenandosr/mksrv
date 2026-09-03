@@ -133,8 +133,9 @@ resource "aws_iam_role_policy_attachment" "ssm_core" {
 }
 
 # OpenBao auto-unseal: only hosts carrying the `openbao` stack receive this grant.
+# `count` keys off the plan-time boolean, not the (apply-time) key ARN.
 resource "aws_iam_role_policy" "openbao_kms" {
-  count       = var.openbao_kms_key_arn != "" ? 1 : 0
+  count       = var.openbao_kms_enabled ? 1 : 0
   name_prefix = "mksrv-openbao-kms-"
   role        = aws_iam_role.host.id
   policy = jsonencode({
@@ -149,7 +150,7 @@ resource "aws_iam_role_policy" "openbao_kms" {
 
 # Backups: only hosts carrying the `backup` stack can read/write the restic bucket.
 resource "aws_iam_role_policy" "backup_s3" {
-  count       = var.backup_bucket_arn != "" ? 1 : 0
+  count       = var.backup_enabled ? 1 : 0
   name_prefix = "mksrv-backup-s3-"
   role        = aws_iam_role.host.id
   policy = jsonencode({

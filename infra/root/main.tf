@@ -179,7 +179,9 @@ module "aws_host" {
   key_name      = var.ssh_public_key != "" ? aws_key_pair.operator[0].key_name : ""
   volumes       = try(var.host_volumes[each.key], [])
 
+  openbao_kms_enabled = contains(each.value.stacks, "openbao") && length(local.openbao_hosts) > 0
   openbao_kms_key_arn = contains(each.value.stacks, "openbao") && length(local.openbao_hosts) > 0 ? aws_kms_key.openbao[0].arn : ""
+  backup_enabled      = contains(each.value.stacks, "backup") && length(local.backup_hosts) > 0
   backup_bucket_arn   = contains(each.value.stacks, "backup") && length(local.backup_hosts) > 0 ? aws_s3_bucket.backups[0].arn : ""
 
   advertise_exitnode = try(each.value.advertise_exitnode, false)

@@ -89,10 +89,22 @@ variable "openbao_kms_key_arn" {
   default     = ""
 }
 
+variable "openbao_kms_enabled" {
+  description = "Whether this host carries `openbao` and a fleet KMS key exists (known at plan time)."
+  type        = bool
+  default     = false
+}
+
 variable "backup_bucket_arn" {
   description = "S3 bucket ARN for restic backups; empty on hosts that do not carry the `backup` stack."
   type        = string
   default     = ""
+}
+
+variable "backup_enabled" {
+  description = "Whether this host carries `backup` and a fleet backups bucket exists (known at plan time)."
+  type        = bool
+  default     = false
 }
 
 variable "tags" {
