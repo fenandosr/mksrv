@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.0 — 2026-09-03
+
+First tagged release. Everything below (M0–M21) ships in `v0.1.0`: the CLI +
+embedded Terraform, the stack catalog (`base`, `identity`, `mail`, `database`,
+`postgres`, `openbao`, `cache`, `monitor`, `logs`, `security`, `backup`, and the
+`files` / `analytics` descriptors), the mesh / configd VPN broker, per-tenant
+RBAC (`admin` / `dev` / `apps` / `vpn`), HA Postgres + OpenBao clusters, per-stack
+storage + retention, and restic backups. `mksrv-configd` and `mksrv-postgres`
+images are pinned to `:v0.1.0`.
+
 ## Unreleased — M21
 
 - Added the `backup` stack (ADR 0018): restic → S3, daily on a systemd timer.

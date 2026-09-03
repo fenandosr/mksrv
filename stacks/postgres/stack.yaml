@@ -6,7 +6,7 @@ targets: [cloud]
 per_tenant: false
 apps:
   - name: postgres
-    image: ghcr.io/fenandosr/mksrv-postgres:latest
+    image: ghcr.io/fenandosr/mksrv-postgres:v0.1.0
 networks: [mksrv-postgres]
 secrets:
   - /mksrv/{env}/postgres/superpass
