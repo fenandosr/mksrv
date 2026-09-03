@@ -1,0 +1,9 @@
+[Unit]
+Description=mksrv backup (restic)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/var/lib/mksrv/stacks/backup/backup.sh
+TimeoutStartSec=3600

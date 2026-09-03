@@ -24,6 +24,7 @@ A `storage:` block requests dedicated EBS volumes mounted at
 | `monitor` | service | cloud/local | yes | identity | implemented |
 | `logs` | service | cloud/local | yes | monitor | implemented (opt-in) |
 | `security` | service | cloud/local | no | logs, monitor | implemented (opt-in) |
+| `backup` | service | cloud | no | — | implemented (opt-in) |
 
 Templates and hooks are intentionally empty in M0. Their implementation belongs
 to M2–M5 and must be golden-tested.

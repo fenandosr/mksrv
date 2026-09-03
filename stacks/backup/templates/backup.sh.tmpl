@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# mksrv backup — rendered by the `backup` stack, run as root by mksrv-backup.service.
+# Non-secret config comes from backup.env (written by `mksrv tenant apply`); the
+# restic repo password is a podman secret; S3 credentials come from the instance
+# role over IMDS (--network host). Every collection step is best-effort so one
+# failure never skips the restic run.
+set -uo pipefail
+
+ENV_FILE=/var/lib/mksrv/stacks/backup/backup.env
+STAGE=/var/lib/mksrv/backup-staging
+RESTIC_IMAGE="docker.io/restic/restic:0.19.1"
+PG_IMAGE="docker.io/library/postgres:16"
+BAO_IMAGE="ghcr.io/openbao/openbao:2.6.1"
+
+log() { printf '[mksrv-backup] %s\n' "$*"; }
+
+if [ ! -f "$ENV_FILE" ]; then
+  log "missing $ENV_FILE — run 'mksrv tenant apply' first"
+  exit 1
+fi
+# shellcheck disable=SC1090
+. "$ENV_FILE"   # RESTIC_REPOSITORY PG_PRIMARY_IP PG_SUPERPASS BAO_ADDR BAO_TOKEN KC_URL KC_ADMIN_PASSWORD REALMS DBS
+
+restic() {
+  podman run --rm --network host \
+    --secret mksrv-backup-restic_password,type=env,target=RESTIC_PASSWORD \
+    -e RESTIC_REPOSITORY="$RESTIC_REPOSITORY" \
+    -v "$STAGE":/stage:ro -v /var/lib/mksrv/vol:/vol:ro \
+    -v /var/lib/mksrv/containers/volumes:/podvol:ro \
+    "$RESTIC_IMAGE" "$@"
+}
+
+rm -rf "$STAGE"; mkdir -p "$STAGE"/pg "$STAGE"/bao "$STAGE"/keycloak
+
+# 1. Postgres logical dumps from the cluster primary.
+if [ -n "${PG_PRIMARY_IP:-}" ] && [ -n "${PG_SUPERPASS:-}" ]; then
+  for db in app ${DBS:-}; do
+    log "pg_dump $db"
+    if ! podman run --rm --network host -e PGPASSWORD="$PG_SUPERPASS" "$PG_IMAGE" \
+        pg_dump -Fc -h "$PG_PRIMARY_IP" -U postgres "$db" > "$STAGE/pg/$db.dump" 2>>"$STAGE/pg/errors.log"; then
+      log "pg_dump $db failed (see errors.log)"
+    fi
+  done
+fi
+
+# 2. OpenBao raft snapshot (backup-scoped token).
+if [ -n "${BAO_ADDR:-}" ] && [ -n "${BAO_TOKEN:-}" ]; then
+  log "openbao raft snapshot"
+  if ! podman run --rm --network host -e BAO_ADDR="$BAO_ADDR" -e BAO_TOKEN="$BAO_TOKEN" "$BAO_IMAGE" \
+      bao operator raft snapshot save - > "$STAGE/bao/raft.snap" 2>>"$STAGE/bao/errors.log"; then
+    log "raft snapshot failed"
+  fi
+fi
+
+# 3. Keycloak realm exports (partial-export via the Admin API).
+if [ -n "${KC_URL:-}" ] && [ -n "${KC_ADMIN_PASSWORD:-}" ]; then
+  tok=$(curl -fsS --max-time 20 -d client_id=admin-cli -d username=admin \
+        -d "password=$KC_ADMIN_PASSWORD" -d grant_type=password \
+        "$KC_URL/realms/master/protocol/openid-connect/token" 2>/dev/null \
+        | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+  if [ -n "$tok" ]; then
+    for r in master ${REALMS:-}; do
+      log "keycloak export $r"
+      curl -fsS --max-time 60 -H "Authorization: Bearer $tok" \
+        "$KC_URL/admin/realms/$r/partial-export?exportClients=true&exportGroupsAndRoles=true" \
+        > "$STAGE/keycloak/$r.json" 2>>"$STAGE/keycloak/errors.log" || log "export $r failed"
+    done
+  else
+    log "keycloak admin token request failed"
+  fi
+fi
+
+# 4. restic snapshot: the staged dumps + the dedicated stack volumes + podman volumes.
+if ! restic backup --tag mksrv --host "$(hostname -s)" /stage /vol /podvol; then
+  log "restic backup failed"
+  exit 1
+fi
+
+# 5. retention.
+restic forget --tag mksrv --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune \
+  || log "restic forget failed"
+
+rm -rf "$STAGE"/pg "$STAGE"/bao "$STAGE"/keycloak
+log "done"
