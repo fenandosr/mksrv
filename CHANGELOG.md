@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — M18
+
+- OpenBao access is now per RBAC group (ADR 0016). `mksrv tenant apply` writes
+  two policies per tenant — `tenant-<id>-admin` (full KV control incl. version
+  destroy, Transit key rotate) and `tenant-<id>-dev` (read-only KV, read/write
+  `kv/tenants/<id>/dev/*`, Transit encrypt/decrypt) — and two OIDC roles bound
+  on the `groups` claim: `tenant-<id>-dev` (`dev` or `admin`, the default) and
+  `tenant-<id>-admin` (`admin`, `-role=`-selected). The AppRole (services) is
+  repointed to `tenant-<id>-dev`. `apps`/`vpn`-only members can no longer log
+  into OpenBao. The pre-RBAC `tenant-<id>` policy/role is removed best-effort.
+
 ## Unreleased — M17
 
 - Per-tenant RBAC groups `admin` / `dev` / `apps` / `vpn` (ADR 0016, `docs/rbac.md`).

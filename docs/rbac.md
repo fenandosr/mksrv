@@ -27,8 +27,8 @@ users:
 | Reach tenant mesh nodes (SSH/mosh to login nodes, internal APIs) | ✅ | ✅ | — | ✅¹ |
 | Postgres `db_<id>` — DDL + read/write | ✅ | ✅ | — | — |
 | Postgres `db_<id>` — read + granted writes | ✅ | ✅ | ✅² | — |
-| OpenBao — read `kv/tenants/<id>/*` | ✅ | ✅ | — | — |
-| OpenBao — write all, transit, rotate | ✅ | — | — | — |
+| OpenBao — read `kv/tenants/<id>/*`, write `kv/…/dev/*`, transit enc/dec | ✅ | ✅ | — | — |
+| OpenBao — write all, version destroy, key rotate | ✅ | — | — | — |
 | Manage the tenant's Keycloak users | ✅ | — | — | — |
 | Change what's published (`forwards`, `dns`, mesh nodes, `stacks`) | ✅³ | — | — | — |
 
@@ -59,7 +59,8 @@ clients, protocol mappers, or realm settings.
 
 - **M17** — groups, `groups` token claim, configd VPN gate, Keycloak team
   management. *Done.*
-- **M18** — OpenBao per-group policies/roles.
+- **M18** — OpenBao per-group policies (`tenant-<id>-admin` / `-dev`) and OIDC
+  roles bound on the `groups` claim. *Done.*
 - **M19** — Postgres `<id>_app` role; `role` claim from group membership.
 
 Until M19 the `role` claim is `<id>` for every authenticated tenant user, so

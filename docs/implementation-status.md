@@ -208,6 +208,13 @@ pulling secrets at runtime).
   {vpn,dev,admin}`. `RealmSpec.AdminGroup`, `ClientSpec.GroupsClaim`,
   `Claims.VPNEntitled`.
 
-Still deferred: OpenBao per-group policies/roles (M18); Postgres `<id>_app` role
-+ group-derived `role` claim (M19); self-service `mksrv publish`; Grafana OIDC
-role mapping.
+## M18 — implemented
+
+- OpenBao per-group access (ADR 0016). `provisionOpenBaoTenants` writes
+  `tenant-<id>-admin` / `tenant-<id>-dev` policies and two `bound_claims` OIDC
+  roles instead of the single `tenant-<id>`. AppRole repointed to the dev policy;
+  the pre-RBAC policy/role removed best-effort. `tenant{Admin,Dev}PolicyHCL`,
+  `oidcGroupRoleArgs`.
+
+Still deferred: Postgres `<id>_app` role + group-derived `role` claim (M19);
+self-service `mksrv publish`; Grafana OIDC role mapping.

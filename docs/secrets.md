@@ -79,15 +79,18 @@ stacks: [database, monitor, cache, openbao]
 
 `mksrv tenant apply <id>` then reconciles, idempotently:
 
-- a policy **`tenant-<id>`** granting access to `kv/tenants/<id>/*` and the
-  tenant's own Transit key, and nothing else;
-- an **AppRole `tenant-<id>`** bound to that policy (`token_ttl 1h`,
-  `token_max_ttl 4h`) — for services;
-- the AppRole's RoleID and SecretID in SSM;
+- two policies scoped to the tenant (ADR 0016 RBAC groups):
+  - **`tenant-<id>-admin`** — full control of `kv/tenants/<id>/*` (incl. version
+    destroy) and the Transit key (incl. rotate);
+  - **`tenant-<id>-dev`** — read-only on `kv/tenants/<id>/*`, read/write on
+    `kv/tenants/<id>/dev/*`, Transit encrypt/decrypt;
+- an **AppRole `tenant-<id>`** bound to `tenant-<id>-dev` (`token_ttl 1h`) — for
+  services; its RoleID and SecretID land in SSM;
 - a **Transit key `transit/keys/<id>`** (`aes256-gcm96`, non-exportable,
   auto-rotated every 90 days) for PII-column encryption;
-- an **OIDC auth mount `oidc-<id>/`** wired to the tenant's Keycloak realm — for
-  humans;
+- an **OIDC auth mount `oidc-<id>/`** with two roles: `tenant-<id>-dev` (bound to
+  the `dev` or `admin` group claim, the `default_role`) and `tenant-<id>-admin`
+  (bound to `admin`, requested with `-role=`);
 - the tenant's own **connection secrets mirrored** into `kv/tenants/<id>/database`
   and `kv/tenants/<id>/cache` (when the tenant also consumes those stacks), so
   the team reads them with their own token instead of asking the operator.
@@ -138,19 +141,23 @@ re-keys new writes; `transit/rewrap/acme` upgrades old ciphertexts.
 ## Human login (OIDC)
 
 `mksrv tenant apply` adds a confidential `openbao` client to the tenant's
-Keycloak realm and an `oidc-<id>/` auth mount on the cluster. Any member of the
-realm logs in and gets the `tenant-<id>` policy — the realm is the isolation
-boundary:
+Keycloak realm and an `oidc-<id>/` auth mount with a role per RBAC group
+(ADR 0016). The role is chosen from the token's `groups` claim.
 
 ```
 export BAO_ADDR=http://<node-tailnet-ip>:8200
+
+# dev or admin -> read secrets, write kv/tenants/<id>/dev/*, transit enc/dec
 bao login -method=oidc -path=oidc-<id>
-# opens the browser to Keycloak, returns on http://localhost:8250/oidc/callback
-bao kv get kv/tenants/<id>/db
+
+# admin only -> full control incl. version destroy and key rotation
+bao login -method=oidc -path=oidc-<id> -role=tenant-<id>-admin
+
+bao kv get kv/tenants/<id>/database
 ```
 
-Refining access by realm group (a subset of the team gets write, the rest read)
-is a later enhancement; today every realm member gets the full tenant policy.
+A user in `apps` / `vpn` only (not `dev` or `admin`) cannot log in — the role's
+`bound_claims` reject the token.
 
 The mksrv reconcilers themselves still read from SSM (they always have SSM
 access and it avoids an ordering dependency on the cluster). Having a service

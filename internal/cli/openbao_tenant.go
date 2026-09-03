@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/fenandosr/mksrv/internal/keycloak"
 	sshx "github.com/fenandosr/mksrv/internal/ssh"
@@ -17,25 +18,31 @@ import (
 const openbaoOIDCRedirect = "http://localhost:8250/oidc/callback"
 
 // oidcConfigArgs builds the `bao write auth/oidc-<id>/config ...` arguments.
+// A bare `bao login` uses the dev role; admins pass `-role=tenant-<id>-admin`.
 func oidcConfigArgs(id, discoveryURL, clientSecret string) []string {
 	return []string{
 		"write", "auth/oidc-" + id + "/config",
 		"oidc_discovery_url=" + discoveryURL,
 		"oidc_client_id=" + openbaoClientID,
 		"oidc_client_secret=" + clientSecret,
-		"default_role=tenant-" + id,
+		"default_role=tenant-" + id + "-dev",
 	}
 }
 
-// oidcRoleArgs builds the `bao write auth/oidc-<id>/role/tenant-<id> ...`
-// arguments: any authenticated member of the tenant realm gets the tenant
-// policy (the realm boundary is the isolation).
-func oidcRoleArgs(id string) []string {
+// oidcGroupRoleArgs builds a per-group OIDC role: only realm members whose
+// `groups` claim contains one of boundGroups can assume it, and it grants
+// exactly `policy`.
+func oidcGroupRoleArgs(id, suffix string, boundGroups []string, policy string) []string {
+	quoted := make([]string, len(boundGroups))
+	for i, g := range boundGroups {
+		quoted[i] = `"` + g + `"`
+	}
 	return []string{
-		"write", "auth/oidc-" + id + "/role/tenant-" + id,
+		"write", "auth/oidc-" + id + "/role/tenant-" + id + "-" + suffix,
 		"user_claim=sub",
 		"allowed_redirect_uris=" + openbaoOIDCRedirect,
-		"token_policies=tenant-" + id,
+		"bound_claims={\"groups\":[" + strings.Join(quoted, ",") + "]}",
+		"token_policies=" + policy,
 		"token_ttl=1h", "token_max_ttl=4h",
 		"oidc_scopes=openid",
 	}
@@ -86,14 +93,24 @@ func mirrorTenantSecret(ctx context.Context, client *sshx.Client, token, id, nam
 	return nil
 }
 
-// tenantPolicyHCL is the OpenBao policy for tenant id: full access to its own
-// KV v2 subtree and Transit key, and nothing else.
-func tenantPolicyHCL(id string) string {
+// tenantAdminPolicyHCL is the `admin` group's OpenBao policy: full control of
+// the tenant's KV subtree and Transit key, including version destroy and key
+// rotation.
+func tenantAdminPolicyHCL(id string) string {
 	return fmt.Sprintf(`path "kv/data/tenants/%[1]s/*" {
   capabilities = ["create", "read", "update", "delete", "list"]
 }
 path "kv/metadata/tenants/%[1]s/*" {
   capabilities = ["read", "list", "delete"]
+}
+path "kv/delete/tenants/%[1]s/*" {
+  capabilities = ["update"]
+}
+path "kv/undelete/tenants/%[1]s/*" {
+  capabilities = ["update"]
+}
+path "kv/destroy/tenants/%[1]s/*" {
+  capabilities = ["update"]
 }
 path "transit/encrypt/%[1]s" {
   capabilities = ["update"]
@@ -105,6 +122,41 @@ path "transit/rewrap/%[1]s" {
   capabilities = ["update"]
 }
 path "transit/datakey/plaintext/%[1]s" {
+  capabilities = ["update"]
+}
+path "transit/keys/%[1]s" {
+  capabilities = ["read", "list"]
+}
+path "transit/keys/%[1]s/rotate" {
+  capabilities = ["update"]
+}
+path "transit/keys/%[1]s/config" {
+  capabilities = ["update"]
+}
+`, id)
+}
+
+// tenantDevPolicyHCL is the `dev` group's policy (also the AppRole's, for
+// services): read-only on the tenant KV subtree, read/write on the
+// `dev/` sub-path, and Transit encrypt/decrypt. A more specific path wins, so
+// the dev/* grant overrides the read-only base.
+func tenantDevPolicyHCL(id string) string {
+	return fmt.Sprintf(`path "kv/data/tenants/%[1]s/*" {
+  capabilities = ["read", "list"]
+}
+path "kv/metadata/tenants/%[1]s/*" {
+  capabilities = ["read", "list"]
+}
+path "kv/data/tenants/%[1]s/dev/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+path "kv/metadata/tenants/%[1]s/dev/*" {
+  capabilities = ["read", "list", "delete"]
+}
+path "transit/encrypt/%[1]s" {
+  capabilities = ["update"]
+}
+path "transit/decrypt/%[1]s" {
   capabilities = ["update"]
 }
 path "transit/keys/%[1]s" {
@@ -179,15 +231,24 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 
 	for _, id := range consumers {
 		role := "tenant-" + id
-		if _, err := client.RunInput(ctx,
-			baoExec(rootToken, "policy", "write", role, "-"),
-			[]byte(tenantPolicyHCL(id)),
-		); err != nil {
-			return fmt.Errorf("openbao %s: write policy: %w", id, err)
+		for name, hcl := range map[string]string{
+			role + "-admin": tenantAdminPolicyHCL(id),
+			role + "-dev":   tenantDevPolicyHCL(id),
+		} {
+			if _, err := client.RunInput(ctx,
+				baoExec(rootToken, "policy", "write", name, "-"), []byte(hcl),
+			); err != nil {
+				return fmt.Errorf("openbao %s: write policy %s: %w", id, name, err)
+			}
 		}
+		// Best-effort: drop the pre-RBAC single policy/role if still present.
+		_, _ = client.Run(ctx, baoExec(rootToken, "policy", "delete", role))
+		_, _ = client.Run(ctx, baoExec(rootToken, "delete", "auth/oidc-"+id+"/role/tenant-"+id))
+
+		// The AppRole (services) gets the dev policy.
 		if _, err := client.Run(ctx, baoExec(rootToken,
 			"write", "auth/approle/role/"+role,
-			"token_policies="+role,
+			"token_policies="+role+"-dev",
 			"token_ttl=1h", "token_max_ttl=4h",
 			"secret_id_num_uses=0", "secret_id_ttl=0",
 		)); err != nil {
@@ -247,8 +308,15 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 		if _, err := client.Run(ctx, baoExec(rootToken, oidcConfigArgs(id, discoveryURL, clientSecret)...)); err != nil {
 			return fmt.Errorf("openbao %s: oidc config: %w", id, err)
 		}
-		if _, err := client.Run(ctx, baoExec(rootToken, oidcRoleArgs(id)...)); err != nil {
-			return fmt.Errorf("openbao %s: oidc role: %w", id, err)
+		// dev role: any dev or admin (bare `bao login` lands here). admin role:
+		// requested explicitly with `-role=tenant-<id>-admin`.
+		if _, err := client.Run(ctx, baoExec(rootToken,
+			oidcGroupRoleArgs(id, "dev", []string{"dev", "admin"}, role+"-dev")...)); err != nil {
+			return fmt.Errorf("openbao %s: oidc dev role: %w", id, err)
+		}
+		if _, err := client.Run(ctx, baoExec(rootToken,
+			oidcGroupRoleArgs(id, "admin", []string{"admin"}, role+"-admin")...)); err != nil {
+			return fmt.Errorf("openbao %s: oidc admin role: %w", id, err)
 		}
 
 		// Mirror the tenant's own connection secrets into its KV path so the
@@ -275,7 +343,7 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 			}
 		}
 
-		printer.Success("tenant %s: openbao policy + approle + transit + oidc + secrets (realm %s)", id, realm)
+		printer.Success("tenant %s: openbao admin/dev policies + approle + transit + oidc + secrets (realm %s)", id, realm)
 	}
 	return nil
 }
