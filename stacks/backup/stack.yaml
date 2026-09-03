@@ -1,0 +1,27 @@
+name: backup
+title: Backups
+description: "restic snapshots (Postgres dumps, OpenBao raft, Keycloak realms, volumes) to S3, daily"
+targets: [cloud]
+per_tenant: false
+apps:
+  - name: restic
+    image: docker.io/restic/restic:0.19.1
+secrets:
+  - /mksrv/{env}/backup/restic_password
+resources:
+  min_ram_mb: 128
+  disk_gb: 5
+templates:
+  - src: templates/backup.sh.tmpl
+    dst: /var/lib/mksrv/stacks/backup/backup.sh
+    scope: shared
+  - src: templates/mksrv-backup.service.tmpl
+    dst: /etc/systemd/system/mksrv-backup.service
+    scope: shared
+  - src: templates/mksrv-backup.timer.tmpl
+    dst: /etc/systemd/system/mksrv-backup.timer
+    scope: shared
+hooks:
+  post_deploy:
+    - run: hooks/enable-timer.sh
+      scope: shared

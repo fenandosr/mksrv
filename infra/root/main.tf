@@ -104,6 +104,62 @@ resource "aws_kms_alias" "openbao" {
   target_key_id = aws_kms_key.openbao[0].key_id
 }
 
+# Backups: one restic S3 bucket for the fleet; only hosts carrying the `backup`
+# stack get the s3 grant (in the aws-host module). Bucket name is deterministic
+# so the stack template computes it from env + region.
+locals {
+  backup_hosts = { for name, h in local.aws_hosts : name => h if contains(h.stacks, "backup") }
+}
+
+resource "aws_s3_bucket" "backups" {
+  count  = length(local.backup_hosts) > 0 ? 1 : 0
+  bucket = "mksrv-${local.env}-backups"
+  tags   = { "mksrv:env" = local.env }
+}
+
+resource "aws_s3_bucket_versioning" "backups" {
+  count  = length(local.backup_hosts) > 0 ? 1 : 0
+  bucket = aws_s3_bucket.backups[0].id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "backups" {
+  count  = length(local.backup_hosts) > 0 ? 1 : 0
+  bucket = aws_s3_bucket.backups[0].id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "backups" {
+  count                   = length(local.backup_hosts) > 0 ? 1 : 0
+  bucket                  = aws_s3_bucket.backups[0].id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "backups" {
+  count  = length(local.backup_hosts) > 0 ? 1 : 0
+  bucket = aws_s3_bucket.backups[0].id
+  rule {
+    id     = "housekeeping"
+    status = "Enabled"
+    filter {}
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
 module "aws_host" {
   source   = "../modules/aws-host"
   for_each = local.aws_hosts
@@ -124,6 +180,7 @@ module "aws_host" {
   volumes       = try(var.host_volumes[each.key], [])
 
   openbao_kms_key_arn = contains(each.value.stacks, "openbao") && length(local.openbao_hosts) > 0 ? aws_kms_key.openbao[0].arn : ""
+  backup_bucket_arn   = contains(each.value.stacks, "backup") && length(local.backup_hosts) > 0 ? aws_s3_bucket.backups[0].arn : ""
 
   advertise_exitnode = try(each.value.advertise_exitnode, false)
 }

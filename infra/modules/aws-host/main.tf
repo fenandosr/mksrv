@@ -147,6 +147,21 @@ resource "aws_iam_role_policy" "openbao_kms" {
   })
 }
 
+# Backups: only hosts carrying the `backup` stack can read/write the restic bucket.
+resource "aws_iam_role_policy" "backup_s3" {
+  count       = var.backup_bucket_arn != "" ? 1 : 0
+  name_prefix = "mksrv-backup-s3-"
+  role        = aws_iam_role.host.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+      Resource = [var.backup_bucket_arn, "${var.backup_bucket_arn}/*"]
+    }]
+  })
+}
+
 resource "aws_iam_instance_profile" "host" {
   name_prefix = "${local.name}-"
   role        = aws_iam_role.host.name

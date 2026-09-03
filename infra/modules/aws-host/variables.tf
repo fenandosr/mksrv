@@ -89,6 +89,12 @@ variable "openbao_kms_key_arn" {
   default     = ""
 }
 
+variable "backup_bucket_arn" {
+  description = "S3 bucket ARN for restic backups; empty on hosts that do not carry the `backup` stack."
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
