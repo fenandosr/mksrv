@@ -3,7 +3,7 @@ tenant: acme
 users:
   - email: jane@acme.example.com
     name: "Jane Doe"
-    groups: [apps]
+    groups: [admin]
     enabled: true
   - email: bob@acme.example.com
-    groups: [both]
+    groups: [dev, vpn]

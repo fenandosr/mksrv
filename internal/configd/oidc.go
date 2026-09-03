@@ -28,6 +28,21 @@ type Claims struct {
 	Name     string   `json:"name"`
 	AZP      string   `json:"azp"`
 	Audience audience `json:"aud"`
+	Groups   []string `json:"groups"`
+}
+
+// vpnGroups are the tenant RBAC groups whose members may enrol a mesh device
+// (ADR 0016). A token carrying none of them gets no clientconfig.
+var vpnGroups = map[string]bool{"vpn": true, "dev": true, "admin": true}
+
+// VPNEntitled reports whether any of the token's groups grants mesh access.
+func (c Claims) VPNEntitled() bool {
+	for _, g := range c.Groups {
+		if vpnGroups[g] {
+			return true
+		}
+	}
+	return false
 }
 
 type audience []string

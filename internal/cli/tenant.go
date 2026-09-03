@@ -35,6 +35,11 @@ const (
 // local listener on. The port is fixed by OpenBao.
 var openbaoRedirectURIs = []string{"http://localhost:8250/oidc/callback"}
 
+// tenantGroups is the per-tenant RBAC group set (ADR 0016). admin manages the
+// team and owns the tenant boundary; dev builds inside it; apps is app SSO;
+// vpn is a standalone mesh-device capability.
+var tenantGroups = []string{"admin", "dev", "apps", "vpn"}
+
 // vpnRedirectURIs are the OIDC loopback callbacks the Cloud-IT VPN desktop app
 // uses. The literal ports are the app's fixed candidates (chosen to avoid the
 // Hyper-V/WSL2 reserved port range); the wildcards cover any dynamic-port build.
@@ -142,18 +147,21 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 				Public:          true,
 				RedirectURIs:    vpnRedirectURIs,
 				HardcodedClaims: map[string]string{"role": id},
+				GroupsClaim:     true,
 			},
 			{ClientID: configdClientID, Public: false, RedirectURIs: []string{}},
 		}
 		if slices.Contains(tenant.Stacks, "openbao") {
 			clients = append(clients, keycloak.ClientSpec{
 				ClientID: openbaoClientID, Public: false, RedirectURIs: openbaoRedirectURIs,
+				GroupsClaim: true,
 			})
 		}
 		res, err := kc.EnsureRealm(ctx, keycloak.RealmSpec{
 			Realm:       realm,
 			DisplayName: tenant.DisplayName,
-			Groups:      []string{"apps", "both"},
+			Groups:      tenantGroups,
+			AdminGroup:  "admin",
 			Clients:     clients,
 		})
 		if err != nil {

@@ -197,4 +197,17 @@ bootstrap`, and a `deployment.yaml` `topology` field.
   `provisionOpenBaoTenants`.
 
 Still deferred: a `bao` agent sidecar / dynamic DB credentials (containers
-pulling secrets at runtime); OpenBao-role scoping by realm group.
+pulling secrets at runtime).
+
+## M17 — implemented
+
+- Per-tenant RBAC groups `admin` / `dev` / `apps` / `vpn` (ADR 0016). `mksrv
+  tenant apply` creates them, adds a `groups` claim mapper to the vpn-desktop
+  and openbao clients, and grants the `admin` group Keycloak's fine-grained
+  team-management roles. configd's `/v1/clientconfig` gates on `groups ∩
+  {vpn,dev,admin}`. `RealmSpec.AdminGroup`, `ClientSpec.GroupsClaim`,
+  `Claims.VPNEntitled`.
+
+Still deferred: OpenBao per-group policies/roles (M18); Postgres `<id>_app` role
++ group-derived `role` claim (M19); self-service `mksrv publish`; Grafana OIDC
+role mapping.

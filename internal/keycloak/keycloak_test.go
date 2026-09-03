@@ -154,6 +154,112 @@ func TestEnsureRealmAddsHardcodedClaimMapper(t *testing.T) {
 	}
 }
 
+func TestEnsureRealmAddsGroupsMapper(t *testing.T) {
+	t.Parallel()
+	var mapperPosts []map[string]any
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/realms/master/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "t"})
+	})
+	mux.HandleFunc("/admin/realms/acme", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"realm": "acme"})
+	})
+	mux.HandleFunc("/admin/realms/acme/groups", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
+	mux.HandleFunc("/admin/realms/acme/clients", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]string{{"id": "u1", "clientId": "openbao"}})
+	})
+	mux.HandleFunc("/admin/realms/acme/clients/u1", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/admin/realms/acme/clients/u1/protocol-mappers/models", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			mapperPosts = append(mapperPosts, body)
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := New(server.URL)
+	if err := c.Login(context.Background(), "admin", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.EnsureRealm(context.Background(), RealmSpec{
+		Realm:   "acme",
+		Clients: []ClientSpec{{ClientID: "openbao", GroupsClaim: true}},
+	}); err != nil {
+		t.Fatalf("EnsureRealm() error = %v", err)
+	}
+	if len(mapperPosts) != 1 || mapperPosts[0]["protocolMapper"] != "oidc-group-membership-mapper" {
+		t.Fatalf("want 1 group-membership mapper POST, got %+v", mapperPosts)
+	}
+	cfg, _ := mapperPosts[0]["config"].(map[string]any)
+	if cfg["claim.name"] != "groups" || cfg["full.path"] != "false" {
+		t.Fatalf("unexpected groups mapper config: %+v", cfg)
+	}
+}
+
+func TestEnsureRealmGrantsTeamManagement(t *testing.T) {
+	t.Parallel()
+	var rolePost []map[string]string
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/realms/master/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "t"})
+	})
+	mux.HandleFunc("/admin/realms/acme", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"realm": "acme"})
+	})
+	mux.HandleFunc("/admin/realms/acme/groups", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]string{{"id": "g-admin", "name": "admin"}, {"id": "g-dev", "name": "dev"}})
+	})
+	mux.HandleFunc("/admin/realms/acme/clients", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]string{{"id": "rm", "clientId": "realm-management"}})
+	})
+	mux.HandleFunc("/admin/realms/acme/clients/rm/roles", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]string{
+			{"id": "r1", "name": "manage-users"}, {"id": "r2", "name": "query-users"},
+			{"id": "r3", "name": "query-groups"}, {"id": "r4", "name": "view-users"},
+		})
+	})
+	mux.HandleFunc("/admin/realms/acme/groups/g-admin/role-mappings/clients/rm", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			_ = json.NewDecoder(r.Body).Decode(&rolePost)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := New(server.URL)
+	if err := c.Login(context.Background(), "admin", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.EnsureRealm(context.Background(), RealmSpec{
+		Realm:      "acme",
+		Groups:     []string{"admin", "dev", "apps", "vpn"},
+		AdminGroup: "admin",
+	}); err != nil {
+		t.Fatalf("EnsureRealm() error = %v", err)
+	}
+	if len(rolePost) != 4 {
+		t.Fatalf("want 4 roles assigned to the admin group, got %+v", rolePost)
+	}
+}
+
 func TestEnsureClientReturnsSecret(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
