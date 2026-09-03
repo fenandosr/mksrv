@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — M19
+
+- Postgres access per RBAC group (ADR 0016), completing the model. `mksrv
+  tenant apply` provisions `<id>_app` (SELECT on `app` by default; the dev opens
+  writes per table) and `<id>_web` alongside `<id>` / `<id>_anon` / `<id>_auth`.
+  The `role` claim is now `<id>_web` (one hardcoded mapper) and an
+  `app.pgrst_pre_request` function narrows it — `admin`/`dev` → `<id>`, `apps` →
+  `<id>_app`, token-less → `<id>_anon` — from the token's `groups` claim.
+  PostgREST gains `PGRST_DB_PRE_REQUEST`.
+- On an existing realm, delete the `mksrv-role` protocol mapper once so
+  `tenant apply` recreates it with the `_web` value.
+
 ## Unreleased — M18
 
 - OpenBao access is now per RBAC group (ADR 0016). `mksrv tenant apply` writes

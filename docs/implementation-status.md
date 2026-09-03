@@ -216,5 +216,14 @@ pulling secrets at runtime).
   the pre-RBAC policy/role removed best-effort. `tenant{Admin,Dev}PolicyHCL`,
   `oidcGroupRoleArgs`.
 
-Still deferred: Postgres `<id>_app` role + group-derived `role` claim (M19);
-self-service `mksrv publish`; Grafana OIDC role mapping.
+## M19 — implemented
+
+- Postgres access per RBAC group (ADR 0016), completing the model.
+  `tenantDatabaseSQL` adds `<id>_app` (SELECT default) and `<id>_web` (the
+  `NOINHERIT` role PostgREST impersonates) plus an `app.pgrst_pre_request`
+  plpgsql function that `SET LOCAL ROLE`s by `request.jwt.claims->groups`. The
+  hardcoded `role` claim is now `<id>_web`; PostgREST gets `PGRST_DB_PRE_REQUEST`.
+
+The RBAC model (M17–M19) is now enforced across Keycloak, configd/VPN, OpenBao,
+and Postgres. Still deferred: self-service `mksrv publish`; Grafana OIDC role
+mapping.

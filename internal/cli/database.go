@@ -111,32 +111,53 @@ func loadPgAdminServers(ctx context.Context, client *sshx.Client, pgadminUser st
 
 func tenantDatabaseSQL(id, password, authPassword string) string {
 	db := "db_" + id
-	role := id
-	anon := id + "_anon"
-	auth := id + "_auth"
+	role := id           // dev / admin: owns schema app, full DML + DDL
+	app := id + "_app"   // apps group: SELECT by default, dev grants writes per table
+	anon := id + "_anon" // token-less
+	web := id + "_web"   // PostgREST impersonation landing role
+	auth := id + "_auth" // authenticator (connection role)
 	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	create := func(name, opts string) string {
+		return fmt.Sprintf(`SELECT format('CREATE ROLE %%I %s', %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, opts, q(name), q(name))
+	}
 	return strings.Join([]string{
 		fmt.Sprintf(`SELECT format('CREATE ROLE %%I LOGIN PASSWORD %%L', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(role), q(password), q(role)),
 		fmt.Sprintf(`ALTER ROLE %q WITH LOGIN PASSWORD %s;`, role, q(password)),
 		fmt.Sprintf(`SELECT format('CREATE DATABASE %%I OWNER %%I', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = %s)\gexec`, q(db), q(role), q(db)),
 		fmt.Sprintf(`REVOKE ALL ON DATABASE %q FROM PUBLIC;`, db),
 		fmt.Sprintf(`GRANT CONNECT, CREATE ON DATABASE %q TO %q;`, db, role),
-		// PostgREST roles: an anonymous role for token-less reads and an
-		// authenticator that logs in and switches into the tenant role
-		// (JWT role claim) or anon.
-		fmt.Sprintf(`SELECT format('CREATE ROLE %%I NOLOGIN', %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(anon), q(anon)),
+		// PostgREST role graph (ADR 0016). auth logs in; a db-pre-request
+		// function switches from web to role / app / anon by the token's groups.
+		create(anon, "NOLOGIN"),
+		create(app, "NOLOGIN"),
+		create(web, "NOLOGIN NOINHERIT"),
 		fmt.Sprintf(`SELECT format('CREATE ROLE %%I LOGIN NOINHERIT PASSWORD %%L', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(auth), q(authPassword), q(auth)),
 		fmt.Sprintf(`ALTER ROLE %q WITH LOGIN NOINHERIT PASSWORD %s;`, auth, q(authPassword)),
-		fmt.Sprintf(`GRANT %q TO %q;`, anon, auth),
-		fmt.Sprintf(`GRANT %q TO %q;`, role, auth),
+		fmt.Sprintf(`GRANT %q, %q, %q TO %q;`, role, app, anon, web),
+		fmt.Sprintf(`GRANT %q TO %q;`, web, auth),
 		fmt.Sprintf(`GRANT CONNECT ON DATABASE %q TO %q;`, db, auth),
 		fmt.Sprintf(`\connect %q`, db),
 		fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS app AUTHORIZATION %q;`, role),
 		fmt.Sprintf(`ALTER DATABASE %q SET search_path TO app, public;`, db),
 		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %q IN SCHEMA app GRANT ALL ON TABLES TO %q;`, role, role),
-		fmt.Sprintf(`GRANT USAGE ON SCHEMA app TO %q;`, anon),
-		fmt.Sprintf(`GRANT SELECT ON ALL TABLES IN SCHEMA app TO %q;`, anon),
-		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %q IN SCHEMA app GRANT SELECT ON TABLES TO %q;`, role, anon),
+		fmt.Sprintf(`GRANT USAGE ON SCHEMA app TO %q, %q, %q;`, anon, app, web),
+		fmt.Sprintf(`GRANT SELECT ON ALL TABLES IN SCHEMA app TO %q, %q;`, anon, app),
+		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %q IN SCHEMA app GRANT SELECT ON TABLES TO %q, %q;`, role, anon, app),
+		// db-pre-request: token-less requests early-return (PostgREST already
+		// set anon); otherwise SET LOCAL ROLE by the `groups` claim.
+		fmt.Sprintf(`CREATE OR REPLACE FUNCTION app.pgrst_pre_request() RETURNS void LANGUAGE plpgsql AS $mksrv$
+DECLARE claims text := current_setting('request.jwt.claims', true); grps jsonb;
+BEGIN
+  IF claims IS NULL OR claims = '' THEN RETURN; END IF;
+  grps := coalesce((claims::jsonb) -> 'groups', '[]'::jsonb);
+  IF grps ? 'admin' OR grps ? 'dev' THEN SET LOCAL ROLE %q;
+  ELSIF grps ? 'apps' THEN SET LOCAL ROLE %q;
+  ELSE SET LOCAL ROLE %q;
+  END IF;
+END;
+$mksrv$;`, role, app, anon),
+		fmt.Sprintf(`ALTER FUNCTION app.pgrst_pre_request() OWNER TO %q;`, role),
+		fmt.Sprintf(`GRANT EXECUTE ON FUNCTION app.pgrst_pre_request() TO %q, %q;`, web, anon),
 		"",
 	}, "\n")
 }
