@@ -17,9 +17,7 @@ resources:
   disk_gb: 40
 storage:
   - name: pgdata
-    gb: 40
-    iops: 4000
-    throughput: 250
+    gb: 20
   - name: raft
     gb: 2
 templates:

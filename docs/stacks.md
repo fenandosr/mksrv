@@ -17,7 +17,7 @@ A `storage:` block requests dedicated EBS volumes mounted at
 | `mail` | service | cloud | no | base | descriptor |
 | `postgres` | cluster | cloud | no | — | implemented (opt-in) |
 | `openbao` | cluster | cloud | yes | identity | implemented (opt-in) |
-| `database` | service | cloud/local | yes | identity | implemented |
+| `database` | service | cloud/local | yes | identity (+ `postgres` cluster when present) | implemented |
 | `cache` | service | cloud/local | yes | identity | implemented |
 | `files` | service | cloud/local | yes | identity | descriptor |
 | `analytics` | service | cloud/local | yes | database, identity | descriptor |

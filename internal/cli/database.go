@@ -13,6 +13,40 @@ import (
 	"github.com/fenandosr/mksrv/internal/ui"
 )
 
+// pgConn is where the tenant-provisioning SQL runs: the Patroni primary when a
+// `postgres` cluster is in the fleet, otherwise the `database` stack's own
+// standalone Postgres.
+type pgConn struct {
+	target    sshx.Target
+	name      string
+	container string
+	psqlUser  string
+	superRef  string
+	pgAdmin   string // Host value pgAdmin registers (a node IP, or the container name)
+}
+
+func (f *fleet) pgConn() (pgConn, bool, error) {
+	if f.postgres.Primary != "" {
+		ht, ok := f.byName[f.postgres.Primary]
+		if !ok {
+			return pgConn{}, false, fmt.Errorf("postgres primary %q is not a fleet host", f.postgres.Primary)
+		}
+		ip := f.outputs.Hosts[ht.Name].PrivateIP
+		return pgConn{ht.Target, ht.Name, "mksrv-patroni", "postgres", "/mksrv/{env}/postgres/superpass", ip}, true, nil
+	}
+	for i := range f.targets {
+		if slices.Contains(f.targets[i].Host.Stacks, "postgres") {
+			return pgConn{}, false, fmt.Errorf("a host carries `postgres` but the cluster is not bootstrapped — run `mksrv postgres bootstrap` first")
+		}
+	}
+	for i := range f.targets {
+		if slices.Contains(f.targets[i].Host.Stacks, "database") {
+			return pgConn{f.targets[i].Target, f.targets[i].Name, "mksrv-postgres", "mksrv", "/mksrv/{env}/database/pg_superpass", "mksrv-postgres"}, true, nil
+		}
+	}
+	return pgConn{}, false, nil
+}
+
 // provisionDatabases creates one database, login role, and app schema per
 // tenant that consumes the `database` stack. It is idempotent and only runs
 // when a data host carries `database`.
@@ -30,14 +64,21 @@ func (f *fleet) provisionDatabases(ctx context.Context, printer ui.Printer, tena
 	if err := f.ensureSecrets(ctx); err != nil {
 		return err
 	}
-	superPass, err := f.resolver.Get(ctx, "/mksrv/{env}/database/pg_superpass")
+	pg, ok, err := f.pgConn()
 	if err != nil {
-		return fmt.Errorf("postgres superuser password: %w (deploy database first)", err)
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	superPass, err := f.resolver.Get(ctx, pg.superRef)
+	if err != nil {
+		return fmt.Errorf("postgres superuser password: %w (deploy postgres first)", err)
 	}
 
-	client, err := sshx.Dial(ctx, dataHost.Target, f.knownHosts)
+	client, err := sshx.Dial(ctx, pg.target, f.knownHosts)
 	if err != nil {
-		return dialError(dataHost.Name, err)
+		return dialError(pg.name, err)
 	}
 	defer client.Close()
 
@@ -56,8 +97,8 @@ func (f *fleet) provisionDatabases(ctx context.Context, printer ui.Printer, tena
 		}
 		sql := tenantDatabaseSQL(id, dbPass, authPass)
 		cmd := fmt.Sprintf(
-			"sudo podman exec -e PGPASSWORD=%s -i mksrv-postgres psql -v ON_ERROR_STOP=1 -U mksrv -d postgres",
-			quoteArg(superPass),
+			"sudo podman exec -e PGPASSWORD=%s -i %s psql -v ON_ERROR_STOP=1 -U %s -d postgres",
+			quoteArg(superPass), pg.container, pg.psqlUser,
 		)
 		if _, err := client.RunInput(ctx, cmd, []byte(sql)); err != nil {
 			return fmt.Errorf("provision database for %s: %w", id, err)
@@ -67,7 +108,15 @@ func (f *fleet) provisionDatabases(ctx context.Context, printer ui.Printer, tena
 	}
 
 	if len(pgTenants) > 0 {
-		if err := loadPgAdminServers(ctx, client, f.data.Deployment.Identity.ACMEEmail, pgTenants); err != nil {
+		adminClient := client
+		if dataHost.Name != pg.name {
+			adminClient, err = sshx.Dial(ctx, dataHost.Target, f.knownHosts)
+			if err != nil {
+				return dialError(dataHost.Name, err)
+			}
+			defer adminClient.Close()
+		}
+		if err := loadPgAdminServers(ctx, adminClient, f.data.Deployment.Identity.ACMEEmail, pg.pgAdmin, pgTenants); err != nil {
 			printer.Warn("pgAdmin server list not loaded: %v", err)
 		} else {
 			printer.Info("pgAdmin servers registered for %d tenants", len(pgTenants))
@@ -78,13 +127,13 @@ func (f *fleet) provisionDatabases(ctx context.Context, printer ui.Printer, tena
 
 // loadPgAdminServers pre-registers the tenant databases in pgAdmin so operators
 // only need to enter the password.
-func loadPgAdminServers(ctx context.Context, client *sshx.Client, pgadminUser string, tenants []string) error {
+func loadPgAdminServers(ctx context.Context, client *sshx.Client, pgadminUser, pgHost string, tenants []string) error {
 	servers := map[string]any{}
 	for i, id := range tenants {
 		servers[fmt.Sprintf("%d", i+1)] = map[string]any{
 			"Name":          fmt.Sprintf("%s (db_%s)", id, id),
 			"Group":         "mksrv tenants",
-			"Host":          "mksrv-postgres",
+			"Host":          pgHost,
 			"Port":          5432,
 			"MaintenanceDB": "db_" + id,
 			"Username":      id,

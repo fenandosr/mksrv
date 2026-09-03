@@ -50,6 +50,22 @@ func TestRenderBootstrapDataHostHasNoWebPorts(t *testing.T) {
 	}
 }
 
+func TestDropEmpty(t *testing.T) {
+	t.Parallel()
+	files := map[string][]byte{
+		"/etc/containers/systemd/a.container": []byte("[Container]\nImage=x\n"),
+		"/etc/containers/systemd/b.container": []byte("  \n\t\n"),
+		"/etc/containers/systemd/c.container": nil,
+	}
+	dropEmpty(files)
+	if len(files) != 1 {
+		t.Fatalf("dropEmpty kept %d files: %v", len(files), files)
+	}
+	if _, ok := files["/etc/containers/systemd/a.container"]; !ok {
+		t.Fatal("dropEmpty removed the non-empty file")
+	}
+}
+
 func TestQuadletUnits(t *testing.T) {
 	t.Parallel()
 	files := map[string][]byte{

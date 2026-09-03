@@ -3,6 +3,7 @@
 package deploy
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -90,6 +91,9 @@ func DeployStack(ctx context.Context, client *ssh.Client, opts Options) (StackRe
 	if err != nil {
 		return result, err
 	}
+	// A template may render to nothing (e.g. the standalone Postgres unit when a
+	// `postgres` cluster is in the fleet) — drop it so no empty unit is written.
+	dropEmpty(files)
 
 	quadletChanged := false
 	edgeFragmentChanged := false
@@ -219,6 +223,16 @@ func remoteMatches(ctx context.Context, client *ssh.Client, remotePath string, w
 		return false, nil
 	}
 	return strings.TrimSpace(res.Stdout) == hex.EncodeToString(sum[:]), nil
+}
+
+// dropEmpty removes rendered files whose content is blank or whitespace-only, so
+// a self-disabling template writes no file at all.
+func dropEmpty(files map[string][]byte) {
+	for dst, content := range files {
+		if len(bytes.TrimSpace(content)) == 0 {
+			delete(files, dst)
+		}
+	}
 }
 
 func quadletUnits(files map[string][]byte) []string {

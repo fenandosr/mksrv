@@ -227,3 +227,13 @@ pulling secrets at runtime).
 The RBAC model (M17–M19) is now enforced across Keycloak, configd/VPN, OpenBao,
 and Postgres. Still deferred: self-service `mksrv publish`; Grafana OIDC role
 mapping.
+
+## M20 — implemented
+
+- `database` runs on the Patroni cluster when a `postgres` cluster is in the
+  fleet (ADR 0017), else standalone. `pgConn` selects the target;
+  `postgrestDSN` builds a libpq multi-host DSN. `deploy.dropEmpty` lets
+  `postgres.container.tmpl` self-disable. `stacks/postgres` `pgdata` 40→20 GiB.
+
+Still deferred: Keycloak's own Postgres onto the cluster; folding
+`postgres bootstrap` into `apply`.

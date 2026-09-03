@@ -115,6 +115,17 @@ func TestStackRendersDataPlane(t *testing.T) {
 		t.Fatalf("postgres unit missing tailnet publish:\n%s", pg)
 	}
 
+	// With a `postgres` cluster in the fleet, the standalone unit renders empty.
+	clusterCtx := ctx
+	clusterCtx.StackHosts = map[string]string{"postgres": "10.20.0.11"}
+	cFiles, err := Stack(stacksRoot, catalog["database"], clusterCtx)
+	if err != nil {
+		t.Fatalf("Stack(database, cluster) error = %v", err)
+	}
+	if pg := strings.TrimSpace(string(cFiles["/etc/containers/systemd/mksrv-postgres.container"])); pg != "" {
+		t.Fatalf("standalone postgres unit should be empty when a cluster exists:\n%s", pg)
+	}
+
 	monFiles, err := Stack(stacksRoot, catalog["monitor"], ctx)
 	if err != nil {
 		t.Fatalf("Stack(monitor) error = %v", err)
@@ -259,7 +270,7 @@ func TestStackStorageAndRetention(t *testing.T) {
 	}
 
 	// postgres cluster
-	if s := catalog["postgres"].Storage; len(s) != 2 || s[0].Name != "pgdata" || s[0].IOPS != 4000 {
+	if s := catalog["postgres"].Storage; len(s) != 2 || s[0].Name != "pgdata" || s[1].Name != "raft" {
 		t.Fatalf("postgres storage block: %#v", s)
 	}
 	ctx.Host.Stacks = []string{"postgres"}

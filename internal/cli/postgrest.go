@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/fenandosr/mksrv/internal/render"
@@ -87,7 +88,7 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 		if err != nil {
 			return fmt.Errorf("postgrest %s: %w", id, err)
 		}
-		dbURI := fmt.Sprintf("postgres://%s_auth:%s@mksrv-postgres:5432/db_%s", id, authPass, id)
+		dbURI := postgrestDSN(f.postgres, id, authPass)
 
 		secrets := map[string]string{
 			"mksrv-database-postgrest-" + id + "-dburi": dbURI,
@@ -154,6 +155,21 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 }
 
 // fetchRealmJWKS returns the tenant realm's JWKS document, used verbatim as
+// postgrestDSN is the libpq URI PostgREST connects with. With a Patroni cluster
+// it lists every node and asks for the read-write one (the primary); otherwise
+// it targets the `database` stack's standalone Postgres.
+func postgrestDSN(c postgresCluster, id, authPass string) string {
+	if len(c.Nodes) == 0 {
+		return fmt.Sprintf("postgres://%s_auth:%s@mksrv-postgres:5432/db_%s", id, authPass, id)
+	}
+	hosts := make([]string, len(c.Nodes))
+	for i, n := range c.Nodes {
+		hosts[i] = n.IP + ":5432"
+	}
+	return fmt.Sprintf("postgres://%s_auth:%s@%s/db_%s?target_session_attrs=read-write",
+		id, authPass, strings.Join(hosts, ","), id)
+}
+
 // PostgREST's PGRST_JWT_SECRET.
 func fetchRealmJWKS(ctx context.Context, keycloakDomain, realm string) (string, error) {
 	url := fmt.Sprintf("https://%s/realms/%s/protocol/openid-connect/certs", keycloakDomain, realm)

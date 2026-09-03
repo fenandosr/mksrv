@@ -1,3 +1,4 @@
+{{- if not (.StackIP "postgres") }}
 [Unit]
 Description=mksrv PostgreSQL
 
@@ -28,3 +29,4 @@ TimeoutStartSec=180
 
 [Install]
 WantedBy=multi-user.target
+{{- end }}
