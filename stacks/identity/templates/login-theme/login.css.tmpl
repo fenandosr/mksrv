@@ -1,0 +1,41 @@
+/* Rendered by mksrv for tenant {{ .Tenant.ID }} (M24, ADR 0023).
+   Only CSS + an embedded logo — the login page's HTML/FTL templates are
+   untouched, so this survives Keycloak upgrades. Selectors target the
+   keycloak.v2 (PatternFly-based) default theme; if a Keycloak upgrade
+   changes its markup, re-check these against a live login page. */
+
+:root {
+  --mksrv-primary: {{ .Tenant.Branding.Primary | default "#0C6D77" }};
+{{- if .Tenant.Branding.Secondary }}
+  --mksrv-secondary: {{ .Tenant.Branding.Secondary }};
+{{- end }}
+}
+
+{{- if .Tenant.Branding.LogoDataURI }}
+
+#kc-header-wrapper {
+  background-image: url("{{ .Tenant.Branding.LogoDataURI }}");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  text-indent: -9999px;
+  overflow: hidden;
+  min-height: 64px;
+}
+{{- end }}
+
+.pf-v5-c-button.pf-m-primary {
+  background-color: var(--mksrv-primary) !important;
+  border-color: var(--mksrv-primary) !important;
+}
+
+.pf-v5-c-button.pf-m-primary:hover,
+.pf-v5-c-button.pf-m-primary:focus {
+  background-color: var(--mksrv-secondary, var(--mksrv-primary)) !important;
+  border-color: var(--mksrv-secondary, var(--mksrv-primary)) !important;
+}
+
+a,
+a:visited {
+  color: var(--mksrv-primary);
+}

@@ -76,4 +76,22 @@ func TestRenderContextPopulatesOperatorFQDNs(t *testing.T) {
 			t.Fatalf("OperatorFQDNs[%d] = %q, want %q (full: %v)", i, ctx.OperatorFQDNs[i], fqdn, ctx.OperatorFQDNs)
 		}
 	}
+	// M24: every declared tenant, not just `database` consumers — Keycloak's
+	// per-tenant theme mount needs the full roster.
+	if wantIDs := []string{"bitabit", "hg"}; len(ctx.TenantIDs) != 2 || ctx.TenantIDs[0] != wantIDs[0] || ctx.TenantIDs[1] != wantIDs[1] {
+		t.Fatalf("TenantIDs = %v, want %v", ctx.TenantIDs, wantIDs)
+	}
+}
+
+func TestThemeDirsCommand(t *testing.T) {
+	t.Parallel()
+	if got := themeDirsCommand(nil); got != "sudo mkdir -p" {
+		t.Fatalf("themeDirsCommand(nil) = %q", got)
+	}
+	got := themeDirsCommand([]string{"bitabit", "hg"})
+	want := "sudo mkdir -p /var/lib/mksrv/stacks/identity/themes/'bitabit'/login/resources/css" +
+		" /var/lib/mksrv/stacks/identity/themes/'hg'/login/resources/css"
+	if got != want {
+		t.Fatalf("themeDirsCommand() = %q, want %q", got, want)
+	}
 }

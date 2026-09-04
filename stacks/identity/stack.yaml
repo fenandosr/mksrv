@@ -40,6 +40,12 @@ templates:
   - src: templates/identity.caddy.tmpl
     dst: /var/lib/mksrv/caddy.d/10-identity.caddy
     scope: shared
+  - src: templates/login-theme/theme.properties.tmpl
+    dst: /var/lib/mksrv/stacks/identity/themes/{tenant}/login/theme.properties
+    scope: per_tenant
+  - src: templates/login-theme/login.css.tmpl
+    dst: /var/lib/mksrv/stacks/identity/themes/{tenant}/login/resources/css/login.css
+    scope: per_tenant
 hooks:
   post_deploy:
     - run: hooks/reload-caddy.sh

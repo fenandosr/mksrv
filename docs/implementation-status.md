@@ -278,3 +278,17 @@ Still deferred: Keycloak's own Postgres onto the cluster; folding
 
 M23 is complete. See `docs/monitoring.md` for the full scrape/dashboard/alert
 reference.
+
+## M24 — implemented
+
+- Per-tenant Keycloak login branding (ADR 0023): `branding:` gains
+  `secondary`; `login.css` (CSS only, no `.ftl` overrides) embeds
+  `logo_data_uri` directly as a `background-image` — no separate asset file.
+  `render.Context.TenantIDs` lets the shared Keycloak unit mount one theme
+  directory per declared tenant; `ensureTenantThemeDirs` guarantees each
+  exists before `mksrv apply` (re)starts Keycloak, independent of whether
+  `tenant apply` has run for that tenant yet (a missing bind-mount source
+  would otherwise fail Keycloak entirely — every tenant's login, not just the
+  new one's). `EnsureRealm` reconciles `loginTheme` idempotently; `tenant
+  apply` restarts Keycloak once, unconditionally, after every other
+  Keycloak-touching step in that run. See `docs/branding.md`.

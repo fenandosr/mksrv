@@ -260,6 +260,100 @@ func TestEnsureRealmGrantsTeamManagement(t *testing.T) {
 	}
 }
 
+func TestEnsureRealmSetsLoginTheme(t *testing.T) {
+	t.Parallel()
+	var puts []map[string]any
+	loginTheme := ""
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/realms/master/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "t"})
+	})
+	mux.HandleFunc("/admin/realms/acme", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			puts = append(puts, body)
+			loginTheme, _ = body["loginTheme"].(string)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"realm": "acme", "loginTheme": loginTheme})
+	})
+	mux.HandleFunc("/admin/realms/acme/groups", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
+	mux.HandleFunc("/admin/realms/acme/clients", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := New(server.URL)
+	if err := c.Login(context.Background(), "admin", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	spec := RealmSpec{Realm: "acme", LoginTheme: "mksrv-acme"}
+	res, err := c.EnsureRealm(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("EnsureRealm() error = %v", err)
+	}
+	if !res.LoginThemeUpdated || len(puts) != 1 || puts[0]["loginTheme"] != "mksrv-acme" {
+		t.Fatalf("result=%+v puts=%+v", res, puts)
+	}
+
+	// Second apply: theme already matches, no further PUT.
+	res, err = c.EnsureRealm(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.LoginThemeUpdated || len(puts) != 1 {
+		t.Fatalf("idempotency broken: %+v puts=%d", res, len(puts))
+	}
+}
+
+func TestEnsureRealmCreationIncludesLoginTheme(t *testing.T) {
+	t.Parallel()
+	var created map[string]any
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/realms/master/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "t"})
+	})
+	realmExists := false
+	mux.HandleFunc("/admin/realms/acme", func(w http.ResponseWriter, _ *http.Request) {
+		if !realmExists {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"realm": "acme"})
+	})
+	mux.HandleFunc("/admin/realms", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&created)
+		realmExists = true
+		w.WriteHeader(http.StatusCreated)
+	})
+	mux.HandleFunc("/admin/realms/acme/groups", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
+	mux.HandleFunc("/admin/realms/acme/clients", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := New(server.URL)
+	if err := c.Login(context.Background(), "admin", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.EnsureRealm(context.Background(), RealmSpec{Realm: "acme", LoginTheme: "mksrv-acme"}); err != nil {
+		t.Fatalf("EnsureRealm() error = %v", err)
+	}
+	if created["loginTheme"] != "mksrv-acme" {
+		t.Fatalf("realm creation body missing loginTheme: %+v", created)
+	}
+}
+
 func TestEnsureClientReturnsSecret(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()

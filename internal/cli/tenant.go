@@ -163,6 +163,7 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 			Groups:      tenantGroups,
 			AdminGroup:  "admin",
 			Clients:     clients,
+			LoginTheme:  themeName(id),
 		})
 		if err != nil {
 			return &ExitError{Code: 1, Err: fmt.Errorf("realm %s: %w", realm, err)}
@@ -211,6 +212,12 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 		return err
 	}
 	printer.Info("configd signing public key (add to each tenant.json signingKeys[]):\n%s", pubPEM)
+
+	// Last: restarts Keycloak, so run it once everything else that talks to
+	// the Admin API this pass is already done (ADR 0023).
+	if err := f.provisionTenantBranding(ctx, printer, edgeClient, selected); err != nil {
+		return &ExitError{Code: 1, Err: err}
+	}
 	return nil
 }
 

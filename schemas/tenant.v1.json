@@ -69,6 +69,7 @@
       "type": "object", "additionalProperties": false,
       "properties": {
         "primary": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "default": "#0C6D77"},
+        "secondary": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
         "logo_data_uri": {"type": "string", "maxLength": 1048576, "pattern": "^(?:|data:image/(?:png|jpeg|webp|svg\\+xml);base64,[A-Za-z0-9+/=]+)$"}
       }
     }
