@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `mksrv deploy` now pulls a stack's images (`podman pull`, retried) before
+  starting its units, so a slow first pull can't trip `TimeoutStartSec` /
+  the restart rate limiter (which failed Grafana's 547 MB image on a fresh host).
 - Fix (M20): the `database` stack's `postgres` TCP health check probed
   `127.0.0.1:5432` on the app host — nothing there in cluster mode. Removed; the
   standalone container gates on its own `pg_isready` HealthCmd and the cluster

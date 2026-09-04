@@ -95,6 +95,10 @@ func DeployStack(ctx context.Context, client *ssh.Client, opts Options) (StackRe
 	// `postgres` cluster is in the fleet) — drop it so no empty unit is written.
 	dropEmpty(files)
 
+	// Pull images up front so a slow first pull never trips a unit's
+	// TimeoutStartSec / restart rate limiter (best-effort, with retries).
+	prePull(ctx, client, stack)
+
 	quadletChanged := false
 	edgeFragmentChanged := false
 	for _, dst := range render.SortedPaths(files) {
@@ -223,6 +227,22 @@ func remoteMatches(ctx context.Context, client *ssh.Client, remotePath string, w
 		return false, nil
 	}
 	return strings.TrimSpace(res.Stdout) == hex.EncodeToString(sum[:]), nil
+}
+
+// prePull fetches every image a stack declares before its units are (re)started.
+// Best-effort: a pull failure here is logged by the caller only if the unit then
+// fails to start. Retries a few times to ride out transient registry throttling.
+func prePull(ctx context.Context, client *ssh.Client, stack model.Stack) {
+	for _, app := range stack.Apps {
+		if strings.TrimSpace(app.Image) == "" {
+			continue
+		}
+		cmd := fmt.Sprintf(
+			"for i in 1 2 3 4; do sudo podman pull %s && exit 0; sleep $((i*10)); done; exit 1",
+			shellQuote(app.Image),
+		)
+		_, _ = client.Run(ctx, cmd)
+	}
 }
 
 // dropEmpty removes rendered files whose content is blank or whitespace-only, so
