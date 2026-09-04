@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fix (M13): `bao policy write <name> -` read empty stdin because `baoExec`
+  built `podman exec` without `-i`, so `mksrv tenant apply` failed at the
+  per-tenant OpenBao step ("'policy' parameter not supplied or empty").
+- Fix (M5): `mksrv tenant apply`'s pgAdmin server-list load wrote the file
+  inside the container and then `podman cp`'d it from the host, which fails.
+  Now `tee`s on the host first.
+
 - Fix (M20): `mksrv postgres bootstrap` recorded `.mksrv/postgres.json`'s
   `primary` as the Patroni IP, but `pgConn` (used by `mksrv tenant apply`) looks
   it up as a fleet host name — `mksrv tenant apply` then failed with
