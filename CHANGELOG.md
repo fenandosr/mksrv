@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Feature (M23 phase 1, ADR 0019): fleet-wide metrics. A new `agent` stack
+  (node-exporter + cAdvisor, published on each host's private IP) is
+  auto-assigned to every host once any host carries `monitor` — no Terraform
+  change needed, the intra-VPC security group rule already allows it.
+  `monitor`'s Prometheus now scrapes the whole fleet (`render.Context.Fleet`)
+  plus Patroni's native `/metrics`, closing the blind spot where only the
+  `monitor` host itself had metrics. Grafana gets a provisioned dashboards
+  volume and one bundled dashboard, `fleet-overview`. See `docs/monitoring.md`.
+
 - Fix (M20): the `database` stack's `postgres` TCP health check probed
   `127.0.0.1:5432` on the app host — nothing there in cluster mode. Removed; the
   standalone container gates on its own `pg_isready` HealthCmd and the cluster

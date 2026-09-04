@@ -14,6 +14,31 @@ import (
 	"github.com/fenandosr/mksrv/internal/model"
 )
 
+// normalizeImplicitStacks appends stacks a fleet needs implicitly rather than
+// by explicit per-host declaration (M23). Currently just `agent`
+// (node-exporter + cAdvisor): once any host carries `monitor`, every host
+// gets `agent` so the central Prometheus has a full fleet view without the
+// operator listing it on every host. Runs before semanticChecks so capacity
+// and dependency checks see the effective stack list.
+func normalizeImplicitStacks(deployment *model.Deployment) {
+	hasMonitor := false
+	for _, host := range deployment.Hosts {
+		if contains(host.Stacks, "monitor") {
+			hasMonitor = true
+			break
+		}
+	}
+	if !hasMonitor {
+		return
+	}
+	for name, host := range deployment.Hosts {
+		if !contains(host.Stacks, "agent") {
+			host.Stacks = append([]string{"agent"}, host.Stacks...)
+			deployment.Hosts[name] = host
+		}
+	}
+}
+
 func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 	deployment := data.Deployment
 	if deployment.Timezone == "" {

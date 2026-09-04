@@ -21,13 +21,19 @@ A `storage:` block requests dedicated EBS volumes mounted at
 | `cache` | service | cloud/local | yes | identity | implemented |
 | `files` | service | cloud/local | yes | identity | descriptor |
 | `analytics` | service | cloud/local | yes | database, identity | descriptor |
-| `monitor` | service | cloud/local | yes | identity | implemented |
+| `agent` | service | cloud/local | no | — | implemented (auto-assigned, ADR 0019) |
+| `monitor` | service | cloud/local | yes | identity, agent | implemented |
 | `logs` | service | cloud/local | yes | monitor | implemented (opt-in) |
 | `security` | service | cloud/local | no | logs, monitor | implemented (opt-in) |
 | `backup` | service | cloud | no | — | implemented (opt-in) |
 
 Templates and hooks are intentionally empty in M0. Their implementation belongs
 to M2–M5 and must be golden-tested.
+
+`agent` is never listed by the operator: `mksrv validate` appends it to every
+host once any host carries `monitor`, so the fleet's central Prometheus always
+has a full view (ADR 0019). It is still a real stack — `mksrv status` reports
+it like any other.
 
 ## Derived tenant endpoints
 

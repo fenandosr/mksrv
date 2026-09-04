@@ -23,8 +23,45 @@ func TestValidateExampleWorkspace(t *testing.T) {
 	if !report.Valid {
 		t.Fatalf("report invalid: %#v", report.Issues)
 	}
-	if report.Hosts != 2 || report.Tenants != 1 || report.Users != 2 || report.CatalogStacks != 13 {
+	if report.Hosts != 2 || report.Tenants != 1 || report.Users != 2 || report.CatalogStacks != 14 {
 		t.Fatalf("counts = hosts:%d tenants:%d users:%d stacks:%d", report.Hosts, report.Tenants, report.Users, report.CatalogStacks)
+	}
+}
+
+func TestValidateInjectsAgentWhenMonitorPresent(t *testing.T) {
+	t.Parallel()
+	root := filepath.Clean(filepath.Join("..", "..", "examples", "workspace"))
+	data, report, err := Validate(context.Background(), root, ValidateOptions{RunningVersion: "dev"})
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if !report.Valid {
+		t.Fatalf("report invalid: %#v", report.Issues)
+	}
+	// `onprem-data` declares monitor explicitly; every host (including `edge`,
+	// which never lists agent) must get it too (ADR 0019).
+	for _, name := range []string{"edge", "onprem-data"} {
+		host, ok := data.Deployment.Hosts[name]
+		if !ok {
+			t.Fatalf("host %q missing from decoded deployment", name)
+		}
+		if !contains(host.Stacks, "agent") {
+			t.Fatalf("host %q missing implicit agent stack: %v", name, host.Stacks)
+		}
+	}
+}
+
+func TestNormalizeImplicitStacksNoopsWithoutMonitor(t *testing.T) {
+	t.Parallel()
+	dep := &model.Deployment{Hosts: map[string]model.Host{
+		"a": {Provider: "aws", Stacks: []string{"base"}},
+		"b": {Provider: "aws", Stacks: []string{"database"}},
+	}}
+	normalizeImplicitStacks(dep)
+	for name, host := range dep.Hosts {
+		if contains(host.Stacks, "agent") {
+			t.Fatalf("host %q got agent without monitor present: %v", name, host.Stacks)
+		}
 	}
 }
 

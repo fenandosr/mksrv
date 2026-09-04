@@ -8,15 +8,33 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
+  # The fleet's `agent` stack (node-exporter + cAdvisor), published on every
+  # host's private VPC IP — no mesh hop needed, hosts already trust each
+  # other inside the VPC (M23).
   - job_name: node
     static_configs:
-      - targets: ["mksrv-node-exporter:9100"]
-        labels: { host: "{{ .Host.Name }}" }
+{{- range .Fleet }}
+      - targets: ["{{ .PrivateIP }}:9100"]
+        labels: { host: "{{ .Name }}", role: "{{ .Role }}" }
+{{- end }}
 
   - job_name: cadvisor
     static_configs:
-      - targets: ["mksrv-cadvisor:8080"]
-        labels: { host: "{{ .Host.Name }}" }
+{{- range .Fleet }}
+      - targets: ["{{ .PrivateIP }}:8080"]
+        labels: { host: "{{ .Name }}", role: "{{ .Role }}" }
+{{- end }}
+
+{{- if .StackNodes "postgres" }}
+
+  # Patroni serves its own /metrics natively — no exporter needed.
+  - job_name: patroni
+    static_configs:
+{{- range .StackNodes "postgres" }}
+      - targets: ["{{ .PrivateIP }}:8008"]
+        labels: { host: "{{ .Name }}" }
+{{- end }}
+{{- end }}
 {{- if .StackIP "logs" }}
 
   - job_name: loki

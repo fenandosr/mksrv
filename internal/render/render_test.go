@@ -3,6 +3,7 @@
 package render
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -239,6 +240,101 @@ func TestStackRendersLogsAndSecurity(t *testing.T) {
 	}
 	if c := string(secFiles["/etc/containers/systemd/mksrv-crowdsec.container"]); !strings.Contains(c, "target=BOUNCER_KEY_firewall") {
 		t.Fatalf("crowdsec unit missing bouncer key secret:\n%s", c)
+	}
+}
+
+func TestStackRendersAgent(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	ctx := baseContext()
+	ctx.Host.Name = "core1"
+	ctx.Host.PrivateIP = "10.20.0.21"
+	ctx.Host.Stacks = []string{"agent"}
+	files, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), catalog["agent"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(agent) error = %v", err)
+	}
+	if u := string(files["/etc/containers/systemd/mksrv-node-exporter.container"]); !strings.Contains(u, "PublishPort=10.20.0.21:9100:9100") {
+		t.Fatalf("node-exporter unit missing private-IP publish:\n%s", u)
+	}
+	if u := string(files["/etc/containers/systemd/mksrv-cadvisor.container"]); !strings.Contains(u, "PublishPort=10.20.0.21:8080:8080") {
+		t.Fatalf("cadvisor unit missing private-IP publish:\n%s", u)
+	}
+}
+
+func TestStackRendersMonitorFleetWide(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	stacksRoot := filepath.Clean(filepath.Join("..", "..", "stacks"))
+
+	// No postgres cluster in the fleet: the `patroni` job must not render.
+	ctx := baseContext()
+	ctx.Host.Name = "appd"
+	ctx.Host.PrivateIP = "10.20.0.30"
+	ctx.Host.Stacks = []string{"monitor"}
+	ctx.Fleet = []Member{
+		{Name: "appd", PrivateIP: "10.20.0.30", Role: "data"},
+		{Name: "edge", PrivateIP: "10.20.0.10", Role: "edge"},
+	}
+	files, err := Stack(stacksRoot, catalog["monitor"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(monitor) error = %v", err)
+	}
+	p := string(files["/var/lib/mksrv/stacks/monitor/prometheus.yml"])
+	for _, want := range []string{
+		`targets: ["10.20.0.30:9100"]`,
+		`host: "appd", role: "data"`,
+		`targets: ["10.20.0.10:9100"]`,
+		`targets: ["10.20.0.30:8080"]`,
+		`targets: ["10.20.0.10:8080"]`,
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prometheus.yml missing %q:\n%s", want, p)
+		}
+	}
+	if strings.Contains(p, "job_name: patroni") {
+		t.Fatalf("prometheus.yml should not have a patroni job without a postgres cluster:\n%s", p)
+	}
+
+	// A postgres cluster in the fleet adds the patroni job over its members.
+	ctx.StackMembers = map[string][]Member{"postgres": {
+		{Name: "core1", PrivateIP: "10.20.0.21"},
+		{Name: "core2", PrivateIP: "10.20.0.22"},
+		{Name: "core3", PrivateIP: "10.20.0.23"},
+	}}
+	files, err = Stack(stacksRoot, catalog["monitor"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(monitor, cluster) error = %v", err)
+	}
+	p = string(files["/var/lib/mksrv/stacks/monitor/prometheus.yml"])
+	for _, want := range []string{"job_name: patroni", `targets: ["10.20.0.21:8008"]`, `targets: ["10.20.0.23:8008"]`} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prometheus.yml missing %q:\n%s", want, p)
+		}
+	}
+
+	// Grafana gets the dashboards volume + provisioning file, datasource uids
+	// are fixed so bundled dashboard JSON can reference them.
+	grafana := string(files["/etc/containers/systemd/mksrv-grafana.container"])
+	if !strings.Contains(grafana, "/var/lib/mksrv/stacks/monitor/dashboards:/var/lib/mksrv-dashboards:Z,ro") {
+		t.Fatalf("grafana unit missing dashboards volume:\n%s", grafana)
+	}
+	if ds := string(files["/var/lib/mksrv/stacks/monitor/grafana-datasource.yml"]); !strings.Contains(ds, "uid: prometheus") {
+		t.Fatalf("grafana datasource missing fixed uid:\n%s", ds)
+	}
+	dash := string(files["/var/lib/mksrv/stacks/monitor/dashboards/fleet-overview.json"])
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(dash), &decoded); err != nil {
+		t.Fatalf("fleet-overview.json is not valid JSON: %v\n%s", err, dash)
+	}
+	if !strings.Contains(dash, `"legendFormat": "{{host}}"`) {
+		t.Fatalf("fleet-overview.json should keep the literal Prometheus legend placeholder:\n%s", dash)
 	}
 }
 

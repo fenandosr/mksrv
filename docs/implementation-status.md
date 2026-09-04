@@ -246,3 +246,16 @@ Still deferred: Keycloak's own Postgres onto the cluster; folding
   restic password as a podman secret; a raft-snapshot-only periodic OpenBao
   token. `internal/cli/backup.go` (`provisionBackup`, `mksrv backup run/list`).
   Restore is documented (`docs/backup.md`), not automated.
+
+## M23 — in progress (phase 1 of 4)
+
+- **Phase 1 — implemented** (ADR 0019): a new `agent` stack (node-exporter +
+  cAdvisor) is auto-assigned to every host once any host carries `monitor`
+  (`workspace.normalizeImplicitStacks`), publishing on each host's private
+  VPC IP. `monitor`'s Prometheus scrapes the whole fleet via the new
+  `render.Context.Fleet` roster, plus Patroni's native `/metrics`. Grafana
+  gets provisioned dashboards (`fleet-overview`, bundled). No Terraform
+  change — the intra-VPC security group rule already permitted the traffic.
+- Deferred to phases 2–4: OpenBao/Postgres/Redis exporters; blackbox probing
+  of public endpoints; Keycloak/Caddy metrics; an alert-rule catalog and
+  notifications. See `docs/monitoring.md`.

@@ -17,6 +17,8 @@ Environment=GF_SECURITY_ADMIN_USER=admin
 Environment=GF_DATASOURCES_PROMETHEUS_URL=http://mksrv-prometheus:9090
 Secret=mksrv-monitor-grafana_admin_password,type=env,target=GF_SECURITY_ADMIN_PASSWORD
 Volume=/var/lib/mksrv/stacks/monitor/grafana-datasource.yml:/etc/grafana/provisioning/datasources/mksrv.yml:Z,ro
+Volume=/var/lib/mksrv/stacks/monitor/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/mksrv.yml:Z,ro
+Volume=/var/lib/mksrv/stacks/monitor/dashboards:/var/lib/mksrv-dashboards:Z,ro
 Volume=mksrv-monitor-grafana:/var/lib/grafana
 
 [Service]
