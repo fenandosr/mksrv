@@ -19,9 +19,11 @@ import (
 
 // Client talks to one Keycloak instance.
 type Client struct {
-	base  string
-	http  *http.Client
-	token string
+	base     string
+	http     *http.Client
+	token    string
+	user     string
+	password string
 }
 
 // New creates a client for baseURL (e.g. https://auth.example.com).
@@ -35,6 +37,7 @@ func New(baseURL string) *Client {
 // Login obtains an admin access token from the master realm using the
 // admin-cli public client and the direct-grant flow.
 func (c *Client) Login(ctx context.Context, username, password string) error {
+	c.user, c.password = username, password
 	form := url.Values{
 		"grant_type": {"password"},
 		"client_id":  {"admin-cli"},
@@ -67,27 +70,46 @@ func (c *Client) Login(ctx context.Context, username, password string) error {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in any, out any) (int, error) {
-	var reader io.Reader
+	var blob []byte
 	if in != nil {
-		blob, err := json.Marshal(in)
-		if err != nil {
+		var err error
+		if blob, err = json.Marshal(in); err != nil {
 			return 0, err
 		}
-		reader = bytes.NewReader(blob)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+"/admin"+path, reader)
+
+	send := func() (*http.Response, error) {
+		var reader io.Reader
+		if in != nil {
+			reader = bytes.NewReader(blob)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, c.base+"/admin"+path, reader)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		if in != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		return c.http.Do(req)
+	}
+
+	res, err := send()
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	res, err := c.http.Do(req)
-	if err != nil {
-		return 0, err
+	// The admin token is short-lived; on a 401 re-authenticate once and retry.
+	if res.StatusCode == http.StatusUnauthorized && c.user != "" {
+		res.Body.Close()
+		if err := c.Login(ctx, c.user, c.password); err != nil {
+			return http.StatusUnauthorized, fmt.Errorf("keycloak re-login: %w", err)
+		}
+		if res, err = send(); err != nil {
+			return 0, err
+		}
 	}
 	defer res.Body.Close()
+
 	body, _ := io.ReadAll(io.LimitReader(res.Body, 8<<20))
 	if res.StatusCode >= 400 {
 		return res.StatusCode, fmt.Errorf("keycloak %s %s: %d %s", method, path, res.StatusCode, strings.TrimSpace(string(body)))

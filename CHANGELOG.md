@@ -28,6 +28,44 @@
   `monitor` host itself had metrics. Grafana gets a provisioned dashboards
   volume and one bundled dashboard, `fleet-overview`. See `docs/monitoring.md`.
 
+- Fix: `infra/root/.terraform.lock.hcl` is now committed and embedded (`assets.go`
+  gains an explicit embed for it, since bare `//go:embed infra` skips dotfiles).
+  Without it every `mksrv apply` on a `dev` engine re-resolved the AWS provider
+  from scratch. The lock pins `hashicorp/aws` with multi-platform hashes.
+
+- Fix (M21): `backup.sh` never initialised the restic repository, so the very
+  first run failed with "Is there a repository at the following location?". It
+  now runs `restic init` when `restic cat config` shows no repo. It also no
+  longer treats restic's exit 3 ("some source files could not be read" —
+  sockets, files that changed mid-read) as a failure: the snapshot is written.
+- Fix (M21): `mksrv-backup.service` `ExecStart`ed `backup.sh` directly, but the
+  script lives under `/var/lib/mksrv` (relabelled `container_file_t` for podman)
+  and systemd cannot exec it there — `status=203/EXEC`, Permission denied. Now
+  `ExecStart=/usr/bin/bash …`.
+
+- Fix: the Keycloak admin token expires (60s master-realm default) partway
+  through a long `mksrv tenant apply`; the client now re-authenticates once on
+  a 401 and retries.
+- Fix (M13): `bao policy write <name> -` read empty stdin because `baoExec`
+  built `podman exec` without `-i`, so `mksrv tenant apply` failed at the
+  per-tenant OpenBao step ("'policy' parameter not supplied or empty").
+- Fix (M5): `mksrv tenant apply`'s pgAdmin server-list load wrote the file
+  inside the container and then `podman cp`'d it from the host, which fails.
+  Now `tee`s on the host first.
+
+- Fix (M20): `mksrv postgres bootstrap` recorded `.mksrv/postgres.json`'s
+  `primary` as the Patroni IP, but `pgConn` (used by `mksrv tenant apply`) looks
+  it up as a fleet host name — `mksrv tenant apply` then failed with
+  "postgres primary "10.20.x.x" is not a fleet host". Now records the host name;
+  `pgConn` also tolerates an IP from an older file.
+- Fix (M11): dedicated-volume bind mounts (`prometheus` tsdb, `loki` chunks,
+  `patroni` pgdata/raft, `openbao` baoraft) now use `:Z,U` so podman chowns the
+  freshly-formatted XFS mount to the container's user. Without it Prometheus
+  (uid 65534), Loki, Patroni and OpenBao exited on "permission denied" writing
+  to their root-owned data dir.
+- `mksrv deploy` now pulls a stack's images (`podman pull`, retried) before
+  starting its units, so a slow first pull can't trip `TimeoutStartSec` /
+  the restart rate limiter (which failed Grafana's 547 MB image on a fresh host).
 - Fix (M20): the `database` stack's `postgres` TCP health check probed
   `127.0.0.1:5432` on the app host — nothing there in cluster mode. Removed; the
   standalone container gates on its own `pg_isready` HealthCmd and the cluster

@@ -59,20 +59,23 @@ func TestOIDCArgs(t *testing.T) {
 		}
 	}
 
-	dev := strings.Join(oidcGroupRoleArgs("acme", "dev", []string{"dev", "admin"}, "tenant-acme-dev"), " ")
-	for _, want := range []string{
-		"write auth/oidc-acme/role/tenant-acme-dev",
-		`bound_claims={"groups":["dev","admin"]}`,
-		"token_policies=tenant-acme-dev",
-		"allowed_redirect_uris=http://localhost:8250/oidc/callback",
-	} {
-		if !strings.Contains(dev, want) {
-			t.Fatalf("oidc dev role args missing %q: %s", want, dev)
-		}
+	if p := oidcGroupRolePath("acme", "dev"); p != "auth/oidc-acme/role/tenant-acme-dev" {
+		t.Fatalf("oidc role path = %q", p)
 	}
-	adm := strings.Join(oidcGroupRoleArgs("acme", "admin", []string{"admin"}, "tenant-acme-admin"), " ")
-	if !strings.Contains(adm, `bound_claims={"groups":["admin"]}`) || !strings.Contains(adm, "token_policies=tenant-acme-admin") {
-		t.Fatalf("oidc admin role args wrong: %s", adm)
+	var dev map[string]any
+	if err := json.Unmarshal(oidcGroupRolePayload([]string{"dev", "admin"}, "tenant-acme-dev"), &dev); err != nil {
+		t.Fatal(err)
+	}
+	bc, _ := dev["bound_claims"].(map[string]any)
+	groups, _ := bc["groups"].([]any)
+	if len(groups) != 2 || groups[0] != "dev" || dev["token_policies"] != "tenant-acme-dev" ||
+		dev["allowed_redirect_uris"] != "http://localhost:8250/oidc/callback" {
+		t.Fatalf("oidc dev role payload wrong: %s", oidcGroupRolePayload([]string{"dev", "admin"}, "tenant-acme-dev"))
+	}
+	var adm map[string]any
+	_ = json.Unmarshal(oidcGroupRolePayload([]string{"admin"}, "tenant-acme-admin"), &adm)
+	if adm["token_policies"] != "tenant-acme-admin" {
+		t.Fatalf("oidc admin role payload wrong: %s", oidcGroupRolePayload([]string{"admin"}, "tenant-acme-admin"))
 	}
 }
 

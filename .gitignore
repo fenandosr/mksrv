@@ -13,6 +13,7 @@ coverage.out
 *.tfstate.*
 .terraform/
 .terraform.lock.hcl
+!/infra/root/.terraform.lock.hcl
 crash.log
 
 # mksrv workspaces and generated state

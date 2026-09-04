@@ -5,5 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/var/lib/mksrv/stacks/backup/backup.sh
+# Invoke bash explicitly: the script lives under /var/lib/mksrv, which the
+# bootstrap relabels for podman's graphroot, so systemd (init_t) cannot exec
+# the file directly — it can exec bash and let bash read the script.
+ExecStart=/usr/bin/bash /var/lib/mksrv/stacks/backup/backup.sh
 TimeoutStartSec=3600

@@ -101,7 +101,9 @@ func (a *App) newOpenBaoCommand(opts *globalOptions) *cobra.Command {
 // baoExec builds a `podman exec ... bao <args>` command. token is optional.
 func baoExec(token string, args ...string) string {
 	b := strings.Builder{}
-	b.WriteString("sudo podman exec -e BAO_ADDR=http://127.0.0.1:8200")
+	// -i: keep stdin open so `bao policy write <name> -` (and other stdin
+	// readers) receive the piped input from client.RunInput.
+	b.WriteString("sudo podman exec -i -e BAO_ADDR=http://127.0.0.1:8200")
 	if token != "" {
 		b.WriteString(" -e BAO_TOKEN=" + quoteArg(token))
 	}
