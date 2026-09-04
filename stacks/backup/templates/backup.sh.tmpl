@@ -71,8 +71,24 @@ if [ -n "${KC_URL:-}" ] && [ -n "${KC_ADMIN_PASSWORD:-}" ]; then
 fi
 
 # 4. restic snapshot: the staged dumps + the dedicated stack volumes + podman volumes.
-if ! restic backup --tag mksrv --host "$(hostname -s)" /stage /vol /podvol; then
-  log "restic backup failed"
+# Initialise the repository on first run — the S3 bucket exists (Terraform) but
+# the restic repo does not until something writes to it.
+if ! restic cat config >/dev/null 2>&1; then
+  log "initialising restic repository"
+  if ! restic init; then
+    log "restic init failed"
+    exit 1
+  fi
+fi
+# restic exit 3 = "some source files could not be read" (sockets, files that
+# changed mid-read under the live stack volumes) — the snapshot is still written,
+# so treat it as a warning, not a failure. Only a real error (1) aborts.
+restic backup --tag mksrv --host "$(hostname -s)" /stage /vol /podvol
+rc=$?
+if [ "$rc" = 3 ]; then
+  log "restic backup: some source files were unreadable (snapshot still created)"
+elif [ "$rc" != 0 ]; then
+  log "restic backup failed (exit $rc)"
   exit 1
 fi
 

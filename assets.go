@@ -9,5 +9,5 @@ import "embed"
 // FS contains the public engine tree and the synthetic workspace example.
 // all:stacks is required so the _shared directory is included.
 //
-//go:embed infra all:stacks schemas examples/workspace
+//go:embed infra infra/root/.terraform.lock.hcl all:stacks schemas examples/workspace
 var FS embed.FS

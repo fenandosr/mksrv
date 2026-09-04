@@ -42,6 +42,16 @@ func TestPgConnSelectsClusterOrStandalone(t *testing.T) {
 		t.Fatalf("cluster pgConn = %+v ok=%v err=%v", pg, ok, err)
 	}
 
+	// legacy postgres.json recorded the primary as an IP -> resolve via Nodes
+	fIP := &fleet{
+		postgres: postgresCluster{Primary: "10.20.0.11", Nodes: []postgresNode{{Host: "core1", IP: "10.20.0.11"}}},
+		byName:   map[string]hostTarget{"core1": {Name: "core1"}},
+		outputs:  infra.Outputs{Hosts: map[string]infra.HostOutput{"core1": {PrivateIP: "10.20.0.11"}}},
+	}
+	if pg, ok, err := fIP.pgConn(); err != nil || !ok || pg.name != "core1" {
+		t.Fatalf("IP-primary pgConn = %+v ok=%v err=%v", pg, ok, err)
+	}
+
 	// postgres assigned but not bootstrapped -> error
 	f2 := &fleet{targets: []hostTarget{{Name: "core1", Host: model.Host{Stacks: []string{"postgres"}}}}}
 	if _, _, err := f2.pgConn(); err == nil || !strings.Contains(err.Error(), "bootstrap") {

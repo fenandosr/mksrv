@@ -27,9 +27,18 @@ type pgConn struct {
 
 func (f *fleet) pgConn() (pgConn, bool, error) {
 	if f.postgres.Primary != "" {
-		ht, ok := f.byName[f.postgres.Primary]
+		name := f.postgres.Primary
+		if _, ok := f.byName[name]; !ok {
+			// Older .mksrv/postgres.json recorded the primary as an IP.
+			for _, n := range f.postgres.Nodes {
+				if n.IP == f.postgres.Primary && n.Host != "" {
+					name = n.Host
+				}
+			}
+		}
+		ht, ok := f.byName[name]
 		if !ok {
-			return pgConn{}, false, fmt.Errorf("postgres primary %q is not a fleet host", f.postgres.Primary)
+			return pgConn{}, false, fmt.Errorf("postgres primary %q is not a fleet host (re-run `mksrv postgres bootstrap`)", f.postgres.Primary)
 		}
 		ip := f.outputs.Hosts[ht.Name].PrivateIP
 		return pgConn{ht.Target, ht.Name, "mksrv-patroni", "postgres", "/mksrv/{env}/postgres/superpass", ip}, true, nil
@@ -146,7 +155,7 @@ func loadPgAdminServers(ctx context.Context, client *sshx.Client, pgadminUser, p
 		return err
 	}
 	if _, err := client.RunInput(ctx,
-		"sudo podman exec -i mksrv-pgadmin sh -c 'cat > /tmp/mksrv-servers.json' 2>/dev/null || sudo tee /tmp/mksrv-servers.json >/dev/null && sudo podman cp /tmp/mksrv-servers.json mksrv-pgadmin:/tmp/mksrv-servers.json",
+		"sudo tee /tmp/mksrv-servers.json >/dev/null && sudo podman cp /tmp/mksrv-servers.json mksrv-pgadmin:/tmp/mksrv-servers.json",
 		blob,
 	); err != nil {
 		return err
