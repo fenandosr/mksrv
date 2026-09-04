@@ -3,6 +3,9 @@ global:
   external_labels:
     env: {{ .Env }}
 
+rule_files:
+  - /etc/prometheus/rules.yml
+
 scrape_configs:
   - job_name: prometheus
     static_configs:

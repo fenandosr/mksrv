@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"sigs.k8s.io/yaml"
+
 	"github.com/fenandosr/mksrv/internal/engine"
 	"github.com/fenandosr/mksrv/internal/model"
 	"github.com/fenandosr/mksrv/internal/schema"
@@ -373,6 +375,37 @@ func TestStackRendersMonitorFleetWide(t *testing.T) {
 	if !strings.Contains(dash, `"legendFormat": "{{host}}"`) {
 		t.Fatalf("fleet-overview.json should keep the literal Prometheus legend placeholder:\n%s", dash)
 	}
+	if !strings.Contains(dash, `"title": "Firing alerts"`) || !strings.Contains(dash, `ALERTS{alertstate=\"firing\"}`) {
+		t.Fatalf("fleet-overview.json missing the firing-alerts panel:\n%s", dash)
+	}
+
+	// M23 phase 4: the alert-rule file is wired in and itself renders to valid
+	// YAML with Prometheus's own {{ $labels... }} placeholders intact — mksrv's
+	// renderer must not try to resolve them as its own template fields.
+	if !strings.Contains(p, "rule_files:") || !strings.Contains(p, "/etc/prometheus/rules.yml") {
+		t.Fatalf("prometheus.yml missing rule_files:\n%s", p)
+	}
+	if pu := string(files["/etc/containers/systemd/mksrv-prometheus.container"]); !strings.Contains(pu, "prometheus-rules.yml:/etc/prometheus/rules.yml:Z,ro") {
+		t.Fatalf("prometheus unit missing the rules mount:\n%s", pu)
+	}
+	rules := string(files["/var/lib/mksrv/stacks/monitor/prometheus-rules.yml"])
+	for _, want := range []string{
+		"alert: TargetDown", "alert: PatroniNoLeader", "alert: OpenBaoSealed",
+		"alert: EndpointDown", "alert: CertExpiringSoon", "alert: BackupStale",
+		"{{ $labels.host }}", "mksrv_backup_last_success_seconds",
+	} {
+		if !strings.Contains(rules, want) {
+			t.Fatalf("prometheus-rules.yml missing %q:\n%s", want, rules)
+		}
+	}
+	var rulesDoc map[string]any
+	if err := yaml.Unmarshal([]byte(rules), &rulesDoc); err != nil {
+		t.Fatalf("prometheus-rules.yml is not valid YAML: %v\n%s", err, rules)
+	}
+	groups, _ := rulesDoc["groups"].([]any)
+	if len(groups) != 4 {
+		t.Fatalf("prometheus-rules.yml groups = %d, want 4:\n%s", len(groups), rules)
+	}
 }
 
 func TestStackStorageAndRetention(t *testing.T) {
@@ -523,6 +556,8 @@ func TestStackRendersBackup(t *testing.T) {
 		"partial-export?exportClients=true",
 		"restic forget --tag mksrv --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune",
 		"--secret mksrv-backup-restic_password,type=env,target=RESTIC_PASSWORD",
+		"mksrv_backup_last_success_seconds $(date +%s)",
+		`mv "$METRICS_DIR/backup.prom.$$" "$METRICS_DIR/backup.prom"`,
 	} {
 		if !strings.Contains(sh, want) {
 			t.Fatalf("backup.sh missing %q", want)

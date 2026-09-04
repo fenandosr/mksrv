@@ -96,5 +96,17 @@ fi
 restic forget --tag mksrv --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune \
   || log "restic forget failed"
 
+# 6. freshness metric for node-exporter's textfile collector (M23 phase 4):
+# the `BackupStale` alert fires off this. Atomic write (temp + rename) so the
+# collector never reads a half-written file.
+METRICS_DIR=/var/lib/mksrv/metrics
+mkdir -p "$METRICS_DIR"
+{
+  echo "# HELP mksrv_backup_last_success_seconds Unix time of the last successful mksrv-backup run."
+  echo "# TYPE mksrv_backup_last_success_seconds gauge"
+  echo "mksrv_backup_last_success_seconds $(date +%s)"
+} > "$METRICS_DIR/backup.prom.$$"
+mv "$METRICS_DIR/backup.prom.$$" "$METRICS_DIR/backup.prom"
+
 rm -rf "$STAGE"/pg "$STAGE"/bao "$STAGE"/keycloak
 log "done"

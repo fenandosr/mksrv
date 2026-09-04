@@ -5,7 +5,7 @@ auto-assigned to every host — ADR 0019) give the fleet a central metrics view.
 This page tracks what is scraped today, what dashboards ship, and what M23's
 later phases add.
 
-## What's scraped (M23 phases 1–2)
+## What's scraped
 
 | Job | Source | Every host? |
 |---|---|---|
@@ -61,12 +61,44 @@ vendored, to avoid license drift):
 - Prometheus and Loki datasources are provisioned with fixed UIDs (`prometheus`,
   `loki`) so bundled dashboard JSON can reference them without a lookup.
 
-## Roadmap (M23, phase 4)
+## Alert rules
 
-- **Phase 4** — a `mksrv_backup_last_success_seconds` textfile metric, an
-  alert-rule catalog (host resource pressure, `PatroniNoLeader`,
-  `OpenBaoSealed`, `CertExpiringSoon`, `BackupStale`, `EndpointDown`, …), and
-  Grafana-managed notifications (webhook or SMTP contact point).
+`stacks/monitor/templates/prometheus-rules.yml.tmpl`, loaded via Prometheus's
+`rule_files:`. A rule for a subsystem that isn't deployed simply never fires
+(no error). Visible in Prometheus's own `/alerts`, and as a count in
+Grafana's `fleet-overview` dashboard (`sum(ALERTS{alertstate="firing"})`).
 
-See ADR 0019 (phase 1), ADR 0020 (phase 2), and ADR 0021 (phase 3) for the
-design rationale.
+| Alert | Group | Fires when | For |
+|---|---|---|---|
+| `TargetDown` | fleet | a scrape target has been unreachable | 5m |
+| `HostDiskAlmostFull` | fleet | a filesystem has < 12% free | 10m |
+| `HostLowMemory` | fleet | a host has < 10% memory available | 10m |
+| `HostHighCPU` | fleet | a host's CPU usage is above 90% | 15m |
+| `PatroniNoLeader` | data-plane | no Patroni node reports itself as leader | 2m |
+| `OpenBaoSealed` | data-plane | an OpenBao node is sealed | 1m |
+| `RedisMemoryHigh` | data-plane | Redis is above 85% of `maxmemory` | 10m |
+| `PostgresConnectionsSaturated` | data-plane | above 80% of `max_connections` | 10m |
+| `EndpointDown` | edge | a blackbox probe (an operator/tenant FQDN) fails | 5m |
+| `CertExpiringSoon` | edge | a TLS cert has < 14 days left | 1h |
+| `BackupStale` | backup | no successful `mksrv-backup` run in > 26h | — |
+
+## Wiring up notifications (manual, ~2 minutes)
+
+Rules fire and show up in Grafana/Prometheus regardless, but nothing pages
+anyone until a contact point exists. This is deliberately **not**
+auto-provisioned (ADR 0022) — Grafana's alerting provisioning YAML has real
+schema risk that this session had no live instance to verify against, and
+this system runs production traffic. Do it once, in the UI:
+
+1. Grafana → **Alerting → Contact points** → **Add contact point** — pick
+   `Slack`, `Webhook`, or `Email` and fill in the destination.
+2. **Alerting → Notification policies** → edit the default policy → set its
+   contact point to the one just created.
+3. **Alerting → Alert rules** → **New alert rule**, query the Prometheus
+   datasource with `ALERTS{alertstate="firing"}` (or import individual rules
+   from `prometheus-rules.yml` one at a time) so Grafana evaluates and routes
+   them — Grafana's own alerting engine needs its own rule copy; it does not
+   read Prometheus's `rule_files:` automatically.
+
+See ADR 0019 (phase 1), ADR 0020 (phase 2), ADR 0021 (phase 3), and ADR 0022
+(phase 4) for the full design rationale. M23 is complete as of phase 4.
