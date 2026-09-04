@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix (M20): `pgadmin` / `postgrest` container units hard-coded
+  `Requires=`/`After=mksrv-postgres.service`. In cluster mode that unit doesn't
+  exist on the app host, so `systemctl restart mksrv-pgadmin.service` failed
+  with "Unit mksrv-postgres.service not found". The dependency is now guarded by
+  `{{ if not (.StackIP "postgres") }}`.
 - Fix: the `cache` stack's `users.acl` seed carried a leading comment block.
   Redis's external `aclfile` parser accepts only `user …` and blank lines, so
   Redis aborted startup ("Aborting Redis startup because of ACL errors … should

@@ -1,7 +1,9 @@
 [Unit]
 Description=mksrv pgAdmin
+{{- if not (.StackIP "postgres") }}
 Requires=mksrv-postgres.service
 After=mksrv-postgres.service
+{{- end }}
 
 [Container]
 ContainerName=mksrv-pgadmin
