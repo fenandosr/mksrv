@@ -261,7 +261,7 @@ func TestStackStorageAndRetention(t *testing.T) {
 		t.Fatalf("Stack(monitor) error = %v", err)
 	}
 	pu := string(mon["/etc/containers/systemd/mksrv-prometheus.container"])
-	if !strings.Contains(pu, "Volume=/var/lib/mksrv/vol/tsdb:/prometheus:Z") {
+	if !strings.Contains(pu, "Volume=/var/lib/mksrv/vol/tsdb:/prometheus:Z,U") {
 		t.Fatalf("prometheus unit not on the dedicated volume:\n%s", pu)
 	}
 	if !strings.Contains(pu, "--storage.tsdb.retention.time=30d") {
@@ -272,7 +272,7 @@ func TestStackStorageAndRetention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stack(logs) error = %v", err)
 	}
-	if lu := string(lg["/etc/containers/systemd/mksrv-loki.container"]); !strings.Contains(lu, "Volume=/var/lib/mksrv/vol/chunks:/loki:Z") {
+	if lu := string(lg["/etc/containers/systemd/mksrv-loki.container"]); !strings.Contains(lu, "Volume=/var/lib/mksrv/vol/chunks:/loki:Z,U") {
 		t.Fatalf("loki unit not on the dedicated volume:\n%s", lu)
 	}
 	if ly := string(lg["/var/lib/mksrv/stacks/logs/loki.yml"]); !strings.Contains(ly, "retention_period: 504h") { // 21 * 24
@@ -289,7 +289,7 @@ func TestStackStorageAndRetention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stack(postgres) error = %v", err)
 	}
-	if u := string(pg["/etc/containers/systemd/mksrv-patroni.container"]); !strings.Contains(u, "Volume=/var/lib/mksrv/vol/pgdata:/var/lib/postgresql/data:Z") {
+	if u := string(pg["/etc/containers/systemd/mksrv-patroni.container"]); !strings.Contains(u, "Volume=/var/lib/mksrv/vol/pgdata:/var/lib/postgresql/data:Z,U") {
 		t.Fatalf("patroni unit not on the dedicated volume:\n%s", u)
 	}
 }
@@ -444,7 +444,7 @@ func TestStackRendersOpenBaoCluster(t *testing.T) {
 	unit := string(files["/etc/containers/systemd/mksrv-openbao.container"])
 	for _, want := range []string{
 		"AddCapability=IPC_LOCK",
-		"Volume=/var/lib/mksrv/vol/baoraft:/openbao/data:Z",
+		"Volume=/var/lib/mksrv/vol/baoraft:/openbao/data:Z,U",
 		"PublishPort=10.20.0.22:8200:8200",
 		"PublishPort=100.64.0.22:8200:8200",
 	} {

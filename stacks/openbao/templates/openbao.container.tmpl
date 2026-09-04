@@ -19,7 +19,7 @@ PublishPort={{ .Host.TailnetIP }}:8200:8200
 {{- end }}
 PublishPort=127.0.0.1:8200:8200
 Volume=/var/lib/mksrv/stacks/openbao/openbao.hcl:/openbao/config/openbao.hcl:Z,ro
-Volume={{ .Volume "baoraft" }}:/openbao/data:Z
+Volume={{ .Volume "baoraft" }}:/openbao/data:Z,U
 HealthCmd=sh -c 'bao status; test $? -ne 1'
 HealthInterval=30s
 HealthRetries=10

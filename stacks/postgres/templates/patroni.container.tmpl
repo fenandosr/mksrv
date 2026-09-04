@@ -18,8 +18,8 @@ PublishPort={{ .Host.TailnetIP }}:5432:5432
 PublishPort=127.0.0.1:5432:5432
 PublishPort=127.0.0.1:8008:8008
 Volume=/var/lib/mksrv/stacks/postgres/patroni.yml:/etc/patroni/patroni.yml:Z,ro
-Volume={{ .Volume "pgdata" }}:/var/lib/postgresql/data:Z
-Volume={{ .Volume "raft" }}:/var/lib/patroni/raft:Z
+Volume={{ .Volume "pgdata" }}:/var/lib/postgresql/data:Z,U
+Volume={{ .Volume "raft" }}:/var/lib/patroni/raft:Z,U
 Secret=mksrv-postgres-superpass,type=env,target=PATRONI_SUPERUSER_PASSWORD
 Secret=mksrv-postgres-replication_password,type=env,target=PATRONI_REPLICATION_PASSWORD
 HealthCmd=patronictl -c /etc/patroni/patroni.yml list -f json

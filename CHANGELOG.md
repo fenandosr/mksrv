@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix (M11): dedicated-volume bind mounts (`prometheus` tsdb, `loki` chunks,
+  `patroni` pgdata/raft, `openbao` baoraft) now use `:Z,U` so podman chowns the
+  freshly-formatted XFS mount to the container's user. Without it Prometheus
+  (uid 65534), Loki, Patroni and OpenBao exited on "permission denied" writing
+  to their root-owned data dir.
 - `mksrv deploy` now pulls a stack's images (`podman pull`, retried) before
   starting its units, so a slow first pull can't trip `TimeoutStartSec` /
   the restart rate limiter (which failed Grafana's 547 MB image on a fresh host).
