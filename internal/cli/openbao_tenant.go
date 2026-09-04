@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/fenandosr/mksrv/internal/keycloak"
 	sshx "github.com/fenandosr/mksrv/internal/ssh"
@@ -29,23 +28,26 @@ func oidcConfigArgs(id, discoveryURL, clientSecret string) []string {
 	}
 }
 
-// oidcGroupRoleArgs builds a per-group OIDC role: only realm members whose
-// `groups` claim contains one of boundGroups can assume it, and it grants
-// exactly `policy`.
-func oidcGroupRoleArgs(id, suffix string, boundGroups []string, policy string) []string {
-	quoted := make([]string, len(boundGroups))
-	for i, g := range boundGroups {
-		quoted[i] = `"` + g + `"`
+// oidcGroupRolePayload is the JSON body for a per-group OIDC role: only realm
+// members whose `groups` claim contains one of boundGroups can assume it, and it
+// grants exactly `policy`. Passed to `bao write <path> -` on stdin so the
+// `bound_claims` map survives shell quoting.
+func oidcGroupRolePayload(boundGroups []string, policy string) []byte {
+	body := map[string]any{
+		"user_claim":            "sub",
+		"allowed_redirect_uris": openbaoOIDCRedirect,
+		"bound_claims":          map[string]any{"groups": boundGroups},
+		"token_policies":        policy,
+		"token_ttl":             "1h",
+		"token_max_ttl":         "4h",
+		"oidc_scopes":           "openid",
 	}
-	return []string{
-		"write", "auth/oidc-" + id + "/role/tenant-" + id + "-" + suffix,
-		"user_claim=sub",
-		"allowed_redirect_uris=" + openbaoOIDCRedirect,
-		"bound_claims={\"groups\":[" + strings.Join(quoted, ",") + "]}",
-		"token_policies=" + policy,
-		"token_ttl=1h", "token_max_ttl=4h",
-		"oidc_scopes=openid",
-	}
+	b, _ := json.Marshal(body)
+	return b
+}
+
+func oidcGroupRolePath(id, suffix string) string {
+	return "auth/oidc-" + id + "/role/tenant-" + id + "-" + suffix
 }
 
 // tenantDBSecretFields returns the KV fields for a tenant's Postgres connection.
@@ -310,12 +312,12 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 		}
 		// dev role: any dev or admin (bare `bao login` lands here). admin role:
 		// requested explicitly with `-role=tenant-<id>-admin`.
-		if _, err := client.Run(ctx, baoExec(rootToken,
-			oidcGroupRoleArgs(id, "dev", []string{"dev", "admin"}, role+"-dev")...)); err != nil {
+		if _, err := client.RunInput(ctx, baoExec(rootToken, "write", oidcGroupRolePath(id, "dev"), "-"),
+			oidcGroupRolePayload([]string{"dev", "admin"}, role+"-dev")); err != nil {
 			return fmt.Errorf("openbao %s: oidc dev role: %w", id, err)
 		}
-		if _, err := client.Run(ctx, baoExec(rootToken,
-			oidcGroupRoleArgs(id, "admin", []string{"admin"}, role+"-admin")...)); err != nil {
+		if _, err := client.RunInput(ctx, baoExec(rootToken, "write", oidcGroupRolePath(id, "admin"), "-"),
+			oidcGroupRolePayload([]string{"admin"}, role+"-admin")); err != nil {
 			return fmt.Errorf("openbao %s: oidc admin role: %w", id, err)
 		}
 
