@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix (M21): `mksrv-backup.service` `ExecStart`ed `backup.sh` directly, but the
+  script lives under `/var/lib/mksrv` (relabelled `container_file_t` for podman)
+  and systemd cannot exec it there — `status=203/EXEC`, Permission denied. Now
+  `ExecStart=/usr/bin/bash …`.
+
 - Fix: the Keycloak admin token expires (60s master-realm default) partway
   through a long `mksrv tenant apply`; the client now re-authenticates once on
   a 401 and retries.
