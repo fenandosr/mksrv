@@ -36,9 +36,9 @@ templates:
     dst: /etc/containers/systemd/mksrv-postgrest-{tenant}.container
     scope: per_tenant
 health:
-  - app: postgres
-    type: tcp
-    port: 5432
+  # No local Postgres check: the standalone container gates on its own
+  # `pg_isready` HealthCmd + `Notify=healthy`, and in cluster mode Postgres
+  # runs on the core hosts (gated by `mksrv postgres bootstrap`).
   - app: pgadmin
     type: http
     path: /misc/ping

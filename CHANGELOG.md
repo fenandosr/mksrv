@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fix (M20): the `database` stack's `postgres` TCP health check probed
+  `127.0.0.1:5432` on the app host — nothing there in cluster mode. Removed; the
+  standalone container gates on its own `pg_isready` HealthCmd and the cluster
+  is gated by `mksrv postgres bootstrap`.
 - Fix (M20): `pgadmin` / `postgrest` container units hard-coded
   `Requires=`/`After=mksrv-postgres.service`. In cluster mode that unit doesn't
   exist on the app host, so `systemctl restart mksrv-pgadmin.service` failed
