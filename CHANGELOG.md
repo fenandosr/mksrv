@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Feature (M23 phase 4, ADR 0022): alert-rule catalog. `backup.sh` writes a
+  `mksrv_backup_last_success_seconds` textfile metric on success. A new
+  `prometheus-rules.yml` (4 groups, 11 rules — host pressure, `TargetDown`,
+  `PatroniNoLeader`, `OpenBaoSealed`, `RedisMemoryHigh`,
+  `PostgresConnectionsSaturated`, `EndpointDown`, `CertExpiringSoon`,
+  `BackupStale`) is loaded via Prometheus's `rule_files:`; a rule for an
+  undeployed subsystem simply never fires. `fleet-overview` gets a "Firing
+  alerts" panel. Notifications are deliberately **not** auto-provisioned —
+  see `docs/monitoring.md` for the two-minute manual setup. **M23 is
+  complete.**
+
 - Feature (M23 phase 3, ADR 0021): edge visibility. `blackbox_exporter`
   probes every operator + tenant-rest FQDN over HTTPS (reachability +
   certificate expiry via `probe_ssl_earliest_cert_expiry`) — the target list,

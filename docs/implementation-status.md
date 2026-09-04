@@ -247,7 +247,7 @@ Still deferred: Keycloak's own Postgres onto the cluster; folding
   token. `internal/cli/backup.go` (`provisionBackup`, `mksrv backup run/list`).
   Restore is documented (`docs/backup.md`), not automated.
 
-## M23 — in progress (phase 3 of 4)
+## M23 — implemented
 
 - **Phase 1 — implemented** (ADR 0019): a new `agent` stack (node-exporter +
   cAdvisor) is auto-assigned to every host once any host carries `monitor`
@@ -269,5 +269,12 @@ Still deferred: Keycloak's own Postgres onto the cluster; folding
   published on the private IP. Caddy gets a `servers { metrics }` option and
   a private-IP-only vhost proxying just `/metrics` — the admin API itself
   stays loopback-only.
-- Deferred to phase 4: an alert-rule catalog and notifications. See
-  `docs/monitoring.md`.
+- **Phase 4 — implemented** (ADR 0022): `backup.sh` writes a
+  `mksrv_backup_last_success_seconds` textfile metric on success; a
+  `prometheus-rules.yml` alert-rule catalog (4 groups, 11 rules) is loaded via
+  `rule_files:`; `fleet-overview` gets a "Firing alerts" panel. Notifications
+  are deliberately manual (`docs/monitoring.md`), not auto-provisioned — no
+  live Grafana to verify the provisioning schema against.
+
+M23 is complete. See `docs/monitoring.md` for the full scrape/dashboard/alert
+reference.

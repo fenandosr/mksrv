@@ -31,6 +31,9 @@ templates:
   - src: templates/prometheus.yml.tmpl
     dst: /var/lib/mksrv/stacks/monitor/prometheus.yml
     scope: shared
+  - src: templates/prometheus-rules.yml.tmpl
+    dst: /var/lib/mksrv/stacks/monitor/prometheus-rules.yml
+    scope: shared
   - src: templates/prometheus.container.tmpl
     dst: /etc/containers/systemd/mksrv-prometheus.container
     scope: shared

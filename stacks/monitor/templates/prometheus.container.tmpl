@@ -7,6 +7,7 @@ Image={{ .Image "prometheus" | default "quay.io/prometheus/prometheus:v3.1.0" }}
 Network=mksrv-monitor.network
 PublishPort=127.0.0.1:9090:9090
 Volume=/var/lib/mksrv/stacks/monitor/prometheus.yml:/etc/prometheus/prometheus.yml:Z,ro
+Volume=/var/lib/mksrv/stacks/monitor/prometheus-rules.yml:/etc/prometheus/rules.yml:Z,ro
 Volume={{ .Volume "tsdb" }}:/prometheus:Z,U
 Exec=--config.file=/etc/prometheus/prometheus.yml --storage.tsdb.retention.time={{ .Retention.MetricsDays }}d --web.enable-lifecycle
 

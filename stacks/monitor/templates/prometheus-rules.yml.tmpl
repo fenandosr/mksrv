@@ -1,0 +1,112 @@
+{{/* This file is rendered twice: once by mksrv (this pass — no mksrv template
+     actions are used below, only literal YAML), and once per firing alert by
+     Prometheus itself, which expands the `{{ $labels... }}` placeholders in
+     `annotations`. Those are wrapped in a Go raw-string action so mksrv's
+     renderer emits them unchanged instead of trying to resolve `$labels` as
+     one of its own template fields. */}}
+groups:
+  - name: mksrv-fleet
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{`{{ $labels.job }}`}} on {{`{{ $labels.host }}`}} is down"
+          description: "Prometheus has not been able to scrape {{`{{ $labels.job }}`}} ({{`{{ $labels.instance }}`}}) for 5 minutes."
+
+      - alert: HostDiskAlmostFull
+        expr: (node_filesystem_avail_bytes{fstype=~"ext4|xfs"} / node_filesystem_size_bytes{fstype=~"ext4|xfs"}) < 0.12
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{`{{ $labels.host }}`}}:{{`{{ $labels.mountpoint }}`}} is almost full"
+          description: "Less than 12% free space for 10 minutes."
+
+      - alert: HostLowMemory
+        expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{`{{ $labels.host }}`}} is low on memory"
+          description: "Less than 10% memory available for 10 minutes."
+
+      - alert: HostHighCPU
+        expr: (1 - avg by (host) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 0.90
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{`{{ $labels.host }}`}} CPU usage is high"
+          description: "CPU usage above 90% for 15 minutes."
+
+  - name: mksrv-data-plane
+    rules:
+      - alert: PatroniNoLeader
+        expr: sum(patroni_master) < 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Postgres cluster has no Patroni leader"
+          description: "No node reports itself as Patroni leader for 2 minutes — writes are likely unavailable."
+
+      - alert: OpenBaoSealed
+        expr: vault_core_unsealed == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "OpenBao node {{`{{ $labels.host }}`}} is sealed"
+          description: "A sealed OpenBao node serves no secrets until it auto-unseals (KMS) or is unsealed manually."
+
+      - alert: RedisMemoryHigh
+        expr: (redis_memory_used_bytes / redis_memory_max_bytes) > 0.85 and redis_memory_max_bytes > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis memory usage is high"
+          description: "Above 85% of maxmemory for 10 minutes; evictions are likely."
+
+      - alert: PostgresConnectionsSaturated
+        expr: (sum by (host) (pg_stat_database_numbackends) / on (host) pg_settings_max_connections) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{`{{ $labels.host }}`}} Postgres connections near max_connections"
+          description: "Above 80% of max_connections for 10 minutes."
+
+  - name: mksrv-edge
+    rules:
+      - alert: EndpointDown
+        expr: probe_success == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{`{{ $labels.instance }}`}} is not answering"
+          description: "The blackbox probe to {{`{{ $labels.instance }}`}} has failed for 5 minutes."
+
+      - alert: CertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry - time()) < 14 * 24 * 3600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "TLS certificate for {{`{{ $labels.instance }}`}} expires soon"
+          description: "Fewer than 14 days remain before the certificate expires — check Caddy's ACME renewal."
+
+  - name: mksrv-backup
+    rules:
+      - alert: BackupStale
+        expr: (time() - mksrv_backup_last_success_seconds) > 26 * 3600
+        labels:
+          severity: critical
+        annotations:
+          summary: "No successful mksrv backup in over 26 hours"
+          description: "mksrv-backup.timer runs daily; check `mksrv backup run` / `journalctl -u mksrv-backup.service`."
