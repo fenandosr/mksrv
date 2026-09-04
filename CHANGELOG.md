@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix: the Keycloak admin token expires (60s master-realm default) partway
+  through a long `mksrv tenant apply`; the client now re-authenticates once on
+  a 401 and retries.
 - Fix (M13): `bao policy write <name> -` read empty stdin because `baoExec`
   built `podman exec` without `-i`, so `mksrv tenant apply` failed at the
   per-tenant OpenBao step ("'policy' parameter not supplied or empty").

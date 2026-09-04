@@ -297,3 +297,39 @@ func TestEnsureClientReturnsSecret(t *testing.T) {
 		t.Fatalf("secret = %q", secret)
 	}
 }
+
+func TestDoReAuthenticatesOn401(t *testing.T) {
+	t.Parallel()
+	logins := 0
+	firstCall := true
+	mux := http.NewServeMux()
+	mux.HandleFunc("/realms/master/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+		logins++
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "tok"})
+	})
+	mux.HandleFunc("/admin/realms/acme/groups", func(w http.ResponseWriter, _ *http.Request) {
+		if firstCall {
+			firstCall = false
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]string{{"id": "g1", "name": "dev"}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := New(server.URL)
+	if err := c.Login(context.Background(), "admin", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.groupIDs(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("groupIDs after 401 retry: %v", err)
+	}
+	if _, ok := got["dev"]; !ok {
+		t.Fatalf("groups = %v", got)
+	}
+	if logins != 2 {
+		t.Fatalf("want 2 logins (initial + re-auth), got %d", logins)
+	}
+}
