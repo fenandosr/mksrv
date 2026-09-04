@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix (M20): `mksrv postgres bootstrap` recorded `.mksrv/postgres.json`'s
+  `primary` as the Patroni IP, but `pgConn` (used by `mksrv tenant apply`) looks
+  it up as a fleet host name — `mksrv tenant apply` then failed with
+  "postgres primary "10.20.x.x" is not a fleet host". Now records the host name;
+  `pgConn` also tolerates an IP from an older file.
 - Fix (M11): dedicated-volume bind mounts (`prometheus` tsdb, `loki` chunks,
   `patroni` pgdata/raft, `openbao` baoraft) now use `:Z,U` so podman chowns the
   freshly-formatted XFS mount to the container's user. Without it Prometheus

@@ -117,14 +117,15 @@ func (a *App) runPostgresBootstrap(ctx context.Context, printer ui.Printer, glob
 		host := byIP[r.Host].Name
 		cluster.Nodes = append(cluster.Nodes, postgresNode{Host: host, IP: r.Host, Member: r.Member, Role: r.Role})
 		if strings.EqualFold(r.Role, "leader") {
-			cluster.Primary = r.Host
+			cluster.Primary = host // the fleet host name, not the patroni IP
 			leaderHost = byIP[r.Host]
 		}
 	}
 	if cluster.Primary == "" {
 		return &ExitError{Code: 1, Err: fmt.Errorf("cluster has no leader")}
 	}
-	printer.Success("cluster %s: leader %s (%s), %d nodes", scope, leaderHost.Name, cluster.Primary, len(rows))
+	printer.Success("cluster %s: leader %s (%s), %d nodes", scope, leaderHost.Name,
+		f.outputs.Hosts[leaderHost.Name].PrivateIP, len(rows))
 
 	if err := f.provisionAppDatabase(ctx, printer, leaderHost); err != nil {
 		return &ExitError{Code: 1, Err: err}

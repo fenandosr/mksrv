@@ -27,9 +27,18 @@ type pgConn struct {
 
 func (f *fleet) pgConn() (pgConn, bool, error) {
 	if f.postgres.Primary != "" {
-		ht, ok := f.byName[f.postgres.Primary]
+		name := f.postgres.Primary
+		if _, ok := f.byName[name]; !ok {
+			// Older .mksrv/postgres.json recorded the primary as an IP.
+			for _, n := range f.postgres.Nodes {
+				if n.IP == f.postgres.Primary && n.Host != "" {
+					name = n.Host
+				}
+			}
+		}
+		ht, ok := f.byName[name]
 		if !ok {
-			return pgConn{}, false, fmt.Errorf("postgres primary %q is not a fleet host", f.postgres.Primary)
+			return pgConn{}, false, fmt.Errorf("postgres primary %q is not a fleet host (re-run `mksrv postgres bootstrap`)", f.postgres.Primary)
 		}
 		ip := f.outputs.Hosts[ht.Name].PrivateIP
 		return pgConn{ht.Target, ht.Name, "mksrv-patroni", "postgres", "/mksrv/{env}/postgres/superpass", ip}, true, nil
