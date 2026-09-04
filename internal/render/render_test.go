@@ -278,6 +278,10 @@ func TestStackRendersAgent(t *testing.T) {
 	}
 	if u := string(files["/etc/containers/systemd/mksrv-cadvisor.container"]); !strings.Contains(u, "PublishPort=10.20.0.21:8080:8080") {
 		t.Fatalf("cadvisor unit missing private-IP publish:\n%s", u)
+	} else if strings.Contains(u, "127.0.0.1:8080") {
+		// `agent` runs on every host including `identity`'s — a 127.0.0.1:8080
+		// publish collides with Keycloak's own 127.0.0.1:8080 there.
+		t.Fatalf("cadvisor unit must not publish on 127.0.0.1:8080 (collides with Keycloak):\n%s", u)
 	}
 }
 

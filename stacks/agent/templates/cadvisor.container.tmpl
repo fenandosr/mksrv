@@ -5,8 +5,11 @@ Description=mksrv cAdvisor
 ContainerName=mksrv-cadvisor
 Image={{ .Image "cadvisor" | default "gcr.io/cadvisor/cadvisor:v0.49.2" }}
 Network=mksrv-agent.network
+# 8080 is a very common default (Keycloak binds it on 127.0.0.1 too, and
+# `agent` now runs on every host including `identity`'s) — publish only on
+# the private IP, which Prometheus already uses to scrape cross-host; no
+# 127.0.0.1 publish to collide with.
 PublishPort={{ .Host.PrivateIP }}:8080:8080
-PublishPort=127.0.0.1:8080:8080
 Volume=/:/rootfs:ro
 Volume=/var/run:/var/run:ro
 Volume=/sys:/sys:ro
