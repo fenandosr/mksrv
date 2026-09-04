@@ -114,8 +114,12 @@ func TestStackRendersDataPlane(t *testing.T) {
 	if pg := string(dbFiles["/etc/containers/systemd/mksrv-postgres.container"]); !strings.Contains(pg, "PublishPort=100.64.0.1:5432:5432") {
 		t.Fatalf("postgres unit missing tailnet publish:\n%s", pg)
 	}
+	if pa := string(dbFiles["/etc/containers/systemd/mksrv-pgadmin.container"]); !strings.Contains(pa, "Requires=mksrv-postgres.service") {
+		t.Fatalf("standalone pgadmin should require the local postgres unit:\n%s", pa)
+	}
 
-	// With a `postgres` cluster in the fleet, the standalone unit renders empty.
+	// With a `postgres` cluster in the fleet, the standalone unit renders empty
+	// and consumers must not reference the (nonexistent) local postgres unit.
 	clusterCtx := ctx
 	clusterCtx.StackHosts = map[string]string{"postgres": "10.20.0.11"}
 	cFiles, err := Stack(stacksRoot, catalog["database"], clusterCtx)
@@ -124,6 +128,9 @@ func TestStackRendersDataPlane(t *testing.T) {
 	}
 	if pg := strings.TrimSpace(string(cFiles["/etc/containers/systemd/mksrv-postgres.container"])); pg != "" {
 		t.Fatalf("standalone postgres unit should be empty when a cluster exists:\n%s", pg)
+	}
+	if pa := string(cFiles["/etc/containers/systemd/mksrv-pgadmin.container"]); strings.Contains(pa, "mksrv-postgres.service") {
+		t.Fatalf("cluster-mode pgadmin must not reference the local postgres unit:\n%s", pa)
 	}
 
 	monFiles, err := Stack(stacksRoot, catalog["monitor"], ctx)
@@ -167,6 +174,9 @@ func TestStackRendersDataPlane(t *testing.T) {
 	}
 	if acl := string(cacheFiles["/var/lib/mksrv/stacks/cache/users.acl"]); !strings.Contains(acl, "user mksrv on >adminpw ~* &* +@all") {
 		t.Fatalf("cache users.acl seed wrong:\n%s", acl)
+	} else if strings.Contains(acl, "#") {
+		// Redis's aclfile parser rejects comment lines and aborts startup.
+		t.Fatalf("cache users.acl must not contain comments:\n%s", acl)
 	}
 	if unit := string(cacheFiles["/etc/containers/systemd/mksrv-redis.container"]); !strings.Contains(unit, "PublishPort=100.64.0.1:6379:6379") {
 		t.Fatalf("redis unit missing tailnet publish:\n%s", unit)

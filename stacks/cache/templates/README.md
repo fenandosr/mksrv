@@ -5,6 +5,8 @@
 - `users.acl.tmpl` — ACL seed (disabled `default`, `mksrv` admin). `mksrv tenant
   apply` rewrites this file with one `user <id>` line per tenant, confined to the
   `<id>:*` key/channel namespace, then runs `ACL LOAD`. A bare `mksrv deploy`
-  reverts it to the seed until the next `tenant apply`.
+  reverts it to the seed until the next `tenant apply`. Redis's external `aclfile`
+  parser accepts only `user …` and blank lines — **no `#` comments** — so this
+  template must not have any.
 - `redis.container.tmpl` — the shared Redis 7 container, published on the private
   VPC IP, the tailnet IP, and loopback (port 6379).
