@@ -12,6 +12,13 @@ PublishPort=127.0.0.1:9000:9000
 # Management port (metrics + health), also on the private IP so a Prometheus
 # on another host can scrape it (M23 phase 3).
 PublishPort={{ .Host.PrivateIP }}:9000:9000
+# One theme directory per declared tenant, sibling to Keycloak's own bundled
+# themes (parent=keycloak still resolves) — mksrv apply guarantees each of
+# these exists (ensureTenantThemeDirs) even before `tenant apply` has ever
+# run for that tenant (M24).
+{{- range .TenantIDs }}
+Volume=/var/lib/mksrv/stacks/identity/themes/{{ . }}:/opt/keycloak/themes/{{ . }}:Z,ro
+{{- end }}
 Exec=start --http-enabled=true --hostname=https://{{ .Endpoints.Keycloak }} --proxy-headers=xforwarded
 Environment=KC_DB=postgres
 Environment=KC_DB_URL=jdbc:postgresql://mksrv-identity-postgres:5432/keycloak

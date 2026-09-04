@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Feature (M24, ADR 0023): per-tenant Keycloak login branding. `branding:`
+  gains `secondary` alongside `primary`; the logo (`logo_data_uri`, already
+  read by the VPN client) is now also embedded as a CSS `background-image` in
+  a rendered per-tenant `login.css` — no separate asset file. `mksrv tenant
+  apply` sets `loginTheme` on the realm and restarts Keycloak once. Every
+  declared tenant's theme directory is guaranteed to exist before `mksrv
+  apply` (re)starts Keycloak (`ensureTenantThemeDirs`), so adding a tenant is
+  safe before its branding is ever provisioned. See `docs/branding.md`.
+
 - Feature (M23 phase 4, ADR 0022): alert-rule catalog. `backup.sh` writes a
   `mksrv_backup_last_success_seconds` textfile metric on success. A new
   `prometheus-rules.yml` (4 groups, 11 rules — host pressure, `TargetDown`,

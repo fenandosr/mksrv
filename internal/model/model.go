@@ -173,6 +173,7 @@ type TenantKeycloak struct {
 
 type Branding struct {
 	Primary     string `json:"primary,omitempty"`
+	Secondary   string `json:"secondary,omitempty"`
 	LogoDataURI string `json:"logo_data_uri,omitempty"`
 }
 

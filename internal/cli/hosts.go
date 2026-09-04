@@ -325,6 +325,17 @@ func (f *fleet) deployHost(ctx context.Context, printer ui.Printer, ht hostTarge
 		if err != nil {
 			return &ExitError{Code: 2, Err: fmt.Errorf("%s/%s: %w", ht.Name, stackName, err)}
 		}
+		if stackName == "identity" {
+			// keycloak.container.tmpl mounts a themes/<id> directory per
+			// declared tenant; podman does not create a missing bind-mount
+			// source, and a missing one would fail the whole container (M24).
+			// Guarantee every tenant's directory exists before the unit
+			// (re)starts, regardless of whether `tenant apply` has run for it
+			// yet.
+			if err := ensureTenantThemeDirs(ctx, client, sortedTenantIDs(f.data.Tenants)); err != nil {
+				return &ExitError{Code: 2, Err: fmt.Errorf("%s/identity: ensure theme dirs: %w", ht.Name, err)}
+			}
+		}
 		printer.Info("%s: deploying %s", ht.Name, stackName)
 		res, err := deploy.DeployStack(ctx, client, deploy.Options{
 			StacksRoot: f.stacksRoot,
@@ -342,6 +353,27 @@ func (f *fleet) deployHost(ctx context.Context, printer ui.Printer, ht hostTarge
 		printer.Success("%s/%s: %d changed, %d unchanged, health %v", ht.Name, stackName, len(res.Changed), res.Unchanged, res.HealthOK)
 	}
 	return nil
+}
+
+// ensureTenantThemeDirs mkdir -p's every declared tenant's Keycloak login
+// theme directory (M24). A no-op when there are no tenants yet.
+func ensureTenantThemeDirs(ctx context.Context, client *sshx.Client, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := client.Run(ctx, themeDirsCommand(ids))
+	return err
+}
+
+// themeDirsCommand builds the mkdir -p command ensureTenantThemeDirs runs.
+// Split out so the command shape is unit-testable without an SSH double.
+func themeDirsCommand(ids []string) string {
+	var b strings.Builder
+	b.WriteString("sudo mkdir -p")
+	for _, id := range ids {
+		fmt.Fprintf(&b, " /var/lib/mksrv/stacks/identity/themes/%s/login/resources/css", quoteArg(id))
+	}
+	return b.String()
 }
 
 func (f *fleet) renderContext(ht hostTarget) render.Context {
@@ -430,6 +462,7 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 		StackMembers:  stackMembers,
 		Fleet:         fleet,
 		OperatorFQDNs: operatorFQDNs,
+		TenantIDs:     sortedTenantIDs(f.data.Tenants),
 		Retention:     f.data.Deployment.Retention.Resolved(),
 	}
 }

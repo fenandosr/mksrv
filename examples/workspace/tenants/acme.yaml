@@ -31,4 +31,5 @@ mesh_routes:
 device_limit: 60
 branding:
   primary: "#0C6D77"
+  secondary: "#F2A900"
   logo_data_uri: ""

@@ -103,6 +103,67 @@ func TestStackRendersIdentity(t *testing.T) {
 	if kc := string(files["/etc/containers/systemd/mksrv-keycloak.container"]); !strings.Contains(kc, "PublishPort=10.20.0.10:9000:9000") {
 		t.Fatalf("keycloak unit missing private-IP management port publish:\n%s", kc)
 	}
+
+	// M24: one theme volume per declared tenant, sibling to Keycloak's own
+	// bundled themes.
+	ctx := baseContext()
+	ctx.TenantIDs = []string{"bitabit", "hg"}
+	tfiles, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), catalog["identity"], ctx)
+	if err != nil {
+		t.Fatalf("Stack() error = %v", err)
+	}
+	kc := string(tfiles["/etc/containers/systemd/mksrv-keycloak.container"])
+	for _, want := range []string{
+		"Volume=/var/lib/mksrv/stacks/identity/themes/bitabit:/opt/keycloak/themes/bitabit:Z,ro",
+		"Volume=/var/lib/mksrv/stacks/identity/themes/hg:/opt/keycloak/themes/hg:Z,ro",
+	} {
+		if !strings.Contains(kc, want) {
+			t.Fatalf("keycloak unit missing %q:\n%s", want, kc)
+		}
+	}
+}
+
+func TestStackRendersTenantLoginTheme(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	ctx := baseContext()
+	ctx.Tenant = &model.Tenant{ID: "bitabit", Branding: model.Branding{Primary: "#112233"}}
+	files, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), catalog["identity"], ctx)
+	if err != nil {
+		t.Fatalf("Stack() error = %v", err)
+	}
+	props := string(files["/var/lib/mksrv/stacks/identity/themes/bitabit/login/theme.properties"])
+	if !strings.Contains(props, "parent=keycloak") {
+		t.Fatalf("theme.properties wrong:\n%s", props)
+	}
+	css := string(files["/var/lib/mksrv/stacks/identity/themes/bitabit/login/resources/css/login.css"])
+	if !strings.Contains(css, "--mksrv-primary: #112233;") {
+		t.Fatalf("login.css missing primary color:\n%s", css)
+	}
+	if strings.Contains(css, "--mksrv-secondary:") || strings.Contains(css, "background-image") {
+		t.Fatalf("login.css should omit unset secondary/logo blocks:\n%s", css)
+	}
+
+	// A second tenant with secondary + logo set gets both blocks.
+	ctx.Tenant = &model.Tenant{ID: "hg", Branding: model.Branding{
+		Primary: "#112233", Secondary: "#445566", LogoDataURI: "data:image/png;base64,AAAA",
+	}}
+	files, err = Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), catalog["identity"], ctx)
+	if err != nil {
+		t.Fatalf("Stack() error = %v", err)
+	}
+	css = string(files["/var/lib/mksrv/stacks/identity/themes/hg/login/resources/css/login.css"])
+	for _, want := range []string{
+		"--mksrv-secondary: #445566;",
+		`background-image: url("data:image/png;base64,AAAA");`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("login.css missing %q:\n%s", want, css)
+		}
+	}
 }
 
 func TestStackRendersDataPlane(t *testing.T) {

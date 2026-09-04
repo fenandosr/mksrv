@@ -21,6 +21,10 @@ type RealmSpec struct {
 	// query-groups) so a tenant admin runs their own team from the Keycloak
 	// console without operator involvement.
 	AdminGroup string
+	// LoginTheme, when set, is reconciled onto the realm (ADR 0023). Empty
+	// leaves Keycloak's current theme (its own default, or whatever was set
+	// before) untouched.
+	LoginTheme string
 }
 
 // adminGroupRoles are the realm-management client roles the AdminGroup receives:
@@ -47,10 +51,11 @@ type ClientSpec struct {
 
 // RealmResult reports what EnsureRealm changed.
 type RealmResult struct {
-	Realm          string   `json:"realm"`
-	RealmCreated   bool     `json:"realm_created"`
-	GroupsCreated  []string `json:"groups_created"`
-	ClientsCreated []string `json:"clients_created"`
+	Realm             string   `json:"realm"`
+	RealmCreated      bool     `json:"realm_created"`
+	GroupsCreated     []string `json:"groups_created"`
+	ClientsCreated    []string `json:"clients_created"`
+	LoginThemeUpdated bool     `json:"login_theme_updated"`
 }
 
 // EnsureRealm creates the realm, groups, and clients that are missing. It never
@@ -58,7 +63,10 @@ type RealmResult struct {
 func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, error) {
 	result := RealmResult{Realm: spec.Realm}
 
-	status, _ := c.do(ctx, http.MethodGet, "/realms/"+spec.Realm, nil, nil)
+	var existing struct {
+		LoginTheme string `json:"loginTheme"`
+	}
+	status, _ := c.do(ctx, http.MethodGet, "/realms/"+spec.Realm, nil, &existing)
 	if status == http.StatusNotFound {
 		body := map[string]any{
 			"realm":                 spec.Realm,
@@ -68,12 +76,21 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 			"registrationAllowed":   false,
 			"sslRequired":           "external",
 		}
+		if spec.LoginTheme != "" {
+			body["loginTheme"] = spec.LoginTheme
+		}
 		if _, err := c.do(ctx, http.MethodPost, "/realms", body, nil); err != nil {
 			return result, err
 		}
 		result.RealmCreated = true
 	} else if status != http.StatusOK {
 		return result, fmt.Errorf("check realm %s: unexpected status %d", spec.Realm, status)
+	} else if spec.LoginTheme != "" && existing.LoginTheme != spec.LoginTheme {
+		if _, err := c.do(ctx, http.MethodPut, "/realms/"+spec.Realm,
+			map[string]any{"realm": spec.Realm, "loginTheme": spec.LoginTheme}, nil); err != nil {
+			return result, fmt.Errorf("set login theme on realm %s: %w", spec.Realm, err)
+		}
+		result.LoginThemeUpdated = true
 	}
 
 	existingGroups, err := c.groupNames(ctx, spec.Realm)
