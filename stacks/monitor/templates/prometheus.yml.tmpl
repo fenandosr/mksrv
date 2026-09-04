@@ -34,6 +34,33 @@ scrape_configs:
       - targets: ["{{ .PrivateIP }}:8008"]
         labels: { host: "{{ .Name }}" }
 {{- end }}
+
+  # postgres_exporter runs alongside Patroni on every cluster node (M23 phase 2).
+  - job_name: postgres-exporter
+    static_configs:
+{{- range .StackNodes "postgres" }}
+      - targets: ["{{ .PrivateIP }}:9187"]
+        labels: { host: "{{ .Name }}" }
+{{- end }}
+{{- end }}
+{{- if .StackNodes "openbao" }}
+
+  # OpenBao's own Prometheus telemetry (unauthenticated on the VPC — M23 phase 2).
+  - job_name: openbao
+    metrics_path: /v1/sys/metrics
+    params:
+      format: [prometheus]
+    static_configs:
+{{- range .StackNodes "openbao" }}
+      - targets: ["{{ .PrivateIP }}:8200"]
+        labels: { host: "{{ .Name }}" }
+{{- end }}
+{{- end }}
+{{- if .StackIP "cache" }}
+
+  - job_name: redis-exporter
+    static_configs:
+      - targets: ["{{ .StackIP "cache" }}:9121"]
 {{- end }}
 {{- if .StackIP "logs" }}
 

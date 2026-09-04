@@ -1,0 +1,21 @@
+[Unit]
+Description=mksrv redis_exporter
+Requires=mksrv-redis.service
+After=mksrv-redis.service
+
+[Container]
+ContainerName=mksrv-redis-exporter
+Image={{ .Image "redis-exporter" | default "docker.io/oliver006/redis_exporter:v1.67.0" }}
+# host networking: reaches Redis over 127.0.0.1, already published there for
+# local debugging — sidesteps ACL/network questions on the podman bridge.
+Network=host
+Environment=REDIS_ADDR=redis://127.0.0.1:6379
+Environment=REDIS_USER=mksrv
+Environment=REDIS_EXPORTER_WEB_LISTEN_ADDRESS=:9121
+Secret=mksrv-cache-redis_admin_pass,type=env,target=REDIS_PASSWORD
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

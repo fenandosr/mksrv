@@ -7,12 +7,14 @@ depends_on: [identity]
 apps:
   - name: redis
     image: docker.io/library/redis:7.4
+  - name: redis-exporter
+    image: docker.io/oliver006/redis_exporter:v1.67.0
 networks: [mksrv-cache]
 secrets:
   - /mksrv/{env}/cache/redis_admin_pass
 tailnet_ports: [6379]
 resources:
-  min_ram_mb: 384
+  min_ram_mb: 416
   disk_gb: 5
 templates:
   - src: templates/mksrv-cache.network.tmpl
@@ -27,7 +29,14 @@ templates:
   - src: templates/redis.container.tmpl
     dst: /etc/containers/systemd/mksrv-redis.container
     scope: shared
+  - src: templates/redis-exporter.container.tmpl
+    dst: /etc/containers/systemd/mksrv-redis-exporter.container
+    scope: shared
 health:
   - app: redis
     type: tcp
     port: 6379
+  - app: redis-exporter
+    type: http
+    path: /metrics
+    port: 9121

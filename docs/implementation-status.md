@@ -247,7 +247,7 @@ Still deferred: Keycloak's own Postgres onto the cluster; folding
   token. `internal/cli/backup.go` (`provisionBackup`, `mksrv backup run/list`).
   Restore is documented (`docs/backup.md`), not automated.
 
-## M23 — in progress (phase 1 of 4)
+## M23 — in progress (phase 2 of 4)
 
 - **Phase 1 — implemented** (ADR 0019): a new `agent` stack (node-exporter +
   cAdvisor) is auto-assigned to every host once any host carries `monitor`
@@ -256,6 +256,11 @@ Still deferred: Keycloak's own Postgres onto the cluster; folding
   `render.Context.Fleet` roster, plus Patroni's native `/metrics`. Grafana
   gets provisioned dashboards (`fleet-overview`, bundled). No Terraform
   change — the intra-VPC security group rule already permitted the traffic.
-- Deferred to phases 2–4: OpenBao/Postgres/Redis exporters; blackbox probing
-  of public endpoints; Keycloak/Caddy metrics; an alert-rule catalog and
-  notifications. See `docs/monitoring.md`.
+- **Phase 2 — implemented** (ADR 0020): OpenBao's native Prometheus telemetry
+  (unauthenticated `/v1/sys/metrics` on the VPC-only listener);
+  `postgres_exporter` and `redis_exporter` as `Network=host` sidecars inside
+  `postgres`/`cache`, connecting over `127.0.0.1` with existing secrets — no
+  change needed to a live Patroni cluster's `pg_hba`. `monitor` gains the
+  `openbao`, `postgres-exporter`, `redis-exporter` scrape jobs.
+- Deferred to phases 3–4: blackbox probing of public endpoints; Keycloak/Caddy
+  metrics; an alert-rule catalog and notifications. See `docs/monitoring.md`.

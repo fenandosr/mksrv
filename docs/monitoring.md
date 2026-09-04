@@ -5,7 +5,7 @@ auto-assigned to every host — ADR 0019) give the fleet a central metrics view.
 This page tracks what is scraped today, what dashboards ship, and what M23's
 later phases add.
 
-## What's scraped (M23 phase 1)
+## What's scraped (M23 phases 1–2)
 
 | Job | Source | Every host? |
 |---|---|---|
@@ -13,11 +13,20 @@ later phases add.
 | `node` | `agent`'s node-exporter, `<host private ip>:9100` | yes |
 | `cadvisor` | `agent`'s cAdvisor, `<host private ip>:8080` | yes |
 | `patroni` | Patroni's native `/metrics`, `<postgres node ip>:8008` | postgres cluster nodes only |
+| `postgres-exporter` | co-located with Patroni, `<postgres node ip>:9187` | postgres cluster nodes only |
+| `openbao` | OpenBao's native telemetry, `<openbao node ip>:8200/v1/sys/metrics` | openbao cluster nodes only |
+| `redis-exporter` | co-located with `cache`, `<cache host ip>:9121` | no (one `cache` host) |
 | `loki` | when the `logs` stack is present | no |
 | `crowdsec` | when the `security` stack is present | no |
 
 No Terraform change was needed: `infra/modules/aws-host` already allows all
 TCP between fleet hosts inside the VPC (`intra_vpc` security group rule).
+
+The `postgres-exporter` and `redis-exporter` sidecars run with `Network=host`
+and connect over `127.0.0.1` — the same loopback address the owning service
+already publishes for local debugging — rather than the stack's podman bridge
+network, so nothing needs adding to a *live* Patroni cluster's `pg_hba` (it is
+only applied at `initdb` time) or Redis's ACL rules.
 
 ## Dashboards
 
@@ -36,9 +45,9 @@ vendored, to avoid license drift):
 | cAdvisor exporter | `19792` | now (`cadvisor` job) |
 | Prometheus | `19105` | now |
 | Patroni | see the [Patroni repo](https://github.com/zalando/patroni)'s `extras/grafana/` | now (`patroni` job) |
-| PostgreSQL Database | `9628` / `14114` | after `postgres_exporter` (phase 2) |
-| Redis Dashboard | `763` | after `redis_exporter` (phase 2) |
-| Vault | `12904` | after OpenBao telemetry (phase 2) |
+| PostgreSQL Database | `9628` / `14114` | now (`postgres-exporter` job) |
+| Redis Dashboard | `763` | now (`redis-exporter` job) |
+| Vault | `12904` | now (`openbao` job) |
 | Prometheus Blackbox Exporter | `7587` | after `blackbox_exporter` (phase 3) |
 | Keycloak Metrics | `10441` (or the KC 25+ equivalent) | after Keycloak metrics (phase 3) |
 | Caddy | `13859` | after the Caddy metrics vhost (phase 3) |
@@ -49,10 +58,8 @@ vendored, to avoid license drift):
 - Prometheus and Loki datasources are provisioned with fixed UIDs (`prometheus`,
   `loki`) so bundled dashboard JSON can reference them without a lookup.
 
-## Roadmap (M23, phases 2–4)
+## Roadmap (M23, phases 3–4)
 
-- **Phase 2** — OpenBao telemetry (`sys/metrics`), `postgres_exporter` per
-  Patroni node, `redis_exporter` on `cache`; their dashboards.
 - **Phase 3** — `blackbox_exporter` probing every operator FQDN (HTTP 200,
   TLS-expiry countdown), Keycloak's built-in metrics (`KC_METRICS_ENABLED`),
   a Caddy metrics vhost.
@@ -61,4 +68,4 @@ vendored, to avoid license drift):
   `OpenBaoSealed`, `CertExpiringSoon`, `BackupStale`, …), and Grafana-managed
   notifications (webhook or SMTP contact point).
 
-See ADR 0019 for the design rationale.
+See ADR 0019 (phase 1) and ADR 0020 (phase 2) for the design rationale.
