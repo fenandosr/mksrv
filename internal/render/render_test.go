@@ -182,6 +182,10 @@ func TestStackRendersDataPlane(t *testing.T) {
 	if unit := string(cacheFiles["/etc/containers/systemd/mksrv-redis.container"]); !strings.Contains(unit, "PublishPort=100.64.0.1:6379:6379") {
 		t.Fatalf("redis unit missing tailnet publish:\n%s", unit)
 	}
+	if unit := string(cacheFiles["/etc/containers/systemd/mksrv-redis-exporter.container"]); !strings.Contains(unit, "Network=host") ||
+		!strings.Contains(unit, "REDIS_ADDR=redis://127.0.0.1:6379") || !strings.Contains(unit, "target=REDIS_PASSWORD") {
+		t.Fatalf("redis-exporter unit wrong:\n%s", unit)
+	}
 }
 
 func TestStackRendersLogsAndSecurity(t *testing.T) {
@@ -302,18 +306,33 @@ func TestStackRendersMonitorFleetWide(t *testing.T) {
 		t.Fatalf("prometheus.yml should not have a patroni job without a postgres cluster:\n%s", p)
 	}
 
-	// A postgres cluster in the fleet adds the patroni job over its members.
-	ctx.StackMembers = map[string][]Member{"postgres": {
-		{Name: "core1", PrivateIP: "10.20.0.21"},
-		{Name: "core2", PrivateIP: "10.20.0.22"},
-		{Name: "core3", PrivateIP: "10.20.0.23"},
-	}}
+	// A postgres cluster in the fleet adds the patroni + postgres-exporter jobs
+	// over its members; an openbao cluster adds the openbao job; `cache` adds
+	// the redis-exporter job (M23 phase 2).
+	ctx.StackMembers = map[string][]Member{
+		"postgres": {
+			{Name: "core1", PrivateIP: "10.20.0.21"},
+			{Name: "core2", PrivateIP: "10.20.0.22"},
+			{Name: "core3", PrivateIP: "10.20.0.23"},
+		},
+		"openbao": {
+			{Name: "core1", PrivateIP: "10.20.0.21"},
+			{Name: "core2", PrivateIP: "10.20.0.22"},
+			{Name: "core3", PrivateIP: "10.20.0.23"},
+		},
+	}
+	ctx.StackHosts = map[string]string{"cache": "10.20.0.30"}
 	files, err = Stack(stacksRoot, catalog["monitor"], ctx)
 	if err != nil {
 		t.Fatalf("Stack(monitor, cluster) error = %v", err)
 	}
 	p = string(files["/var/lib/mksrv/stacks/monitor/prometheus.yml"])
-	for _, want := range []string{"job_name: patroni", `targets: ["10.20.0.21:8008"]`, `targets: ["10.20.0.23:8008"]`} {
+	for _, want := range []string{
+		"job_name: patroni", `targets: ["10.20.0.21:8008"]`, `targets: ["10.20.0.23:8008"]`,
+		"job_name: postgres-exporter", `targets: ["10.20.0.22:9187"]`,
+		"job_name: openbao", "metrics_path: /v1/sys/metrics", `targets: ["10.20.0.21:8200"]`,
+		"job_name: redis-exporter", `targets: ["10.20.0.30:9121"]`,
+	} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("prometheus.yml missing %q:\n%s", want, p)
 		}
@@ -458,6 +477,11 @@ func TestStackRendersPostgresCluster(t *testing.T) {
 	if u := string(files["/etc/containers/systemd/mksrv-patroni.container"]); !strings.Contains(u, "PublishPort=10.20.0.12:8008:8008") {
 		t.Fatalf("patroni unit wrong:\n%s", u)
 	}
+	if u := string(files["/etc/containers/systemd/mksrv-postgres-exporter.container"]); !strings.Contains(u, "Network=host") ||
+		!strings.Contains(u, "DATA_SOURCE_URI=127.0.0.1:5432/postgres?sslmode=disable") ||
+		!strings.Contains(u, "target=DATA_SOURCE_PASS") {
+		t.Fatalf("postgres-exporter unit wrong:\n%s", u)
+	}
 }
 
 func TestStackRendersBackup(t *testing.T) {
@@ -529,6 +553,8 @@ func TestStackRendersOpenBaoCluster(t *testing.T) {
 		`region     = "us-east-1"`,
 		`kms_key_id = "arn:aws:kms:us-east-1:0:key/abc-123"`,
 		`api_addr     = "http://10.20.0.22:8200"`,
+		`unauthenticated_metrics_access = true`,
+		`prometheus_retention_time = "24h"`,
 	} {
 		if !strings.Contains(hcl, want) {
 			t.Fatalf("openbao.hcl missing %q:\n%s", want, hcl)

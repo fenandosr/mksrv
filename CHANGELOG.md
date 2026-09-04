@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Feature (M23 phase 2, ADR 0020): per-service exporters. OpenBao's own
+  Prometheus telemetry (`telemetry` stanza + unauthenticated `/v1/sys/metrics`
+  on the VPC-only listener); `postgres_exporter` alongside every Patroni node
+  and `redis_exporter` alongside `cache`, both `Network=host` over `127.0.0.1`
+  reusing existing secrets — no change to a live cluster's `pg_hba` needed.
+  `monitor`'s Prometheus gains the `openbao`, `postgres-exporter`, and
+  `redis-exporter` scrape jobs.
+
 - Feature (M23 phase 1, ADR 0019): fleet-wide metrics. A new `agent` stack
   (node-exporter + cAdvisor, published on each host's private IP) is
   auto-assigned to every host once any host carries `monitor` — no Terraform

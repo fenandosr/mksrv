@@ -1,0 +1,22 @@
+[Unit]
+Description=mksrv postgres_exporter
+Requires=mksrv-patroni.service
+After=mksrv-patroni.service
+
+[Container]
+ContainerName=mksrv-postgres-exporter
+Image={{ .Image "postgres-exporter" | default "quay.io/prometheuscommunity/postgres-exporter:v0.16.0" }}
+# host networking: the exporter reaches Patroni's postgres over 127.0.0.1,
+# already allowed by pg_hba (`host all all 127.0.0.1/32`) without touching a
+# live cluster's pg_hba (M23 phase 2) — the podman bridge subnet is not.
+Network=host
+Environment=DATA_SOURCE_USER=postgres
+Environment=DATA_SOURCE_URI=127.0.0.1:5432/postgres?sslmode=disable
+Environment=PG_EXPORTER_WEB_LISTEN_ADDRESS=:9187
+Secret=mksrv-postgres-superpass,type=env,target=DATA_SOURCE_PASS
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

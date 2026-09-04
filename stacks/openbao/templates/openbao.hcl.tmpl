@@ -19,6 +19,17 @@ storage "raft" {
 listener "tcp" {
   address     = "0.0.0.0:8200"
   tls_disable = 1
+  # /v1/sys/metrics without a token — acceptable on the same intra-VPC
+  # boundary that already makes the rest of this listener plaintext (M23
+  # phase 2); Prometheus has no other way to reach a scoped metrics token.
+  telemetry {
+    unauthenticated_metrics_access = true
+  }
+}
+
+telemetry {
+  prometheus_retention_time = "24h"
+  disable_hostname          = true
 }
 
 seal "awskms" {
