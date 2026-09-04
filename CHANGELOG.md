@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Feature (M23 phase 3, ADR 0021): edge visibility. `blackbox_exporter`
+  probes every operator + tenant-rest FQDN over HTTPS (reachability +
+  certificate expiry via `probe_ssl_earliest_cert_expiry`) — the target list,
+  `render.Context.OperatorFQDNs`, mirrors Terraform's `local.operator_fqdns`.
+  Keycloak's already-enabled metrics are now published on the private IP too.
+  Caddy gets a `servers { metrics }` global option and a private-IP-only
+  vhost that proxies just `/metrics` to the (still loopback-only) admin API.
+  `monitor` gains the `blackbox`, `keycloak`, `caddy` scrape jobs.
+
 - Feature (M23 phase 2, ADR 0020): per-service exporters. OpenBao's own
   Prometheus telemetry (`telemetry` stanza + unauthenticated `/v1/sys/metrics`
   on the VPC-only listener); `postgres_exporter` alongside every Patroni node

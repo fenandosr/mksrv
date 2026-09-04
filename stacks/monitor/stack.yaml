@@ -9,12 +9,14 @@ apps:
     image: quay.io/prometheus/prometheus:v3.1.0
   - name: grafana
     image: docker.io/grafana/grafana:11.5.1
+  - name: blackbox
+    image: quay.io/prometheus/blackbox-exporter:v0.25.0
 networks: [mksrv-monitor]
 secrets:
   - /mksrv/{env}/monitor/grafana_admin_password
 tailnet_ports: [9090, 3000]
 resources:
-  min_ram_mb: 1024
+  min_ram_mb: 1056
   disk_gb: 20
 storage:
   - name: tsdb
@@ -41,6 +43,12 @@ templates:
   - src: templates/dashboards/fleet-overview.json.tmpl
     dst: /var/lib/mksrv/stacks/monitor/dashboards/fleet-overview.json
     scope: shared
+  - src: templates/blackbox.yml.tmpl
+    dst: /var/lib/mksrv/stacks/monitor/blackbox.yml
+    scope: shared
+  - src: templates/blackbox.container.tmpl
+    dst: /etc/containers/systemd/mksrv-blackbox.container
+    scope: shared
   - src: templates/grafana.container.tmpl
     dst: /etc/containers/systemd/mksrv-grafana.container
     scope: shared
@@ -60,3 +68,7 @@ health:
     type: http
     path: /api/health
     port: 3000
+  - app: blackbox
+    type: http
+    path: /
+    port: 9115

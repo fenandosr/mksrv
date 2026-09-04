@@ -1,6 +1,9 @@
 {
 	admin 127.0.0.1:2019
 	email {{ .ACMEEmail }}
+	servers {
+		metrics
+	}
 	log {
 		output stdout
 		format json
@@ -11,6 +14,18 @@
 :80 {
 	respond /healthz "ok" 200
 	respond "mksrv {{ .Env }} edge" 200
+}
+
+# Prometheus scrapes Caddy through here rather than the admin API directly:
+# the admin listener (config reload, /stop, ...) stays loopback-only, and only
+# /metrics is proxied through, on the private IP (M23 phase 3).
+{{ .Host.PrivateIP }}:9019 {
+	handle /metrics {
+		reverse_proxy 127.0.0.1:2019
+	}
+	handle {
+		respond 404
+	}
 }
 
 # Per-stack reverse-proxy vhosts (identity, monitor, tenant services) drop

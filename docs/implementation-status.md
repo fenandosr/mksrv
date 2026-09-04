@@ -247,7 +247,7 @@ Still deferred: Keycloak's own Postgres onto the cluster; folding
   token. `internal/cli/backup.go` (`provisionBackup`, `mksrv backup run/list`).
   Restore is documented (`docs/backup.md`), not automated.
 
-## M23 — in progress (phase 2 of 4)
+## M23 — in progress (phase 3 of 4)
 
 - **Phase 1 — implemented** (ADR 0019): a new `agent` stack (node-exporter +
   cAdvisor) is auto-assigned to every host once any host carries `monitor`
@@ -262,5 +262,12 @@ Still deferred: Keycloak's own Postgres onto the cluster; folding
   `postgres`/`cache`, connecting over `127.0.0.1` with existing secrets — no
   change needed to a live Patroni cluster's `pg_hba`. `monitor` gains the
   `openbao`, `postgres-exporter`, `redis-exporter` scrape jobs.
-- Deferred to phases 3–4: blackbox probing of public endpoints; Keycloak/Caddy
-  metrics; an alert-rule catalog and notifications. See `docs/monitoring.md`.
+- **Phase 3 — implemented** (ADR 0021): `blackbox_exporter` probes every
+  operator + tenant-rest FQDN over HTTPS (`render.Context.OperatorFQDNs`,
+  mirroring Terraform's `local.operator_fqdns`) for reachability and
+  certificate-expiry countdown. Keycloak's already-enabled metrics are
+  published on the private IP. Caddy gets a `servers { metrics }` option and
+  a private-IP-only vhost proxying just `/metrics` — the admin API itself
+  stays loopback-only.
+- Deferred to phase 4: an alert-rule catalog and notifications. See
+  `docs/monitoring.md`.

@@ -16,6 +16,9 @@ later phases add.
 | `postgres-exporter` | co-located with Patroni, `<postgres node ip>:9187` | postgres cluster nodes only |
 | `openbao` | OpenBao's native telemetry, `<openbao node ip>:8200/v1/sys/metrics` | openbao cluster nodes only |
 | `redis-exporter` | co-located with `cache`, `<cache host ip>:9121` | no (one `cache` host) |
+| `keycloak` | Keycloak's built-in metrics, `<identity host ip>:9000` | no (one `identity` host) |
+| `caddy` | proxied through a private-IP-only vhost, `<base host ip>:9019` | no (one `base` host) |
+| `blackbox` | every operator + tenant-rest FQDN, probed over HTTPS | n/a (external targets) |
 | `loki` | when the `logs` stack is present | no |
 | `crowdsec` | when the `security` stack is present | no |
 
@@ -48,9 +51,9 @@ vendored, to avoid license drift):
 | PostgreSQL Database | `9628` / `14114` | now (`postgres-exporter` job) |
 | Redis Dashboard | `763` | now (`redis-exporter` job) |
 | Vault | `12904` | now (`openbao` job) |
-| Prometheus Blackbox Exporter | `7587` | after `blackbox_exporter` (phase 3) |
-| Keycloak Metrics | `10441` (or the KC 25+ equivalent) | after Keycloak metrics (phase 3) |
-| Caddy | `13859` | after the Caddy metrics vhost (phase 3) |
+| Prometheus Blackbox Exporter | `7587` | now (`blackbox` job) |
+| Keycloak Metrics | `10441` (or the KC 25+ equivalent) | now (`keycloak` job) |
+| Caddy | `13859` | now (`caddy` job) |
 
 ## Credentials
 
@@ -58,14 +61,12 @@ vendored, to avoid license drift):
 - Prometheus and Loki datasources are provisioned with fixed UIDs (`prometheus`,
   `loki`) so bundled dashboard JSON can reference them without a lookup.
 
-## Roadmap (M23, phases 3–4)
+## Roadmap (M23, phase 4)
 
-- **Phase 3** — `blackbox_exporter` probing every operator FQDN (HTTP 200,
-  TLS-expiry countdown), Keycloak's built-in metrics (`KC_METRICS_ENABLED`),
-  a Caddy metrics vhost.
 - **Phase 4** — a `mksrv_backup_last_success_seconds` textfile metric, an
   alert-rule catalog (host resource pressure, `PatroniNoLeader`,
-  `OpenBaoSealed`, `CertExpiringSoon`, `BackupStale`, …), and Grafana-managed
-  notifications (webhook or SMTP contact point).
+  `OpenBaoSealed`, `CertExpiringSoon`, `BackupStale`, `EndpointDown`, …), and
+  Grafana-managed notifications (webhook or SMTP contact point).
 
-See ADR 0019 (phase 1) and ADR 0020 (phase 2) for the design rationale.
+See ADR 0019 (phase 1), ADR 0020 (phase 2), and ADR 0021 (phase 3) for the
+design rationale.

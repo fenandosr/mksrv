@@ -62,6 +62,7 @@ type Context struct {
 	StackHosts      map[string]string   // stack name -> private VPC IP of the host carrying it
 	StackMembers    map[string][]Member // stack name -> every fleet host carrying it (sorted by Name)
 	Fleet           []Member            // every fleet host, including this one (sorted by Name) — for cross-host scraping (M23)
+	OperatorFQDNs   []string            // every operator + tenant-rest FQDN fronted by the edge, for blackbox probing (M23)
 	Retention       model.RetentionConfig
 	Tenant          *model.Tenant
 	Secrets         map[string]string
