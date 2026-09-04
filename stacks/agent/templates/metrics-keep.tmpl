@@ -1,0 +1,6 @@
+# Managed by mksrv. Ensures /var/lib/mksrv/metrics exists on every host before
+# node-exporter's textfile-collector bind mount is (re)started — writing any
+# templated file creates its parent directories (WriteFileSudo mkdir -p), so
+# this placeholder is the guarantee, not the content. Freestanding .prom
+# metric files (e.g. the backup job's last-success timestamp) are dropped in
+# here even on hosts that don't run `backup` themselves.

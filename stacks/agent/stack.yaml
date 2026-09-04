@@ -19,6 +19,9 @@ templates:
   - src: templates/mksrv-agent.network.tmpl
     dst: /etc/containers/systemd/mksrv-agent.network
     scope: shared
+  - src: templates/metrics-keep.tmpl
+    dst: /var/lib/mksrv/metrics/.keep
+    scope: shared
   - src: templates/node-exporter.container.tmpl
     dst: /etc/containers/systemd/mksrv-node-exporter.container
     scope: shared

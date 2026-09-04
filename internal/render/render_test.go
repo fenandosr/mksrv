@@ -283,6 +283,13 @@ func TestStackRendersAgent(t *testing.T) {
 		// publish collides with Keycloak's own 127.0.0.1:8080 there.
 		t.Fatalf("cadvisor unit must not publish on 127.0.0.1:8080 (collides with Keycloak):\n%s", u)
 	}
+	// node-exporter bind-mounts /var/lib/mksrv/metrics (the textfile
+	// collector directory); podman does not create a missing bind-mount
+	// source, so `agent` must ship a placeholder file there too — on every
+	// host, not just the one running `backup`.
+	if _, ok := files["/var/lib/mksrv/metrics/.keep"]; !ok {
+		t.Fatalf("agent must render a placeholder under /var/lib/mksrv/metrics so the dir exists before node-exporter mounts it; got %v", SortedPaths(files))
+	}
 }
 
 func TestStackRendersMonitorFleetWide(t *testing.T) {
