@@ -80,8 +80,15 @@ if ! restic cat config >/dev/null 2>&1; then
     exit 1
   fi
 fi
-if ! restic backup --tag mksrv --host "$(hostname -s)" /stage /vol /podvol; then
-  log "restic backup failed"
+# restic exit 3 = "some source files could not be read" (sockets, files that
+# changed mid-read under the live stack volumes) — the snapshot is still written,
+# so treat it as a warning, not a failure. Only a real error (1) aborts.
+restic backup --tag mksrv --host "$(hostname -s)" /stage /vol /podvol
+rc=$?
+if [ "$rc" = 3 ]; then
+  log "restic backup: some source files were unreadable (snapshot still created)"
+elif [ "$rc" != 0 ]; then
+  log "restic backup failed (exit $rc)"
   exit 1
 fi
 
