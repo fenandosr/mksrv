@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix: `infra/root/.terraform.lock.hcl` is now committed and embedded (`assets.go`
+  gains an explicit embed for it, since bare `//go:embed infra` skips dotfiles).
+  Without it every `mksrv apply` on a `dev` engine re-resolved the AWS provider
+  from scratch. The lock pins `hashicorp/aws` with multi-platform hashes.
+
 - Fix (M21): `mksrv-backup.service` `ExecStart`ed `backup.sh` directly, but the
   script lives under `/var/lib/mksrv` (relabelled `container_file_t` for podman)
   and systemd cannot exec it there — `status=203/EXEC`, Permission denied. Now

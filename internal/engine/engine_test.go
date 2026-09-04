@@ -35,7 +35,7 @@ func TestExtract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
-	for _, expected := range []string{"infra/root/main.tf", "stacks/base/stack.yaml", "schemas/deployment.v1.json"} {
+	for _, expected := range []string{"infra/root/main.tf", "infra/root/.terraform.lock.hcl", "stacks/base/stack.yaml", "schemas/deployment.v1.json"} {
 		if _, err := os.Stat(filepath.Join(path, expected)); err != nil {
 			t.Errorf("stat %s: %v", expected, err)
 		}
