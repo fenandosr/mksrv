@@ -155,7 +155,7 @@ func loadPgAdminServers(ctx context.Context, client *sshx.Client, pgadminUser, p
 		return err
 	}
 	if _, err := client.RunInput(ctx,
-		"sudo podman exec -i mksrv-pgadmin sh -c 'cat > /tmp/mksrv-servers.json' 2>/dev/null || sudo tee /tmp/mksrv-servers.json >/dev/null && sudo podman cp /tmp/mksrv-servers.json mksrv-pgadmin:/tmp/mksrv-servers.json",
+		"sudo tee /tmp/mksrv-servers.json >/dev/null && sudo podman cp /tmp/mksrv-servers.json mksrv-pgadmin:/tmp/mksrv-servers.json",
 		blob,
 	); err != nil {
 		return err

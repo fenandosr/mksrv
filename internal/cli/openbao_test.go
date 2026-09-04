@@ -34,7 +34,7 @@ func TestBaoInitParse(t *testing.T) {
 func TestBaoExec(t *testing.T) {
 	t.Parallel()
 	plain := baoExec("", "status", "-format=json")
-	if !strings.Contains(plain, "podman exec -e BAO_ADDR=http://127.0.0.1:8200 mksrv-openbao bao") ||
+	if !strings.Contains(plain, "podman exec -i -e BAO_ADDR=http://127.0.0.1:8200 mksrv-openbao bao") ||
 		!strings.Contains(plain, "'status' '-format=json'") {
 		t.Fatalf("plain: %s", plain)
 	}
