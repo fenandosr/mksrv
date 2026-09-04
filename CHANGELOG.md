@@ -7,6 +7,9 @@
   Without it every `mksrv apply` on a `dev` engine re-resolved the AWS provider
   from scratch. The lock pins `hashicorp/aws` with multi-platform hashes.
 
+- Fix (M21): `backup.sh` never initialised the restic repository, so the very
+  first run failed with "Is there a repository at the following location?". It
+  now runs `restic init` when `restic cat config` shows no repo.
 - Fix (M21): `mksrv-backup.service` `ExecStart`ed `backup.sh` directly, but the
   script lives under `/var/lib/mksrv` (relabelled `container_file_t` for podman)
   and systemd cannot exec it there — `status=203/EXEC`, Permission denied. Now

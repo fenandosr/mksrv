@@ -71,6 +71,15 @@ if [ -n "${KC_URL:-}" ] && [ -n "${KC_ADMIN_PASSWORD:-}" ]; then
 fi
 
 # 4. restic snapshot: the staged dumps + the dedicated stack volumes + podman volumes.
+# Initialise the repository on first run — the S3 bucket exists (Terraform) but
+# the restic repo does not until something writes to it.
+if ! restic cat config >/dev/null 2>&1; then
+  log "initialising restic repository"
+  if ! restic init; then
+    log "restic init failed"
+    exit 1
+  fi
+fi
 if ! restic backup --tag mksrv --host "$(hostname -s)" /stage /vol /podvol; then
   log "restic backup failed"
   exit 1

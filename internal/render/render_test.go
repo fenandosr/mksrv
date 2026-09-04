@@ -380,6 +380,7 @@ func TestStackRendersBackup(t *testing.T) {
 	sh := string(files["/var/lib/mksrv/stacks/backup/backup.sh"])
 	for _, want := range []string{
 		"pg_dump -Fc",
+		"restic cat config >/dev/null 2>&1",
 		"bao operator raft snapshot save",
 		"partial-export?exportClients=true",
 		"restic forget --tag mksrv --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune",
