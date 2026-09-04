@@ -62,6 +62,42 @@ scrape_configs:
     static_configs:
       - targets: ["{{ .StackIP "cache" }}:9121"]
 {{- end }}
+{{- if .StackIP "identity" }}
+
+  # Keycloak's built-in metrics on the management port (M23 phase 3).
+  - job_name: keycloak
+    static_configs:
+      - targets: ["{{ .StackIP "identity" }}:9000"]
+{{- end }}
+{{- if .StackIP "base" }}
+
+  # Caddy, proxied through a private-IP-only vhost — the admin API stays
+  # loopback-only (M23 phase 3).
+  - job_name: caddy
+    static_configs:
+      - targets: ["{{ .StackIP "base" }}:9019"]
+{{- end }}
+{{- if .OperatorFQDNs }}
+
+  # Every operator + tenant-rest FQDN, probed over HTTPS: reachability and
+  # (via probe_ssl_earliest_cert_expiry) certificate expiry (M23 phase 3).
+  - job_name: blackbox
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+{{- range .OperatorFQDNs }}
+          - https://{{ . }}
+{{- end }}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: mksrv-blackbox:9115
+{{- end }}
 {{- if .StackIP "logs" }}
 
   - job_name: loki

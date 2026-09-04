@@ -40,6 +40,7 @@ Rough per-service memory (idle → light load):
 | Grafana / Headscale / configd | 150 / 60 / 15 MiB | |
 | `agent` (node-exporter + cAdvisor, every host) | 192 MiB | auto-assigned when `monitor` is present (ADR 0019) |
 | `postgres_exporter` / `redis_exporter` (M23 phase 2) | 30 / 32 MiB | co-located sidecars in `postgres` / `cache` |
+| `blackbox_exporter` (M23 phase 3) | 32 MiB | in `monitor`, no per-target overhead worth modelling |
 | Alloy · CrowdSec · Tailscale (per host) | 80 · 150 · 30 MiB | |
 | Caddy | 30 MiB | |
 

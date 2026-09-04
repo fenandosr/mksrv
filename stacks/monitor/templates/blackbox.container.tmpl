@@ -1,0 +1,16 @@
+[Unit]
+Description=mksrv Blackbox exporter
+
+[Container]
+ContainerName=mksrv-blackbox
+Image={{ .Image "blackbox" | default "quay.io/prometheus/blackbox-exporter:v0.25.0" }}
+Network=mksrv-monitor.network
+PublishPort=127.0.0.1:9115:9115
+Volume=/var/lib/mksrv/stacks/monitor/blackbox.yml:/etc/blackbox_exporter/config.yml:Z,ro
+Exec=--config.file=/etc/blackbox_exporter/config.yml
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

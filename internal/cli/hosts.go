@@ -386,6 +386,23 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 			stackMembers[s] = append(stackMembers[s], member)
 		}
 	}
+	// OperatorFQDNs: every shared operator endpoint plus each tenant's
+	// PostgREST vhost, fronted by the edge — mirrors infra/root/main.tf's
+	// local.operator_fqdns so blackbox probes exactly what DNS actually
+	// points at (M23 phase 3).
+	operatorFQDNs := []string{
+		dep.Identity.KeycloakDomain,
+		dep.Identity.HeadscaleDomain,
+		"cfg." + dep.DNS.RootDomain,
+		"grafana." + dep.DNS.RootDomain,
+		"pgadmin." + dep.DNS.RootDomain,
+	}
+	for _, id := range sortedTenantIDs(f.data.Tenants) {
+		if slices.Contains(f.data.Tenants[id].Stacks, "database") {
+			operatorFQDNs = append(operatorFQDNs, id+".rest."+dep.DNS.RootDomain)
+		}
+	}
+
 	return render.Context{
 		Env:             dep.Env,
 		Region:          dep.AWS.Region,
@@ -407,12 +424,13 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 			ConfigD:    "cfg." + dep.DNS.RootDomain,
 			RootDomain: dep.DNS.RootDomain,
 		},
-		Images:       images,
-		Peers:        peers,
-		StackHosts:   stackHosts,
-		StackMembers: stackMembers,
-		Fleet:        fleet,
-		Retention:    f.data.Deployment.Retention.Resolved(),
+		Images:        images,
+		Peers:         peers,
+		StackHosts:    stackHosts,
+		StackMembers:  stackMembers,
+		Fleet:         fleet,
+		OperatorFQDNs: operatorFQDNs,
+		Retention:     f.data.Deployment.Retention.Resolved(),
 	}
 }
 

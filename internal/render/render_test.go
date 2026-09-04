@@ -19,10 +19,11 @@ func baseContext() Context {
 		Timezone:  "America/Mexico_City",
 		ACMEEmail: "ops@example.com",
 		Host: HostView{
-			Name:     "edge",
-			Role:     "edge",
-			PublicIP: "203.0.113.10",
-			Stacks:   []string{"base", "identity"},
+			Name:      "edge",
+			Role:      "edge",
+			PublicIP:  "203.0.113.10",
+			PrivateIP: "10.20.0.10",
+			Stacks:    []string{"base", "identity"},
 		},
 		Endpoints: Endpoints{
 			Keycloak:   "auth.example.com",
@@ -57,6 +58,12 @@ func TestStackRendersBase(t *testing.T) {
 	if !strings.Contains(string(caddyfile), "respond /healthz") {
 		t.Fatalf("Caddyfile missing health endpoint:\n%s", caddyfile)
 	}
+	if !strings.Contains(string(caddyfile), "servers {\n\t\tmetrics\n\t}") {
+		t.Fatalf("Caddyfile missing the metrics server option:\n%s", caddyfile)
+	}
+	if !strings.Contains(string(caddyfile), "10.20.0.10:9019 {") || !strings.Contains(string(caddyfile), "reverse_proxy 127.0.0.1:2019") {
+		t.Fatalf("Caddyfile missing the metrics vhost on the private IP:\n%s", caddyfile)
+	}
 
 	unit, ok := files["/etc/containers/systemd/mksrv-caddy.container"]
 	if !ok {
@@ -90,6 +97,9 @@ func TestStackRendersIdentity(t *testing.T) {
 	}
 	if !strings.Contains(string(cfg), "server_url: https://vpn.example.com") {
 		t.Fatalf("headscale config wrong:\n%s", cfg)
+	}
+	if kc := string(files["/etc/containers/systemd/mksrv-keycloak.container"]); !strings.Contains(kc, "PublishPort=10.20.0.10:9000:9000") {
+		t.Fatalf("keycloak unit missing private-IP management port publish:\n%s", kc)
 	}
 }
 
@@ -305,6 +315,9 @@ func TestStackRendersMonitorFleetWide(t *testing.T) {
 	if strings.Contains(p, "job_name: patroni") {
 		t.Fatalf("prometheus.yml should not have a patroni job without a postgres cluster:\n%s", p)
 	}
+	if strings.Contains(p, "job_name: blackbox") {
+		t.Fatalf("prometheus.yml should not have a blackbox job without OperatorFQDNs:\n%s", p)
+	}
 
 	// A postgres cluster in the fleet adds the patroni + postgres-exporter jobs
 	// over its members; an openbao cluster adds the openbao job; `cache` adds
@@ -321,7 +334,8 @@ func TestStackRendersMonitorFleetWide(t *testing.T) {
 			{Name: "core3", PrivateIP: "10.20.0.23"},
 		},
 	}
-	ctx.StackHosts = map[string]string{"cache": "10.20.0.30"}
+	ctx.StackHosts = map[string]string{"cache": "10.20.0.30", "identity": "10.20.0.10", "base": "10.20.0.10"}
+	ctx.OperatorFQDNs = []string{"auth.example.com", "bitabit.rest.example.com"}
 	files, err = Stack(stacksRoot, catalog["monitor"], ctx)
 	if err != nil {
 		t.Fatalf("Stack(monitor, cluster) error = %v", err)
@@ -332,6 +346,10 @@ func TestStackRendersMonitorFleetWide(t *testing.T) {
 		"job_name: postgres-exporter", `targets: ["10.20.0.22:9187"]`,
 		"job_name: openbao", "metrics_path: /v1/sys/metrics", `targets: ["10.20.0.21:8200"]`,
 		"job_name: redis-exporter", `targets: ["10.20.0.30:9121"]`,
+		"job_name: keycloak", `targets: ["10.20.0.10:9000"]`,
+		"job_name: caddy", `targets: ["10.20.0.10:9019"]`,
+		"job_name: blackbox", "metrics_path: /probe", "- https://auth.example.com", "- https://bitabit.rest.example.com",
+		"replacement: mksrv-blackbox:9115",
 	} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("prometheus.yml missing %q:\n%s", want, p)

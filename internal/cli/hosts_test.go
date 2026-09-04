@@ -45,3 +45,35 @@ func TestRenderContextPopulatesFleet(t *testing.T) {
 		t.Fatalf("edge member wrong: %+v", ctx.Fleet[1])
 	}
 }
+
+// TestRenderContextPopulatesOperatorFQDNs checks the blackbox probe list
+// (M23 phase 3): the shared operator endpoints plus one rest FQDN per tenant
+// that carries `database` — mirroring infra/root/main.tf's operator_fqdns.
+func TestRenderContextPopulatesOperatorFQDNs(t *testing.T) {
+	t.Parallel()
+	f := &fleet{
+		data: workspace.Data{
+			Deployment: model.Deployment{
+				DNS:      model.DNSConfig{RootDomain: "example.com"},
+				Identity: model.IdentityConfig{KeycloakDomain: "auth.example.com", HeadscaleDomain: "vpn.example.com"},
+				Hosts:    map[string]model.Host{"edge": {Provider: "aws", Stacks: []string{"base"}}},
+			},
+			Tenants: map[string]model.Tenant{
+				"bitabit": {ID: "bitabit", Stacks: []string{"database", "cache"}},
+				"hg":      {ID: "hg", Stacks: []string{"cache"}}, // no database -> no rest vhost
+			},
+		},
+		targets: []hostTarget{{Name: "edge", Host: model.Host{Stacks: []string{"base"}}}},
+		outputs: infra.Outputs{Hosts: map[string]infra.HostOutput{"edge": {PrivateIP: "10.20.0.10"}}},
+	}
+	ctx := f.renderContext(f.targets[0])
+	want := []string{"auth.example.com", "vpn.example.com", "cfg.example.com", "grafana.example.com", "pgadmin.example.com", "bitabit.rest.example.com"}
+	if len(ctx.OperatorFQDNs) != len(want) {
+		t.Fatalf("OperatorFQDNs = %v, want %v", ctx.OperatorFQDNs, want)
+	}
+	for i, fqdn := range want {
+		if ctx.OperatorFQDNs[i] != fqdn {
+			t.Fatalf("OperatorFQDNs[%d] = %q, want %q (full: %v)", i, ctx.OperatorFQDNs[i], fqdn, ctx.OperatorFQDNs)
+		}
+	}
+}
