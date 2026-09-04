@@ -36,11 +36,15 @@ type Endpoints struct {
 	RootDomain string
 }
 
-// Member is one fleet host carrying a stack, for cluster templates.
+// Member is one fleet host carrying a stack, for cluster templates. It also
+// serves as the fleet-wide roster entry in Context.Fleet (M23), where Role and
+// Stacks are populated too.
 type Member struct {
 	Name      string
 	PrivateIP string
 	TailnetIP string
+	Role      string // "edge" when it carries base, otherwise "data"
+	Stacks    []string
 }
 
 // Context is the data passed to every stack template.
@@ -57,6 +61,7 @@ type Context struct {
 	Peers           map[string]string   // mksrv host name -> private VPC IP
 	StackHosts      map[string]string   // stack name -> private VPC IP of the host carrying it
 	StackMembers    map[string][]Member // stack name -> every fleet host carrying it (sorted by Name)
+	Fleet           []Member            // every fleet host, including this one (sorted by Name) — for cross-host scraping (M23)
 	Retention       model.RetentionConfig
 	Tenant          *model.Tenant
 	Secrets         map[string]string

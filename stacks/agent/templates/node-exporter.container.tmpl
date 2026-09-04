@@ -1,0 +1,23 @@
+[Unit]
+Description=mksrv node-exporter
+
+[Container]
+ContainerName=mksrv-node-exporter
+Image={{ .Image "node-exporter" | default "quay.io/prometheus/node-exporter:v1.8.2" }}
+Network=mksrv-agent.network
+PublishPort={{ .Host.PrivateIP }}:9100:9100
+PublishPort=127.0.0.1:9100:9100
+Volume=/:/host:ro,rslave
+Volume=/var/lib/mksrv/metrics:/textfile:ro,Z
+# --collector.textfile reads freestanding .prom files a host script drops in
+# /var/lib/mksrv/metrics (e.g. the backup job's last-success timestamp, M23.4).
+# --collector.systemd is deliberately not enabled: it needs the host's
+# /run/systemd/private socket, which is fiddlier to wire through Podman than
+# the value it adds right now — revisit if unit-failure alerting needs it.
+Exec=--path.rootfs=/host --collector.textfile.directory=/textfile --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($|/)
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

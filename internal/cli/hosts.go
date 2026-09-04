@@ -369,12 +369,18 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 	// already sorted by host name, so StackMembers slices are too.
 	stackHosts := map[string]string{}
 	stackMembers := map[string][]render.Member{}
+	fleet := make([]render.Member, 0, len(f.targets))
 	for _, t := range f.targets {
 		ip := f.outputs.Hosts[t.Name].PrivateIP
 		if ip == "" {
 			continue
 		}
-		member := render.Member{Name: t.Name, PrivateIP: ip, TailnetIP: f.meshIPs[t.Name]}
+		memberRole := "data"
+		if slices.Contains(t.Host.Stacks, "base") {
+			memberRole = "edge"
+		}
+		member := render.Member{Name: t.Name, PrivateIP: ip, TailnetIP: f.meshIPs[t.Name], Role: memberRole, Stacks: t.Host.Stacks}
+		fleet = append(fleet, member)
 		for _, s := range t.Host.Stacks {
 			stackHosts[s] = ip
 			stackMembers[s] = append(stackMembers[s], member)
@@ -405,6 +411,7 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 		Peers:        peers,
 		StackHosts:   stackHosts,
 		StackMembers: stackMembers,
+		Fleet:        fleet,
 		Retention:    f.data.Deployment.Retention.Resolved(),
 	}
 }

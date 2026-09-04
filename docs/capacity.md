@@ -38,7 +38,8 @@ Rough per-service memory (idle → light load):
 | Prometheus | 300 MiB → scales with series | TSDB, retention-sized disk |
 | Loki | 250 → 400 MiB | chunks on filesystem or S3 |
 | Grafana / Headscale / configd | 150 / 60 / 15 MiB | |
-| Alloy · CrowdSec · exporters · Tailscale (per host) | 80 · 150 · 100 · 30 MiB | |
+| `agent` (node-exporter + cAdvisor, every host) | 192 MiB | auto-assigned when `monitor` is present (ADR 0019) |
+| Alloy · CrowdSec · Tailscale (per host) | 80 · 150 · 30 MiB | |
 | Caddy | 30 MiB | |
 
 Instance memory (`InstanceRAMMB`):

@@ -223,6 +223,7 @@ func Validate(ctx context.Context, root string, options ValidateOptions) (Data, 
 	}
 
 	if deploymentOK {
+		normalizeImplicitStacks(&data.Deployment)
 		semanticChecks(&data, &report, options)
 	}
 	report.Hosts = len(data.Deployment.Hosts)

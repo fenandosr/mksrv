@@ -1,0 +1,32 @@
+name: agent
+title: Metrics agent
+description: "node-exporter and cAdvisor, published on the host's private IP for the fleet's central Prometheus (M23)"
+targets: [cloud, local]
+per_tenant: false
+depends_on: []
+apps:
+  - name: node-exporter
+    image: quay.io/prometheus/node-exporter:v1.8.2
+  - name: cadvisor
+    image: gcr.io/cadvisor/cadvisor:v0.49.2
+networks: [mksrv-agent]
+secrets: []
+tailnet_ports: []
+resources:
+  min_ram_mb: 192
+  disk_gb: 2
+templates:
+  - src: templates/mksrv-agent.network.tmpl
+    dst: /etc/containers/systemd/mksrv-agent.network
+    scope: shared
+  - src: templates/node-exporter.container.tmpl
+    dst: /etc/containers/systemd/mksrv-node-exporter.container
+    scope: shared
+  - src: templates/cadvisor.container.tmpl
+    dst: /etc/containers/systemd/mksrv-cadvisor.container
+    scope: shared
+health:
+  - app: node-exporter
+    type: http
+    path: /metrics
+    port: 9100

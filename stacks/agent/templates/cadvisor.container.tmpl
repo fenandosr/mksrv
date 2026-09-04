@@ -4,7 +4,9 @@ Description=mksrv cAdvisor
 [Container]
 ContainerName=mksrv-cadvisor
 Image={{ .Image "cadvisor" | default "gcr.io/cadvisor/cadvisor:v0.49.2" }}
-Network=mksrv-monitor.network
+Network=mksrv-agent.network
+PublishPort={{ .Host.PrivateIP }}:8080:8080
+PublishPort=127.0.0.1:8080:8080
 Volume=/:/rootfs:ro
 Volume=/var/run:/var/run:ro
 Volume=/sys:/sys:ro
