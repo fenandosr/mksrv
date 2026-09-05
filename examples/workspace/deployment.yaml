@@ -28,6 +28,7 @@ identity:
 
 mail:
   inbound: false
+  outbound_smtp: false
 
 hosts:
   edge:

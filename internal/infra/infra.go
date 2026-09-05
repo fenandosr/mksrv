@@ -74,9 +74,22 @@ type HostOutput struct {
 	AZ              string            `json:"az"`
 }
 
+// MailSMTPOutput is the SES sending identity + IAM credential for Keycloak's
+// transactional email (M25). Enabled is false, and every other field empty,
+// when `mail.outbound_smtp` is off.
+type MailSMTPOutput struct {
+	Enabled         bool   `json:"enabled"`
+	AccessKeyID     string `json:"access_key_id"`
+	SecretAccessKey string `json:"secret_access_key"`
+	SMTPHost        string `json:"smtp_host"`
+	SMTPPort        int    `json:"smtp_port"`
+	FromAddress     string `json:"from_address"`
+}
+
 // Outputs is the decoded outputs.json.
 type Outputs struct {
-	Hosts map[string]HostOutput `json:"hosts"`
+	Hosts    map[string]HostOutput `json:"hosts"`
+	MailSMTP MailSMTPOutput        `json:"mail_smtp"`
 }
 
 // LoadOutputs reads and decodes <root>/.mksrv/infra/outputs.json.

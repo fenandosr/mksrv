@@ -97,6 +97,11 @@ type IdentityConfig struct {
 
 type MailConfig struct {
 	Inbound bool `json:"inbound,omitempty"`
+	// OutboundSMTP provisions an SES sending identity for the operator root
+	// domain plus a scoped SMTP credential, and configures every tenant
+	// realm's Keycloak SMTP settings from it (password reset / email
+	// verification). Never touches a tenant's own domain (M25).
+	OutboundSMTP bool `json:"outbound_smtp,omitempty"`
 }
 
 type Host struct {

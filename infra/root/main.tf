@@ -16,8 +16,10 @@ locals {
   base_host = one([for name, h in local.hosts : name if contains(h.stacks, "base")])
   edge_ip   = module.aws_host[local.base_host].public_ip
 
-  root_domain = local.d.dns.root_domain
-  zone_id     = try(local.d.dns.route53.zone_id, null)
+  root_domain   = local.d.dns.root_domain
+  zone_id       = try(local.d.dns.route53.zone_id, null)
+  outbound_smtp = try(local.d.mail.outbound_smtp, false)
+  ses_mail_from = "mail.${local.root_domain}"
 
   # Per-tenant PostgREST data API: <id>.rest.<root_domain>, fronted by the edge.
   tenant_rest_fqdns = [
@@ -51,14 +53,17 @@ locals {
     "grafana.${local.root_domain}",
     "pgadmin.${local.root_domain}",
   ], local.tenant_rest_fqdns))
-  operator_records = [
-    for fqdn in local.operator_fqdns : {
-      fqdn  = fqdn
-      type  = "A"
-      value = local.edge_ip
-      ttl   = 300
-    }
-  ]
+  operator_records = concat(
+    [
+      for fqdn in local.operator_fqdns : {
+        fqdn  = fqdn
+        type  = "A"
+        value = local.edge_ip
+        ttl   = 300
+      }
+    ],
+    local.ses_dns_records,
+  )
 }
 
 module "network" {
@@ -195,6 +200,89 @@ module "existing_host" {
   address  = each.value.address
   ssh_user = each.value.ssh_user
   stacks   = toset(each.value.stacks)
+}
+
+# Operator-domain SES sending identity for Keycloak's transactional email
+# (password reset, email verification) — never a tenant domain (M25). Custom
+# MAIL FROM improves deliverability/DMARC alignment at the cost of one more
+# MX + TXT record, both on the mail.<root_domain> subdomain, not the apex.
+resource "aws_ses_domain_identity" "operator" {
+  count  = local.outbound_smtp ? 1 : 0
+  domain = local.root_domain
+}
+
+resource "aws_ses_domain_dkim" "operator" {
+  count  = local.outbound_smtp ? 1 : 0
+  domain = aws_ses_domain_identity.operator[0].domain
+}
+
+resource "aws_ses_domain_mail_from" "operator" {
+  count            = local.outbound_smtp ? 1 : 0
+  domain           = aws_ses_domain_identity.operator[0].domain
+  mail_from_domain = local.ses_mail_from
+}
+
+locals {
+  ses_dns_records = local.outbound_smtp ? concat(
+    [{
+      fqdn  = "_amazonses.${local.root_domain}"
+      type  = "TXT"
+      value = "\"${aws_ses_domain_identity.operator[0].verification_token}\""
+      ttl   = 300
+    }],
+    [
+      for token in aws_ses_domain_dkim.operator[0].dkim_tokens : {
+        fqdn  = "${token}._domainkey.${local.root_domain}"
+        type  = "CNAME"
+        value = "${token}.dkim.amazonses.com"
+        ttl   = 300
+      }
+    ],
+    [
+      {
+        fqdn  = local.ses_mail_from
+        type  = "MX"
+        value = "10 feedback-smtp.${local.region}.amazonses.com"
+        ttl   = 300
+      },
+      {
+        fqdn  = local.ses_mail_from
+        type  = "TXT"
+        value = "\"v=spf1 include:amazonses.com ~all\""
+        ttl   = 300
+      },
+    ],
+  ) : []
+}
+
+# A dedicated IAM user scoped to ses:SendRawEmail only — no console access, no
+# other permissions. Its access key is converted to an SMTP username/password
+# (internal/aws.DeriveSESSMTPPassword) and pushed to SSM, same as every other
+# mksrv application secret; never referenced from Terraform state again after
+# that one-time mirror.
+resource "aws_iam_user" "ses_smtp" {
+  count = local.outbound_smtp ? 1 : 0
+  name  = "mksrv-${local.env}-ses-smtp"
+  tags  = { "mksrv:env" = local.env }
+}
+
+resource "aws_iam_user_policy" "ses_smtp" {
+  count = local.outbound_smtp ? 1 : 0
+  name  = "ses-send"
+  user  = aws_iam_user.ses_smtp[0].name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "ses:SendRawEmail"
+      Resource = "*"
+    }]
+  })
+}
+
+resource "aws_iam_access_key" "ses_smtp" {
+  count = local.outbound_smtp ? 1 : 0
+  user  = aws_iam_user.ses_smtp[0].name
 }
 
 module "dns_operator" {

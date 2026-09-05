@@ -41,6 +41,19 @@ output "dns" {
   }
 }
 
+output "mail_smtp" {
+  description = "SES sending identity + SMTP credential for Keycloak's transactional email (M25). enabled=false when mail.outbound_smtp is off."
+  sensitive   = true
+  value = local.outbound_smtp ? {
+    enabled           = true
+    access_key_id     = aws_iam_access_key.ses_smtp[0].id
+    secret_access_key = aws_iam_access_key.ses_smtp[0].secret
+    smtp_host         = "email-smtp.${local.region}.amazonaws.com"
+    smtp_port         = 587
+    from_address      = "noreply@${local.root_domain}"
+  } : { enabled = false }
+}
+
 output "network" {
   value = {
     vpc_id            = module.network.vpc_id

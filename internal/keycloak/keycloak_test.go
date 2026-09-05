@@ -354,6 +354,66 @@ func TestEnsureRealmCreationIncludesLoginTheme(t *testing.T) {
 	}
 }
 
+func TestEnsureRealmSetsSMTP(t *testing.T) {
+	t.Parallel()
+	var puts []map[string]any
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/realms/master/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "t"})
+	})
+	mux.HandleFunc("/admin/realms/acme", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			puts = append(puts, body)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"realm": "acme"})
+	})
+	mux.HandleFunc("/admin/realms/acme/groups", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
+	mux.HandleFunc("/admin/realms/acme/clients", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := New(server.URL)
+	if err := c.Login(context.Background(), "admin", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	spec := RealmSpec{Realm: "acme", SMTP: &SMTPSpec{
+		Host: "email-smtp.us-east-1.amazonaws.com", Port: 587,
+		From: "noreply@example.com", FromDisplay: "ACME",
+		User: "AKIA...", Password: "derived-password",
+	}}
+	res, err := c.EnsureRealm(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("EnsureRealm() error = %v", err)
+	}
+	if !res.SMTPUpdated || len(puts) != 1 {
+		t.Fatalf("result=%+v puts=%d", res, len(puts))
+	}
+	smtp, _ := puts[0]["smtpServer"].(map[string]any)
+	if smtp["host"] != "email-smtp.us-east-1.amazonaws.com" || smtp["port"] != "587" ||
+		smtp["from"] != "noreply@example.com" || smtp["user"] != "AKIA..." ||
+		smtp["password"] != "derived-password" || smtp["auth"] != "true" || smtp["starttls"] != "true" {
+		t.Fatalf("unexpected smtpServer body: %+v", smtp)
+	}
+
+	// Every apply re-sends it, unconditionally (Keycloak masks the password
+	// on GET, so there is nothing to diff against).
+	if _, err := c.EnsureRealm(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	if len(puts) != 2 {
+		t.Fatalf("want a second PUT (unconditional), got %d", len(puts))
+	}
+}
+
 func TestEnsureClientReturnsSecret(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()

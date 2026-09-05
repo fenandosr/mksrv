@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -25,6 +26,20 @@ type RealmSpec struct {
 	// leaves Keycloak's current theme (its own default, or whatever was set
 	// before) untouched.
 	LoginTheme string
+	// SMTP, when non-nil, is reconciled onto the realm's email settings
+	// (ADR 0025) — password reset and email verification. Nil leaves
+	// Keycloak's current setting untouched.
+	SMTP *SMTPSpec
+}
+
+// SMTPSpec is a realm's outbound email configuration.
+type SMTPSpec struct {
+	Host        string
+	Port        int
+	From        string
+	FromDisplay string
+	User        string
+	Password    string
 }
 
 // adminGroupRoles are the realm-management client roles the AdminGroup receives:
@@ -56,6 +71,7 @@ type RealmResult struct {
 	GroupsCreated     []string `json:"groups_created"`
 	ClientsCreated    []string `json:"clients_created"`
 	LoginThemeUpdated bool     `json:"login_theme_updated"`
+	SMTPUpdated       bool     `json:"smtp_updated"`
 }
 
 // EnsureRealm creates the realm, groups, and clients that are missing. It never
@@ -91,6 +107,30 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 			return result, fmt.Errorf("set login theme on realm %s: %w", spec.Realm, err)
 		}
 		result.LoginThemeUpdated = true
+	}
+
+	// Always reconciled when set, regardless of whether the realm was just
+	// created or the login theme also changed: Keycloak masks the password
+	// on GET (`**********`), so there is nothing meaningful to diff against,
+	// and re-PUTting the same values is a no-op in effect (ADR 0025).
+	if spec.SMTP != nil {
+		if _, err := c.do(ctx, http.MethodPut, "/realms/"+spec.Realm, map[string]any{
+			"realm": spec.Realm,
+			"smtpServer": map[string]any{
+				"host":            spec.SMTP.Host,
+				"port":            strconv.Itoa(spec.SMTP.Port),
+				"from":            spec.SMTP.From,
+				"fromDisplayName": spec.SMTP.FromDisplay,
+				"ssl":             "false",
+				"starttls":        "true",
+				"auth":            "true",
+				"user":            spec.SMTP.User,
+				"password":        spec.SMTP.Password,
+			},
+		}, nil); err != nil {
+			return result, fmt.Errorf("set smtp on realm %s: %w", spec.Realm, err)
+		}
+		result.SMTPUpdated = true
 	}
 
 	existingGroups, err := c.groupNames(ctx, spec.Realm)
