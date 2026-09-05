@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fix (M25): the SES verification and SPF TXT records were manually wrapped
+  in escaped quotes (`"\"...\""`) — but `aws_route53_record` only wants
+  literal `""` to concatenate segments of values longer than 255 characters;
+  adding it around a short value doubles the quoting and Route53 rejects it
+  ("InvalidCharacterString (Value should be enclosed in quotation marks)").
+  Both are now plain text.
+
 - Fix (M25): the 3 SES DKIM CNAME records were folded into the shared `dns`
   module's `for_each` list, keyed by `"type fqdn"` — but the DKIM token (part
   of the CNAME's *name*) is unknown until `aws_ses_domain_dkim` is actually
