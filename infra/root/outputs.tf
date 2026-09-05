@@ -44,14 +44,21 @@ output "dns" {
 output "mail_smtp" {
   description = "SES sending identity + SMTP credential for Keycloak's transactional email (M25). enabled=false when mail.outbound_smtp is off."
   sensitive   = true
-  value = local.outbound_smtp ? {
-    enabled           = true
-    access_key_id     = aws_iam_access_key.ses_smtp[0].id
-    secret_access_key = aws_iam_access_key.ses_smtp[0].secret
-    smtp_host         = "email-smtp.${local.region}.amazonaws.com"
-    smtp_port         = 587
-    from_address      = "noreply@${local.root_domain}"
-  } : { enabled = false }
+  # A single object literal, every attribute ternary'd individually (both
+  # branches always the same primitive type) rather than choosing between two
+  # differently-shaped objects: Terraform's type unification across a
+  # conditional's two branches falls back to coercing mismatched primitives
+  # to string when it can't reconcile the shapes, which silently turned
+  # `enabled` (and everything else) into a string on the wire — Go's
+  # json.Unmarshal then rejected `"enabled": "false"` for a bool field.
+  value = {
+    enabled           = local.outbound_smtp
+    access_key_id     = local.outbound_smtp ? aws_iam_access_key.ses_smtp[0].id : ""
+    secret_access_key = local.outbound_smtp ? aws_iam_access_key.ses_smtp[0].secret : ""
+    smtp_host         = local.outbound_smtp ? "email-smtp.${local.region}.amazonaws.com" : ""
+    smtp_port         = local.outbound_smtp ? 587 : 0
+    from_address      = local.outbound_smtp ? "noreply@${local.root_domain}" : ""
+  }
 }
 
 output "network" {
