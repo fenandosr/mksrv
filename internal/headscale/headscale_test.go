@@ -78,3 +78,27 @@ func TestPreAuthKeyExtractsKey(t *testing.T) {
 		t.Fatalf("key = %q", key)
 	}
 }
+
+func TestExpireAPIKeysExceptKeepsTheNewOne(t *testing.T) {
+	t.Parallel()
+	fake := &fakeRunner{responses: map[string]string{
+		"'apikeys' 'list'": `[{"prefix":"old1"},{"prefix":"keepme"},{"prefix":"old2"}]`,
+	}}
+	if err := New(fake).ExpireAPIKeysExcept(context.Background(), "keepme"); err != nil {
+		t.Fatalf("ExpireAPIKeysExcept() error = %v", err)
+	}
+	var expired []string
+	for _, c := range fake.calls {
+		if strings.Contains(c, "'apikeys' 'expire'") {
+			expired = append(expired, c)
+		}
+	}
+	if len(expired) != 2 {
+		t.Fatalf("want 2 expire calls (old1, old2), got %d: %v", len(expired), expired)
+	}
+	for _, c := range expired {
+		if strings.Contains(c, "keepme") {
+			t.Fatalf("expired the key we said to keep: %s", c)
+		}
+	}
+}

@@ -241,15 +241,21 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 	if err != nil {
 		return "", err
 	}
-	apiKey, err := r.Get(ctx, "/mksrv/{env}/identity/configd_headscale_apikey")
+	// A Headscale API key is bound to a specific Headscale database — an
+	// in-place relaunch (fresh Headscale) silently invalidates whatever is
+	// in SSM, and configd then can't mint pre-auth keys ("could not mint a
+	// mesh key"). Mint a fresh one every run, store it, and expire the rest
+	// (only configd uses these).
+	apiKey, err := hs.CreateAPIKey(ctx, 365*24*time.Hour)
 	if err != nil {
-		apiKey, err = hs.CreateAPIKey(ctx, 365*24*time.Hour)
-		if err != nil {
-			return "", fmt.Errorf("create headscale api key: %w", err)
-		}
-		if err := r.Put(ctx, "/mksrv/{env}/identity/configd_headscale_apikey", apiKey); err != nil {
-			return "", err
-		}
+		return "", fmt.Errorf("create headscale api key: %w", err)
+	}
+	if err := r.Put(ctx, "/mksrv/{env}/identity/configd_headscale_apikey", apiKey); err != nil {
+		return "", err
+	}
+	newPrefix, _, _ := strings.Cut(apiKey, ".")
+	if err := hs.ExpireAPIKeysExcept(ctx, newPrefix); err != nil {
+		printer.Warn("could not expire old Headscale API keys: %v", err)
 	}
 
 	roster := configd.Config{}
