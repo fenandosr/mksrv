@@ -49,3 +49,7 @@ bootstrap:
     - host replication replicator 10.20.0.0/16 scram-sha-256
     - host all all 10.20.0.0/16 scram-sha-256
     - host all all 127.0.0.1/32 scram-sha-256
+    # `samenet` = the container's own podman bridge subnet: PublishPort traffic
+    # (the Cloud-IT VPN `database` forward, anything reaching :5432 over the
+    # mesh) is SNAT'd to the bridge gateway, which isn't in 10.20.0.0/16.
+    - host all all samenet scram-sha-256
