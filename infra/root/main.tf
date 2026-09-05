@@ -223,36 +223,43 @@ resource "aws_ses_domain_mail_from" "operator" {
 }
 
 locals {
-  ses_dns_records = local.outbound_smtp ? concat(
-    [{
+  # DKIM tokens (hence the CNAME *names*, not just their values) are unknown
+  # until apply — SES generates them when aws_ses_domain_dkim is created.
+  # A for_each keyed by "type fqdn" (the dns module's convention) needs every
+  # key known at plan time, so these 3 records are created directly below
+  # with `count`, not folded into this list like the rest of the operator
+  # records. Route53-only: DKIM auto-creation isn't wired for other DNS
+  # providers.
+  ses_dns_records = local.outbound_smtp ? [
+    {
       fqdn  = "_amazonses.${local.root_domain}"
       type  = "TXT"
       value = "\"${aws_ses_domain_identity.operator[0].verification_token}\""
       ttl   = 300
-    }],
-    [
-      for token in aws_ses_domain_dkim.operator[0].dkim_tokens : {
-        fqdn  = "${token}._domainkey.${local.root_domain}"
-        type  = "CNAME"
-        value = "${token}.dkim.amazonses.com"
-        ttl   = 300
-      }
-    ],
-    [
-      {
-        fqdn  = local.ses_mail_from
-        type  = "MX"
-        value = "10 feedback-smtp.${local.region}.amazonses.com"
-        ttl   = 300
-      },
-      {
-        fqdn  = local.ses_mail_from
-        type  = "TXT"
-        value = "\"v=spf1 include:amazonses.com ~all\""
-        ttl   = 300
-      },
-    ],
-  ) : []
+    },
+    {
+      fqdn  = local.ses_mail_from
+      type  = "MX"
+      value = "10 feedback-smtp.${local.region}.amazonses.com"
+      ttl   = 300
+    },
+    {
+      fqdn  = local.ses_mail_from
+      type  = "TXT"
+      value = "\"v=spf1 include:amazonses.com ~all\""
+      ttl   = 300
+    },
+  ] : []
+}
+
+resource "aws_route53_record" "ses_dkim" {
+  count           = local.outbound_smtp && local.d.dns.provider == "route53" ? 3 : 0
+  zone_id         = local.zone_id
+  name            = "${aws_ses_domain_dkim.operator[0].dkim_tokens[count.index]}._domainkey.${local.root_domain}"
+  type            = "CNAME"
+  ttl             = 300
+  records         = ["${aws_ses_domain_dkim.operator[0].dkim_tokens[count.index]}.dkim.amazonses.com"]
+  allow_overwrite = true
 }
 
 # A dedicated IAM user scoped to ses:SendRawEmail only — no console access, no

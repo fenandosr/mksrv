@@ -49,6 +49,18 @@ realm with SMTP configured. No realm had one.
   is the source of truth here, not mksrv, so a rotated key must always win)
   and everything downstream (Keycloak's realm SMTP settings) reads from
   there, the same as every other mksrv application secret.
+- **DKIM's 3 CNAME records are `count`-based, not part of the shared `dns`
+  module's `for_each`**: SES generates the DKIM tokens when
+  `aws_ses_domain_dkim` is created, so the token — and therefore the CNAME's
+  *name*, not just its value — is unknown until apply. The `dns` module
+  builds its `for_each` map key from `"${type} ${fqdn}"`, and Terraform
+  requires every `for_each` key to be known at plan time; an unknown fqdn in
+  that list poisons the whole map, not just the DKIM entries (hit live:
+  "Invalid for_each argument ... will be known only after apply"). `count = 3`
+  sidesteps it — the *count* (always exactly 3 for Easy DKIM) is known even
+  though `dkim_tokens[count.index]` isn't, and `count`, unlike `for_each`,
+  never needs its index set known ahead of time. Route53-only for now — DKIM
+  auto-creation isn't wired for Cloudflare/RFC2136.
 - **Reconciling onto realms**: `RealmSpec.SMTP`, applied unconditionally
   every `tenant apply` run when set, no diffing — Keycloak masks the password
   on `GET` (`**********`), so there is nothing meaningful to compare against,
