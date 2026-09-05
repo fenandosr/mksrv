@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fix (M12/M20): the tenant DB/cache secrets mksrv mirrors into OpenBao KV
+  (`kv/tenants/<id>/database`, `.../cache`) hard-coded `host=mksrv-postgres` /
+  `host=mksrv-redis` — container names that don't exist on the distributed
+  profile. The DB secret now carries the Patroni node list over the mesh
+  (with `target_session_attrs=read-write`), the cache secret the `cache`
+  stack host's mesh name; standalone keeps the container names.
+
 - Fix (M4): a Headscale API key is bound to a specific Headscale database, so
   an in-place relaunch (fresh Headscale) silently invalidated the one in SSM
   — `configd` then couldn't mint pre-auth keys and the VPN client got
