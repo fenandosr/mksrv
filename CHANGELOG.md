@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fix (M25): the 3 SES DKIM CNAME records were folded into the shared `dns`
+  module's `for_each` list, keyed by `"type fqdn"` — but the DKIM token (part
+  of the CNAME's *name*) is unknown until `aws_ses_domain_dkim` is actually
+  created, so `terraform apply` failed immediately with "Invalid for_each
+  argument ... will be known only after apply". They're now 3 direct
+  `count`-based `aws_route53_record` resources instead (Route53 only).
+
 - Feature (M25, ADR 0025): operator SES SMTP for Keycloak's transactional
   email (password reset, email verification). Opt-in (`mail.outbound_smtp`,
   default off). One sender, `noreply@<root_domain>` — the operator zone
