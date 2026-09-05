@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Fix (M13/M20): `configd`'s built-in ("demo") forwards — the services the
+  Cloud-IT VPN app shows out of the box — all targeted `<env>-data.<env>.mksrv`,
+  a host that only exists in the old 2-host topology. On the distributed
+  profile PostgREST/Redis live on `appd` and Postgres on the `core*` Patroni
+  cluster, so every forward pointed at a name that doesn't resolve — the app
+  connected to the mesh but listed no working services. The targets are now
+  resolved from the fleet's actual shape (`fleetDemoTargets`): the `base`
+  host for edge-health, the Patroni primary for raw `:5432`, the `database`
+  / `cache` stack hosts for PostgREST / Redis. An absent host drops its
+  forward instead of emitting a dead one.
+
 - Fix (M24): the login theme set `parent=keycloak` (the old theme, whose DOM
   the M24 CSS selectors don't match) and `styles=css/login.css` alone, which
   *replaces* the base theme's stylesheet list rather than adding to it — the
