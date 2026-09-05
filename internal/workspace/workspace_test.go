@@ -124,13 +124,19 @@ func TestDiscoverWalksUp(t *testing.T) {
 
 func TestValidateRejectsReservedForwardID(t *testing.T) {
 	t.Parallel()
-	root := copyExample(t)
-	patchTenant(t, root, "id: login\n    label:", "id: database\n    label:")
-	report := revalidate(t, root)
-	if report.Valid {
-		t.Fatal("expected invalid report")
+	for _, reserved := range []string{"database", "openbao"} {
+		reserved := reserved
+		t.Run(reserved, func(t *testing.T) {
+			t.Parallel()
+			root := copyExample(t)
+			patchTenant(t, root, "id: login\n    label:", "id: "+reserved+"\n    label:")
+			report := revalidate(t, root)
+			if report.Valid {
+				t.Fatal("expected invalid report")
+			}
+			assertIssueCode(t, report, "forward.reserved")
+		})
 	}
-	assertIssueCode(t, report, "forward.reserved")
 }
 
 func TestValidateRejectsDNSWithoutZone(t *testing.T) {

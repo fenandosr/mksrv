@@ -38,20 +38,20 @@ func TestTenantForwardsTranslation(t *testing.T) {
 	}
 
 	// The combined roster set must satisfy Cloud-IT VPN's forward rules.
-	demoT := demoTargets{
+	fwdTargets := builtinForwardTargets{
 		Edge:     "prod-edge.prod.mksrv",
 		Postgres: "prod-core2.prod.mksrv",
 		Rest:     "prod-appd.prod.mksrv",
 		Cache:    "prod-appd.prod.mksrv",
 		OpenBao:  "prod-core1.prod.mksrv",
 	}
-	all := append(demoForwards(demoT, 3010, 6379, true), got...)
+	all := append(builtinForwards(fwdTargets, 3010, 6379, true), got...)
 	assertForwardsValid(t, all)
 }
 
 func TestDemoForwardsTargetsAndGating(t *testing.T) {
 	t.Parallel()
-	demoT := demoTargets{
+	fwdTargets := builtinForwardTargets{
 		Edge:     "prod-edge.prod.mksrv",
 		Postgres: "prod-core2.prod.mksrv",
 		Rest:     "prod-appd.prod.mksrv",
@@ -65,7 +65,7 @@ func TestDemoForwardsTargetsAndGating(t *testing.T) {
 		}
 		return m
 	}
-	full := byID(demoForwards(demoT, 3010, 6379, true))
+	full := byID(builtinForwards(fwdTargets, 3010, 6379, true))
 	if full["edge-health"] != "prod-edge.prod.mksrv:80" ||
 		full["database"] != "prod-core2.prod.mksrv:5432" ||
 		full["rest"] != "prod-appd.prod.mksrv:3010" ||
@@ -75,16 +75,16 @@ func TestDemoForwardsTargetsAndGating(t *testing.T) {
 	}
 	// A tenant that consumes none of database/cache/openbao gets just the two
 	// always-on forwards.
-	lean := byID(demoForwards(demoT, 0, 0, false))
+	lean := byID(builtinForwards(fwdTargets, 0, 0, false))
 	if len(lean) != 2 || lean["rest"] != "" || lean["cache"] != "" || lean["openbao"] != "" {
 		t.Fatalf("gating wrong: %+v", lean)
 	}
 	// openbao gated on the flag even when the target is known.
-	if byID(demoForwards(demoT, 0, 0, true))["openbao"] != "prod-core1.prod.mksrv:8200" {
+	if byID(builtinForwards(fwdTargets, 0, 0, true))["openbao"] != "prod-core1.prod.mksrv:8200" {
 		t.Fatalf("openbao forward should render when the flag is set")
 	}
 	// An empty target drops its forward entirely.
-	none := demoForwards(demoTargets{}, 3010, 6379, true)
+	none := builtinForwards(builtinForwardTargets{}, 3010, 6379, true)
 	if len(none) != 0 {
 		t.Fatalf("empty targets should yield no forwards, got %+v", none)
 	}

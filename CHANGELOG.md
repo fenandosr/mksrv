@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Refactor: `demoForwards` → `builtinForwards` (`demoTargets` →
+  `builtinForwardTargets`, `fleetDemoTargets` → `fleetForwardTargets`). The
+  "demo" name is from M4 when these were a tunnel smoke-test; they're now the
+  real per-tenant service set. Also: `openbao` added to `reservedForwardIDs`
+  and the built-in-forward count bumped 4→5 (both missed when the openbao
+  forward landed) — a tenant `forwards:` entry with `id: openbao` now fails
+  validation as reserved instead of silently duplicating the built-in.
+
 - Feature (M12): a tenant carrying the `openbao` stack now gets an `openbao`
   forward in its Cloud-IT VPN config (the raft leader's `:8200` — standbys
   forward requests anyway). Without it there was no way to reach OpenBao

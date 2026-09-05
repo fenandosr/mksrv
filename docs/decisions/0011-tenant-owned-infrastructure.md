@@ -16,7 +16,7 @@ JupyterHub, a login node behind a Ceph store. The tenant needs to:
 
 Until now `deployment.yaml` only modelled hosts mksrv creates (`provider: aws`)
 or the operator's own hosts (`provider: existing`). The tenant schema carried an
-unused `dns_override`; `configd`'s forward set (`demoForwards`) was hard-coded to
+unused `dns_override`; `configd`'s forward set (`builtinForwards`) was hard-coded to
 fleet services; nothing minted tenant-scoped Headscale pre-auth keys.
 
 ## Decision

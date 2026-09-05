@@ -218,9 +218,11 @@ func checkDomainWithinRoot(report *Report, file, valuePath, domain, root string)
 	}
 }
 
-// reservedForwardIDs are the forward ids demoForwards emits for every tenant; a
-// tenant forward may not collide with them.
-var reservedForwardIDs = map[string]bool{"edge-health": true, "database": true, "rest": true, "cache": true}
+// reservedForwardIDs are the forward ids builtinForwards emits for every
+// tenant; a tenant forward may not collide with them.
+var reservedForwardIDs = map[string]bool{
+	"edge-health": true, "database": true, "rest": true, "cache": true, "openbao": true,
+}
 
 func checkTenantForwards(report *Report, file string, tenant model.Tenant) {
 	seen := make(map[string]int, len(tenant.Forwards))
@@ -241,8 +243,8 @@ func checkTenantForwards(report *Report, file string, tenant model.Tenant) {
 			semanticError(report, file, path+".ssh_alias", "forward.ssh_alias", "an ssh forward requires ssh_alias")
 		}
 	}
-	// demoForwards emits at most 4 built-in forwards; Cloud-IT VPN caps at 32.
-	if len(tenant.Forwards)+4 > 32 {
+	// builtinForwards emits at most 5 built-in forwards; Cloud-IT VPN caps at 32.
+	if len(tenant.Forwards)+5 > 32 {
 		semanticError(report, file, "$.forwards", "forward.count", fmt.Sprintf("%d tenant forwards plus mksrv's built-ins exceed the 32-forward limit", len(tenant.Forwards)))
 	}
 }
