@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Fix (M20): Patroni's `pg_hba` allowed only the VPC CIDR and `127.0.0.1`, so
+  a connection reaching `:5432` via `PublishPort` (the Cloud-IT VPN
+  `database` forward, anything over the mesh) was rejected — podman SNATs
+  published-port traffic to the bridge gateway (`10.89.x.1`), outside
+  `10.20.0.0/16`. Added `host all all samenet scram-sha-256`. This is in
+  `bootstrap.pg_hba`, so it only lands on a **fresh** cluster; a live cluster
+  needs the line appended to `pg_hba.conf` on each node + `patronictl reload`
+  once (see the PR / `mksrv postgres bootstrap` notes).
+
 - Fix (M4): `mksrv tenant apply` also wrote the configd tenant roster to SSM
   (`/mksrv/<env>/identity/configd_tenants`), which blew the 4096-char
   Standard-tier value limit once the roster grew (5 built-in forwards × 3

@@ -589,6 +589,7 @@ func TestStackRendersPostgresCluster(t *testing.T) {
 		"self_addr: 10.20.0.12:2222",
 		"- 10.20.0.11:2222",
 		"- 10.20.0.13:2222",
+		"host all all samenet scram-sha-256", // podman-bridge SNAT source (VPN path)
 	} {
 		if !strings.Contains(y, want) {
 			t.Fatalf("patroni.yml missing %q:\n%s", want, y)
