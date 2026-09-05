@@ -263,6 +263,7 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 			Tenant:        id,
 			DisplayName:   tenant.DisplayName,
 			Primary:       tenantPrimary(tenant),
+			LogoDataURI:   tenant.Branding.LogoDataURI,
 			HeadscaleUser: id,
 			ControlURL:    "https://" + dep.Identity.HeadscaleDomain,
 			Forwards:      append(demoForwards(dep.Env, restPort, cachePort), tenantForwards(tenant)...),
