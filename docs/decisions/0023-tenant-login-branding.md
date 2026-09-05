@@ -28,7 +28,7 @@ member sees — used the stock `keycloak.v2` theme for every realm, unbranded.
   reads, so one `logo_data_uri` now serves both surfaces.
 - **CSS only, never the `.ftl` templates.** Keycloak's login HTML lives in
   FreeMarker templates that shift between major versions; a custom
-  `theme.properties` (`parent=keycloak`, `import=common/keycloak`) plus one
+  `theme.properties` (`parent=keycloak.v2`, `import=common/keycloak`) plus one
   `login.css` survives a Keycloak upgrade far better than forked HTML would.
   The selectors targeting `keycloak.v2`'s PatternFly classes are a first pass
   — verify against a live login page and adjust; that part of the CSS is the
@@ -37,7 +37,7 @@ member sees — used the stock `keycloak.v2` theme for every realm, unbranded.
 - **Theme placement**: each tenant gets `/opt/keycloak/themes/<id>` as a
   sibling of Keycloak's own bundled themes (`Volume=.../themes/<id>:/opt/
   keycloak/themes/<id>:Z,ro`, one per tenant in `render.Context.TenantIDs`) —
-  not a replacement of the themes root, so `parent=keycloak` still resolves.
+  not a replacement of the themes root, so `parent=keycloak.v2` still resolves.
 - **The directory-must-exist-first hazard, again.** Podman does not create a
   missing bind-mount source (the same class of bug that broke
   `mksrv-node-exporter.service`, M23). Here the blast radius is worse: a

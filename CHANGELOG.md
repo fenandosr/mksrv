@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Fix (M24): the login theme set `parent=keycloak` (the old theme, whose DOM
+  the M24 CSS selectors don't match) and `styles=css/login.css` alone, which
+  *replaces* the base theme's stylesheet list rather than adding to it — the
+  branded page came out unstyled or fell back. Now `parent=keycloak.v2` and
+  `styles=css/styles.css css/login.css` (Keycloak resolves `styles.css` from
+  the parent, `login.css` from the tenant theme).
+- Fix (M25): the SMTP reconcile now also sets `resetPasswordAllowed` and
+  `loginWithEmailAllowed` on the realm, so the "Forgot password?" link
+  actually appears — it's off in a fresh Keycloak realm.
+
 - Fix (M20): `mksrv tenant apply`'s database provisioning trusted
   `.mksrv/postgres.json`'s recorded primary blindly — a snapshot from the
   last `mksrv postgres bootstrap`. Any failover since (a rolling restart from

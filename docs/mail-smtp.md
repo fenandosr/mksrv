@@ -43,7 +43,10 @@ individually verified addresses, capped at 200/day. Turning
 
 ## Verifying it end to end
 
-1. `mksrv apply && mksrv tenant apply`.
+1. `mksrv apply && mksrv tenant apply`. The tenant-apply step also flips
+   `resetPasswordAllowed` / `loginWithEmailAllowed` on each realm, so the
+   "Forgot password?" link appears on the login page (it's off in a fresh
+   Keycloak realm, and pointless without SMTP anyway).
 2. Confirm in the SES console that the root domain identity is "Verified"
    (DKIM propagation can take a few minutes after the CNAME records land).
 3. Verify one test recipient address in the SES sandbox (above).

@@ -403,6 +403,9 @@ func TestEnsureRealmSetsSMTP(t *testing.T) {
 		smtp["password"] != "derived-password" || smtp["auth"] != "true" || smtp["starttls"] != "true" {
 		t.Fatalf("unexpected smtpServer body: %+v", smtp)
 	}
+	if puts[0]["resetPasswordAllowed"] != true || puts[0]["loginWithEmailAllowed"] != true {
+		t.Fatalf("SMTP PUT must also enable the forgot-password flow: %+v", puts[0])
+	}
 
 	// Every apply re-sends it, unconditionally (Keycloak masks the password
 	// on GET, so there is nothing to diff against).
