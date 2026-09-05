@@ -66,6 +66,38 @@ func TestPgConnSelectsClusterOrStandalone(t *testing.T) {
 	}
 }
 
+func TestPatroniLeaderIP(t *testing.T) {
+	t.Parallel()
+	rows := []patroniMember{
+		{Member: "core1", Host: "10.20.0.21", Role: "Replica"},
+		{Member: "core2", Host: "10.20.0.22", Role: "Leader"},
+		{Member: "core3", Host: "10.20.0.23", Role: "Replica"},
+	}
+	if got := patroniLeaderIP(rows); got != "10.20.0.22" {
+		t.Fatalf("patroniLeaderIP() = %q", got)
+	}
+	if got := patroniLeaderIP(nil); got != "" {
+		t.Fatalf("patroniLeaderIP(nil) = %q, want empty", got)
+	}
+	if got := patroniLeaderIP([]patroniMember{{Member: "core1", Host: "10.20.0.21", Role: "Replica"}}); got != "" {
+		t.Fatalf("patroniLeaderIP(no leader) = %q, want empty", got)
+	}
+}
+
+func TestHostNameForPrivateIP(t *testing.T) {
+	t.Parallel()
+	outputs := infra.Outputs{Hosts: map[string]infra.HostOutput{
+		"core1": {PrivateIP: "10.20.0.21"},
+		"core2": {PrivateIP: "10.20.0.22"},
+	}}
+	if got := hostNameForPrivateIP(outputs, "10.20.0.22"); got != "core2" {
+		t.Fatalf("hostNameForPrivateIP() = %q", got)
+	}
+	if got := hostNameForPrivateIP(outputs, "10.20.0.99"); got != "" {
+		t.Fatalf("hostNameForPrivateIP(unknown) = %q, want empty", got)
+	}
+}
+
 func TestTenantDatabaseSQL(t *testing.T) {
 	t.Parallel()
 	sql := tenantDatabaseSQL("bitabit", "s3cr3t'value", "auth'pw")
