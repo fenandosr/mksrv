@@ -114,8 +114,13 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 	// on GET (`**********`), so there is nothing meaningful to diff against,
 	// and re-PUTting the same values is a no-op in effect (ADR 0025).
 	if spec.SMTP != nil {
+		// resetPasswordAllowed + loginWithEmailAllowed put the "Forgot
+		// password?" link on the login page — pointless without SMTP, so
+		// they ride along with it here.
 		if _, err := c.do(ctx, http.MethodPut, "/realms/"+spec.Realm, map[string]any{
-			"realm": spec.Realm,
+			"realm":                 spec.Realm,
+			"resetPasswordAllowed":  true,
+			"loginWithEmailAllowed": true,
 			"smtpServer": map[string]any{
 				"host":            spec.SMTP.Host,
 				"port":            strconv.Itoa(spec.SMTP.Port),

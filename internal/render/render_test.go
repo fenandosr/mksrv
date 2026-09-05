@@ -136,7 +136,7 @@ func TestStackRendersTenantLoginTheme(t *testing.T) {
 		t.Fatalf("Stack() error = %v", err)
 	}
 	props := string(files["/var/lib/mksrv/stacks/identity/themes/bitabit/login/theme.properties"])
-	if !strings.Contains(props, "parent=keycloak") {
+	if !strings.Contains(props, "parent=keycloak.v2") || !strings.Contains(props, "styles=css/styles.css css/login.css") {
 		t.Fatalf("theme.properties wrong:\n%s", props)
 	}
 	css := string(files["/var/lib/mksrv/stacks/identity/themes/bitabit/login/resources/css/login.css"])

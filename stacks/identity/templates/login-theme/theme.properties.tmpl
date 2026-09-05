@@ -1,3 +1,7 @@
-parent=keycloak
+parent=keycloak.v2
 import=common/keycloak
-styles=css/login.css
+# css/styles.css isn't in this theme — Keycloak falls through to the parent
+# (keycloak.v2) for it, so the default styling still loads; login.css layers
+# the tenant overrides on top. Setting `styles` at all replaces the parent's
+# list, which is why styles.css must be named explicitly here.
+styles=css/styles.css css/login.css
