@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/fenandosr/mksrv/internal/infra"
 	sshx "github.com/fenandosr/mksrv/internal/ssh"
 	"github.com/fenandosr/mksrv/internal/ui"
 )
@@ -56,6 +57,71 @@ func (f *fleet) pgConn() (pgConn, bool, error) {
 	return pgConn{}, false, nil
 }
 
+// ensurePrimary re-checks that pg actually points at the current Patroni
+// leader before DDL runs against it. .mksrv/postgres.json's recorded primary
+// is a snapshot from the last `mksrv postgres bootstrap` — any failover since
+// (a rolling restart from a later `mksrv apply` touching the postgres stack
+// included) leaves it stale, and running DDL against a now-demoted replica
+// fails with "cannot execute ALTER ROLE in a read-only transaction". Patroni
+// answers `patronictl list` from any node regardless of role, so this check
+// works even when pg currently points at a replica. Best-effort: on any
+// problem checking, it proceeds with the pg/client it was given rather than
+// failing the caller outright. Closes the old client and self-heals
+// .mksrv/postgres.json when it redials a different (real) leader.
+func (f *fleet) ensurePrimary(ctx context.Context, client *sshx.Client, pg pgConn) (pgConn, *sshx.Client) {
+	if f.postgres.Primary == "" {
+		return pg, client // standalone: pg.container is the only postgres there is
+	}
+	res, err := client.Run(ctx, "sudo podman exec "+pg.container+" patronictl -c /etc/patroni/patroni.yml list -f json")
+	if err != nil {
+		return pg, client
+	}
+	var rows []patroniMember
+	if err := json.Unmarshal([]byte(res.Stdout), &rows); err != nil {
+		return pg, client
+	}
+	leaderIP := patroniLeaderIP(rows)
+	if leaderIP == "" || leaderIP == pg.pgAdmin {
+		return pg, client // already the leader, or the cluster didn't report one
+	}
+	leaderName := hostNameForPrivateIP(f.outputs, leaderIP)
+	ht, ok := f.byName[leaderName]
+	if leaderName == "" || !ok {
+		return pg, client
+	}
+	newClient, err := sshx.Dial(ctx, ht.Target, f.knownHosts)
+	if err != nil {
+		return pg, client
+	}
+	client.Close()
+	pg.target, pg.name, pg.pgAdmin = ht.Target, leaderName, leaderIP
+	f.postgres.Primary = leaderName
+	_ = f.writePostgres(f.postgres)
+	return pg, newClient
+}
+
+// patroniLeaderIP returns the private IP of the `patronictl list` row with
+// Role "leader" (case-insensitive), or "" if none is reported.
+func patroniLeaderIP(rows []patroniMember) string {
+	for _, r := range rows {
+		if strings.EqualFold(r.Role, "leader") {
+			return r.Host
+		}
+	}
+	return ""
+}
+
+// hostNameForPrivateIP returns the fleet host name whose private IP matches
+// ip, or "" if none does.
+func hostNameForPrivateIP(outputs infra.Outputs, ip string) string {
+	for name, out := range outputs.Hosts {
+		if out.PrivateIP == ip {
+			return name
+		}
+	}
+	return ""
+}
+
 // provisionDatabases creates one database, login role, and app schema per
 // tenant that consumes the `database` stack. It is idempotent and only runs
 // when a data host carries `database`.
@@ -89,6 +155,7 @@ func (f *fleet) provisionDatabases(ctx context.Context, printer ui.Printer, tena
 	if err != nil {
 		return dialError(pg.name, err)
 	}
+	pg, client = f.ensurePrimary(ctx, client, pg)
 	defer client.Close()
 
 	var pgTenants []string

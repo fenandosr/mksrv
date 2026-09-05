@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Fix (M20): `mksrv tenant apply`'s database provisioning trusted
+  `.mksrv/postgres.json`'s recorded primary blindly — a snapshot from the
+  last `mksrv postgres bootstrap`. Any failover since (a rolling restart from
+  a later `mksrv apply` touching the `postgres` stack included, e.g. M23
+  adding `postgres-exporter`) leaves it stale, and DDL against a
+  now-demoted replica fails with "cannot execute ALTER ROLE in a read-only
+  transaction". `provisionDatabases` now checks the live Patroni leader
+  (`patronictl list`, answerable from any node regardless of role) before
+  running DDL, re-dialing and self-healing the recorded primary when it's
+  stale.
+
 - Fix (M25): the SES verification and SPF TXT records were manually wrapped
   in escaped quotes (`"\"...\""`) — but `aws_route53_record` only wants
   literal `""` to concatenate segments of values longer than 255 characters;
