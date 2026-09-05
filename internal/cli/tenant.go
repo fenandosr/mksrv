@@ -253,6 +253,7 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 	}
 
 	roster := configd.Config{}
+	demoT := f.fleetDemoTargets()
 	sortedIDs := sortedTenantIDs(f.data.Tenants)
 	for _, id := range sortedIDs {
 		tenant := f.data.Tenants[id]
@@ -272,7 +273,7 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 			LogoDataURI:   tenant.Branding.LogoDataURI,
 			HeadscaleUser: id,
 			ControlURL:    "https://" + dep.Identity.HeadscaleDomain,
-			Forwards:      append(demoForwards(dep.Env, restPort, cachePort), tenantForwards(tenant)...),
+			Forwards:      append(demoForwards(demoT, restPort, cachePort), tenantForwards(tenant)...),
 			UpdateFeedURL: fmt.Sprintf("https://%s/appcast.json", tenant.BaseDomain),
 			MinVersion:    "0.1.0",
 		})
@@ -333,63 +334,106 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 	return configd.PublicKeyPEM(signer.PublicKey())
 }
 
+// demoTargets are the mesh FQDNs the built-in forwards point at. They move
+// with the fleet's shape: the distributed profile splits the old single
+// `data` host into `appd` (PostgREST, Redis) and the `core*` Patroni cluster.
+// Any field left empty drops its forward.
+type demoTargets struct {
+	Edge     string // base host FQDN, for edge-health
+	Postgres string // raw :5432 — the Patroni primary in cluster mode
+	Rest     string // host FQDN carrying the `database` stack (PostgREST)
+	Cache    string // host FQDN carrying the `cache` stack (Redis)
+}
+
 // demoForwards is the forward set advertised to Cloud-IT VPN clients. The
 // edge-health forward exercises the full tunnel path; database exposes raw
 // PostgreSQL; rest exposes the tenant's PostgREST data API (restPort > 0 when
 // the tenant consumes database); cache exposes shared Redis (cachePort > 0 when
 // the tenant consumes cache).
-func demoForwards(env string, restPort, cachePort int) []configd.Forward {
-	forwards := []configd.Forward{
-		{
+func demoForwards(t demoTargets, restPort, cachePort int) []configd.Forward {
+	var forwards []configd.Forward
+	if t.Edge != "" {
+		forwards = append(forwards, configd.Forward{
 			ID:           "edge-health",
 			Label:        "Edge health",
 			Type:         "http",
 			Listen:       configd.Listen{Host: "127.0.0.1", Port: 0},
 			PortStrategy: "auto",
-			Target:       fmt.Sprintf("%s-edge.%s.mksrv:80", env, env),
+			Target:       t.Edge + ":80",
 			OpenAction:   configd.OpenAction{Kind: "browser", Path: "/healthz"},
 			HealthCheck:  configd.HealthCheck{Kind: "http", Path: "/healthz", IntervalSec: 30},
 			MaxConns:     8,
-		},
-		{
+		})
+	}
+	if t.Postgres != "" {
+		forwards = append(forwards, configd.Forward{
 			ID:           "database",
 			Label:        "PostgreSQL",
 			Type:         "tcp",
 			Listen:       configd.Listen{Host: "127.0.0.1", Port: 0},
 			PortStrategy: "auto",
-			Target:       fmt.Sprintf("%s-data.%s.mksrv:5432", env, env),
+			Target:       t.Postgres + ":5432",
 			OpenAction:   configd.OpenAction{Kind: "none"},
 			HealthCheck:  configd.HealthCheck{Kind: "tcp", IntervalSec: 30},
 			MaxConns:     16,
-		},
+		})
 	}
-	if restPort > 0 {
+	if restPort > 0 && t.Rest != "" {
 		forwards = append(forwards, configd.Forward{
 			ID:           "rest",
 			Label:        "Data API (PostgREST)",
 			Type:         "http",
 			Listen:       configd.Listen{Host: "127.0.0.1", Port: 0},
 			PortStrategy: "auto",
-			Target:       fmt.Sprintf("%s-data.%s.mksrv:%d", env, env, restPort),
+			Target:       fmt.Sprintf("%s:%d", t.Rest, restPort),
 			OpenAction:   configd.OpenAction{Kind: "browser", Path: "/"},
 			HealthCheck:  configd.HealthCheck{Kind: "http", Path: "/", IntervalSec: 30},
 			MaxConns:     16,
 		})
 	}
-	if cachePort > 0 {
+	if cachePort > 0 && t.Cache != "" {
 		forwards = append(forwards, configd.Forward{
 			ID:           "cache",
 			Label:        "Redis",
 			Type:         "tcp",
 			Listen:       configd.Listen{Host: "127.0.0.1", Port: 0},
 			PortStrategy: "auto",
-			Target:       fmt.Sprintf("%s-data.%s.mksrv:%d", env, env, cachePort),
+			Target:       fmt.Sprintf("%s:%d", t.Cache, cachePort),
 			OpenAction:   configd.OpenAction{Kind: "none"},
 			HealthCheck:  configd.HealthCheck{Kind: "tcp", IntervalSec: 30},
 			MaxConns:     16,
 		})
 	}
 	return forwards
+}
+
+// fleetDemoTargets resolves the demo-forward mesh FQDNs from the fleet's
+// current shape.
+func (f *fleet) fleetDemoTargets() demoTargets {
+	env := f.data.Deployment.Env
+	mesh := func(host string) string {
+		if host == "" {
+			return ""
+		}
+		return fmt.Sprintf("%s-%s.%s.mksrv", env, host, env)
+	}
+	var edge, dbHost, cacheHost string
+	for _, ht := range f.targets {
+		if slices.Contains(ht.Host.Stacks, "base") {
+			edge = ht.Name
+		}
+		if slices.Contains(ht.Host.Stacks, "database") {
+			dbHost = ht.Name
+		}
+		if slices.Contains(ht.Host.Stacks, "cache") {
+			cacheHost = ht.Name
+		}
+	}
+	pgHost := dbHost // standalone: Postgres lives with the database stack
+	if f.postgres.Primary != "" {
+		pgHost = f.postgres.Primary
+	}
+	return demoTargets{Edge: mesh(edge), Postgres: mesh(pgHost), Rest: mesh(dbHost), Cache: mesh(cacheHost)}
 }
 
 // tenantForwards translates a tenant's declared forwards into configd.Forward,
