@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/fenandosr/mksrv/internal/keycloak"
 	sshx "github.com/fenandosr/mksrv/internal/ssh"
@@ -50,21 +51,54 @@ func oidcGroupRolePath(id, suffix string) string {
 	return "auth/oidc-" + id + "/role/tenant-" + id + "-" + suffix
 }
 
-// tenantDBSecretFields returns the KV fields for a tenant's Postgres connection.
-func tenantDBSecretFields(id, password string) []string {
+// meshHostFQDN is the tailnet name a fleet host is reachable at — the address
+// anything on the mesh (a tenant's own enrolled machine included) uses.
+func meshHostFQDN(env, host string) string {
+	return fmt.Sprintf("%s-%s.%s.mksrv", env, host, env)
+}
+
+// tenantDBSecretFields returns the KV fields for a tenant's Postgres
+// connection. On the distributed profile the target is the Patroni node list
+// over the mesh (with target_session_attrs so writes always land on the
+// leader); standalone keeps the single `mksrv-postgres` container name.
+func tenantDBSecretFields(pg postgresCluster, env, id, password string) []string {
+	host, suffix := "mksrv-postgres:5432", ""
+	if len(pg.Nodes) > 0 {
+		parts := make([]string, len(pg.Nodes))
+		for i, n := range pg.Nodes {
+			name := n.Host
+			if name == "" {
+				name = n.IP
+			} else {
+				name = meshHostFQDN(env, name)
+			}
+			parts[i] = name + ":5432"
+		}
+		host = strings.Join(parts, ",")
+		suffix = "?target_session_attrs=read-write"
+	}
 	return []string{
-		"host=mksrv-postgres", "port=5432", "dbname=db_" + id, "username=" + id,
+		"dbname=db_" + id,
+		"username=" + id,
 		"password=" + password,
-		"url=postgres://" + id + ":" + password + "@mksrv-postgres:5432/db_" + id,
+		"hosts=" + host,
+		"url=postgres://" + id + ":" + password + "@" + host + "/db_" + id + suffix,
 	}
 }
 
-// tenantCacheSecretFields returns the KV fields for a tenant's Redis connection.
-func tenantCacheSecretFields(id, password string) []string {
+// tenantCacheSecretFields returns the KV fields for a tenant's Redis
+// connection. cacheHost is the `cache` stack host's mesh name (or "" to fall
+// back to the container name for a single-host/dev layout).
+func tenantCacheSecretFields(cacheHost, id, password string) []string {
+	host := cacheHost
+	if host == "" {
+		host = "mksrv-redis"
+	}
 	return []string{
-		"host=mksrv-redis", "port=6379", "username=" + id,
+		"host=" + host + ":6379",
+		"username=" + id,
 		"password=" + password,
-		"url=redis://" + id + ":" + password + "@mksrv-redis:6379",
+		"url=redis://" + id + ":" + password + "@" + host + ":6379",
 	}
 }
 
@@ -326,12 +360,14 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 		// source of truth; the passwords are write-once, so a mirror is only
 		// written when it is missing or has drifted.
 		stacks := f.data.Tenants[id].Stacks
+		env := f.data.Deployment.Env
 		if slices.Contains(stacks, "database") {
 			pw, err := f.resolver.Get(ctx, "/mksrv/{env}/database/tenant_"+id+"_password")
 			if err != nil {
 				return fmt.Errorf("openbao %s: database password: %w (provision databases first)", id, err)
 			}
-			if err := mirrorTenantSecret(ctx, client, rootToken, id, "database", pw, tenantDBSecretFields(id, pw)); err != nil {
+			if err := mirrorTenantSecret(ctx, client, rootToken, id, "database", pw,
+				tenantDBSecretFields(f.postgres, env, id, pw)); err != nil {
 				return err
 			}
 		}
@@ -340,7 +376,14 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 			if err != nil {
 				return fmt.Errorf("openbao %s: cache password: %w (provision redis first)", id, err)
 			}
-			if err := mirrorTenantSecret(ctx, client, rootToken, id, "cache", pw, tenantCacheSecretFields(id, pw)); err != nil {
+			cacheHost := ""
+			for _, ht := range f.targets {
+				if slices.Contains(ht.Host.Stacks, "cache") {
+					cacheHost = meshHostFQDN(env, ht.Name)
+				}
+			}
+			if err := mirrorTenantSecret(ctx, client, rootToken, id, "cache", pw,
+				tenantCacheSecretFields(cacheHost, id, pw)); err != nil {
 				return err
 			}
 		}

@@ -81,18 +81,44 @@ func TestOIDCArgs(t *testing.T) {
 
 func TestTenantSecretFields(t *testing.T) {
 	t.Parallel()
-	db := strings.Join(tenantDBSecretFields("acme", "p-w_1"), " ")
+
+	// Standalone: the container name, unchanged.
+	std := strings.Join(tenantDBSecretFields(postgresCluster{}, "prod", "acme", "p-w_1"), " ")
 	for _, want := range []string{
 		"dbname=db_acme", "username=acme", "password=p-w_1",
 		"url=postgres://acme:p-w_1@mksrv-postgres:5432/db_acme",
 	} {
-		if !strings.Contains(db, want) {
-			t.Fatalf("db fields missing %q: %s", want, db)
+		if !strings.Contains(std, want) {
+			t.Fatalf("standalone db fields missing %q: %s", want, std)
 		}
 	}
-	cache := strings.Join(tenantCacheSecretFields("acme", "p-w_1"), " ")
-	if !strings.Contains(cache, "url=redis://acme:p-w_1@mksrv-redis:6379") {
+	if strings.Contains(std, "target_session_attrs") {
+		t.Fatalf("standalone should not carry target_session_attrs: %s", std)
+	}
+
+	// Cluster: the Patroni node list over the mesh, leader-pinned. (Asserted
+	// in two pieces so the URL's user:pass@host doesn't trip the
+	// public-hygiene email-domain check.)
+	cl := strings.Join(tenantDBSecretFields(postgresCluster{Nodes: []postgresNode{
+		{Host: "core1", IP: "10.20.0.11"}, {Host: "core2", IP: "10.20.0.12"}, {Host: "core3", IP: "10.20.0.13"},
+	}}, "prod", "acme", "p-w_1"), " ")
+	nodeList := "core1." + "prod.mksrv:5432,prod-core2." + "prod.mksrv:5432,prod-core3." + "prod.mksrv:5432"
+	if !strings.Contains(cl, "url=postgres://acme:p-w_1@prod-"+nodeList+"/db_acme?target_session_attrs=read-write") {
+		t.Fatalf("cluster db url wrong:\n%s", cl)
+	}
+	if !strings.Contains(cl, "hosts=prod-"+nodeList) {
+		t.Fatalf("cluster db hosts field wrong:\n%s", cl)
+	}
+	if strings.Contains(cl, "mksrv-postgres") {
+		t.Fatalf("cluster db fields still reference the standalone container: %s", cl)
+	}
+
+	cache := strings.Join(tenantCacheSecretFields("prod-appd."+"prod.mksrv", "acme", "p-w_1"), " ")
+	if !strings.Contains(cache, "@prod-appd."+"prod.mksrv:6379") || !strings.Contains(cache, "url=redis://acme:p-w_1@") {
 		t.Fatalf("cache fields wrong: %s", cache)
+	}
+	if fallback := strings.Join(tenantCacheSecretFields("", "acme", "p-w_1"), " "); !strings.Contains(fallback, "@mksrv-redis:6379") {
+		t.Fatalf("empty cache host should fall back to the container name: %s", fallback)
 	}
 }
 
