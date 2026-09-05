@@ -49,6 +49,13 @@ realm with SMTP configured. No realm had one.
   is the source of truth here, not mksrv, so a rotated key must always win)
   and everything downstream (Keycloak's realm SMTP settings) reads from
   there, the same as every other mksrv application secret.
+- **TXT values are plain text, not manually quoted.** `aws_route53_record`
+  only wants literal `""` to *concatenate* segments of a value longer than
+  255 characters (its own docs); adding it around a short value (the SPF
+  string, the SES verification token) sends Route53 a doubly-quoted string
+  and fails apply with "InvalidCharacterString (Value should be enclosed in
+  quotation marks)" — hit live, on the very first real `apply` with the flag
+  on.
 - **DKIM's 3 CNAME records are `count`-based, not part of the shared `dns`
   module's `for_each`**: SES generates the DKIM tokens when
   `aws_ses_domain_dkim` is created, so the token — and therefore the CNAME's

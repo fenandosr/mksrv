@@ -230,11 +230,18 @@ locals {
   # with `count`, not folded into this list like the rest of the operator
   # records. Route53-only: DKIM auto-creation isn't wired for other DNS
   # providers.
+  #
+  # TXT values below are plain text, not manually quoted: aws_route53_record
+  # only wants literal `""` inserted to *concatenate* segments of a value
+  # longer than 255 characters (per the resource's own docs) — adding it
+  # around a short value, as an earlier version of this file did, sends
+  # Route53 a doubly-quoted string and fails apply with "InvalidCharacterString
+  # (Value should be enclosed in quotation marks)".
   ses_dns_records = local.outbound_smtp ? [
     {
       fqdn  = "_amazonses.${local.root_domain}"
       type  = "TXT"
-      value = "\"${aws_ses_domain_identity.operator[0].verification_token}\""
+      value = aws_ses_domain_identity.operator[0].verification_token
       ttl   = 300
     },
     {
@@ -246,7 +253,7 @@ locals {
     {
       fqdn  = local.ses_mail_from
       type  = "TXT"
-      value = "\"v=spf1 include:amazonses.com ~all\""
+      value = "v=spf1 include:amazonses.com ~all"
       ttl   = 300
     },
   ] : []
