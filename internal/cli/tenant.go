@@ -279,7 +279,7 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 			LogoDataURI:   tenant.Branding.LogoDataURI,
 			HeadscaleUser: id,
 			ControlURL:    "https://" + dep.Identity.HeadscaleDomain,
-			Forwards:      append(demoForwards(demoT, restPort, cachePort), tenantForwards(tenant)...),
+			Forwards:      append(demoForwards(demoT, restPort, cachePort, slices.Contains(tenant.Stacks, "openbao")), tenantForwards(tenant)...),
 			UpdateFeedURL: fmt.Sprintf("https://%s/appcast.json", tenant.BaseDomain),
 			MinVersion:    "0.1.0",
 		})
@@ -349,6 +349,7 @@ type demoTargets struct {
 	Postgres string // raw :5432 — the Patroni primary in cluster mode
 	Rest     string // host FQDN carrying the `database` stack (PostgREST)
 	Cache    string // host FQDN carrying the `cache` stack (Redis)
+	OpenBao  string // openbao leader FQDN — :8200 (standbys forward to the active node)
 }
 
 // demoForwards is the forward set advertised to Cloud-IT VPN clients. The
@@ -356,7 +357,7 @@ type demoTargets struct {
 // PostgreSQL; rest exposes the tenant's PostgREST data API (restPort > 0 when
 // the tenant consumes database); cache exposes shared Redis (cachePort > 0 when
 // the tenant consumes cache).
-func demoForwards(t demoTargets, restPort, cachePort int) []configd.Forward {
+func demoForwards(t demoTargets, restPort, cachePort int, openbao bool) []configd.Forward {
 	var forwards []configd.Forward
 	if t.Edge != "" {
 		forwards = append(forwards, configd.Forward{
@@ -410,6 +411,19 @@ func demoForwards(t demoTargets, restPort, cachePort int) []configd.Forward {
 			MaxConns:     16,
 		})
 	}
+	if openbao && t.OpenBao != "" {
+		forwards = append(forwards, configd.Forward{
+			ID:           "openbao",
+			Label:        "OpenBao",
+			Type:         "tcp",
+			Listen:       configd.Listen{Host: "127.0.0.1", Port: 0},
+			PortStrategy: "auto",
+			Target:       t.OpenBao + ":8200",
+			OpenAction:   configd.OpenAction{Kind: "none"},
+			HealthCheck:  configd.HealthCheck{Kind: "tcp", IntervalSec: 30},
+			MaxConns:     16,
+		})
+	}
 	return forwards
 }
 
@@ -423,7 +437,7 @@ func (f *fleet) fleetDemoTargets() demoTargets {
 		}
 		return fmt.Sprintf("%s-%s.%s.mksrv", env, host, env)
 	}
-	var edge, dbHost, cacheHost string
+	var edge, dbHost, cacheHost, baoHost string
 	for _, ht := range f.targets {
 		if slices.Contains(ht.Host.Stacks, "base") {
 			edge = ht.Name
@@ -434,12 +448,21 @@ func (f *fleet) fleetDemoTargets() demoTargets {
 		if slices.Contains(ht.Host.Stacks, "cache") {
 			cacheHost = ht.Name
 		}
+		if slices.Contains(ht.Host.Stacks, "openbao") && baoHost == "" {
+			baoHost = ht.Name
+		}
 	}
 	pgHost := dbHost // standalone: Postgres lives with the database stack
 	if f.postgres.Primary != "" {
 		pgHost = f.postgres.Primary
 	}
-	return demoTargets{Edge: mesh(edge), Postgres: mesh(pgHost), Rest: mesh(dbHost), Cache: mesh(cacheHost)}
+	if _, ok := f.byName[f.openbao.Leader]; ok {
+		baoHost = f.openbao.Leader // standbys forward anyway, but skip the hop
+	}
+	return demoTargets{
+		Edge: mesh(edge), Postgres: mesh(pgHost), Rest: mesh(dbHost),
+		Cache: mesh(cacheHost), OpenBao: mesh(baoHost),
+	}
 }
 
 // tenantForwards translates a tenant's declared forwards into configd.Forward,

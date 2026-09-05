@@ -144,8 +144,13 @@ re-keys new writes; `transit/rewrap/acme` upgrades old ciphertexts.
 Keycloak realm and an `oidc-<id>/` auth mount with a role per RBAC group
 (ADR 0016). The role is chosen from the token's `groups` claim.
 
+A tenant that carries the `openbao` stack gets an **`openbao` forward** in its
+Cloud-IT VPN config (points at the raft leader's `:8200`; standbys forward
+anyway). With the VPN connected, `BAO_ADDR` is the local port that forward
+listens on:
+
 ```
-export BAO_ADDR=http://<node-tailnet-ip>:8200
+export BAO_ADDR=http://127.0.0.1:<openbao-forward-port>   # or http://<node-tailnet-ip>:8200 on the tailnet directly
 
 # dev or admin -> read secrets, write kv/tenants/<id>/dev/*, transit enc/dec
 bao login -method=oidc -path=oidc-<id>
