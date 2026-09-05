@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Feature (M25, ADR 0025): operator SES SMTP for Keycloak's transactional
+  email (password reset, email verification). Opt-in (`mail.outbound_smtp`,
+  default off). One sender, `noreply@<root_domain>` — the operator zone
+  only, never a tenant domain. Terraform provisions the SES identity, DKIM,
+  a custom MAIL FROM domain, and a `ses:SendRawEmail`-only IAM user; the
+  derived SMTP password (`internal/aws.DeriveSESSMTPPassword`, AWS's
+  published SigV4-based conversion) is mirrored into SSM and reconciled onto
+  every tenant realm's SMTP settings. See `docs/mail-smtp.md` — in
+  particular, the SES sandbox is a separate, manual blocker even with the
+  flag on.
+
+- Fix (configd): `reconcileConfigd`'s tenant roster never set `LogoDataURI`,
+  even though `configd.TenantEntry` and the signed `ClientConfig` have
+  carried it end to end since this was built — the Cloud-IT VPN desktop app
+  has never actually received a tenant's logo. `Primary` made the same trip
+  correctly; the logo silently didn't.
+
 - Feature (M24, ADR 0023): per-tenant Keycloak login branding. `branding:`
   gains `secondary` alongside `primary`; the logo (`logo_data_uri`, already
   read by the VPN client) is now also embedded as a CSS `background-image` in

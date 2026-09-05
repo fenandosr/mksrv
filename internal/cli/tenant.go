@@ -134,6 +134,11 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 		return &ExitError{Code: 1, Err: err}
 	}
 
+	smtp, err := f.tenantSMTPSpec(ctx)
+	if err != nil {
+		return &ExitError{Code: 1, Err: err}
+	}
+
 	selected, err := f.selectedTenants(args)
 	if err != nil {
 		return &ExitError{Code: 2, Err: err}
@@ -164,6 +169,7 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 			AdminGroup:  "admin",
 			Clients:     clients,
 			LoginTheme:  themeName(id),
+			SMTP:        smtp,
 		})
 		if err != nil {
 			return &ExitError{Code: 1, Err: fmt.Errorf("realm %s: %w", realm, err)}

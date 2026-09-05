@@ -292,3 +292,18 @@ reference.
   new one's). `EnsureRealm` reconciles `loginTheme` idempotently; `tenant
   apply` restarts Keycloak once, unconditionally, after every other
   Keycloak-touching step in that run. See `docs/branding.md`.
+
+## M25 — implemented (opt-in)
+
+- Operator SES SMTP for Keycloak's transactional email (ADR 0025):
+  `mail.outbound_smtp`, default off. Terraform provisions an SES identity for
+  the root domain (never a tenant domain), DKIM, a custom MAIL FROM domain,
+  and a `ses:SendRawEmail`-only IAM user. `internal/aws.DeriveSESSMTPPassword`
+  converts the IAM secret key to an SMTP password (AWS's published
+  derivation — not verified against a live endpoint in this codebase);
+  `tenantSMTPSpec` mirrors it into SSM and `RealmSpec.SMTP` reconciles it onto
+  every realm, unconditionally, each `tenant apply` run. The SES sandbox is a
+  separate, manual blocker even with the flag on — see `docs/mail-smtp.md`.
+- Also fixed: `reconcileConfigd`'s roster never set `LogoDataURI`, so the
+  Cloud-IT VPN desktop app never actually received a tenant's logo despite
+  the field existing end to end since the client protocol was built.
