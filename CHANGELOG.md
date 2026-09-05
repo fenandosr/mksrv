@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Feature (M12): a tenant carrying the `openbao` stack now gets an `openbao`
+  forward in its Cloud-IT VPN config (the raft leader's `:8200` — standbys
+  forward requests anyway). Without it there was no way to reach OpenBao
+  from a tenant machine that isn't on the tailnet directly, so `bao login
+  -method=oidc` from a laptop just failed to resolve the node.
+
 - Fix (M12/M20): the tenant DB/cache secrets mksrv mirrors into OpenBao KV
   (`kv/tenants/<id>/database`, `.../cache`) hard-coded `host=mksrv-postgres` /
   `host=mksrv-redis` — container names that don't exist on the distributed
