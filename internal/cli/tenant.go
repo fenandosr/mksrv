@@ -259,7 +259,7 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 	}
 
 	roster := configd.Config{}
-	demoT := f.fleetDemoTargets()
+	fwdTargets := f.fleetForwardTargets()
 	sortedIDs := sortedTenantIDs(f.data.Tenants)
 	for _, id := range sortedIDs {
 		tenant := f.data.Tenants[id]
@@ -279,7 +279,7 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 			LogoDataURI:   tenant.Branding.LogoDataURI,
 			HeadscaleUser: id,
 			ControlURL:    "https://" + dep.Identity.HeadscaleDomain,
-			Forwards:      append(demoForwards(demoT, restPort, cachePort, slices.Contains(tenant.Stacks, "openbao")), tenantForwards(tenant)...),
+			Forwards:      append(builtinForwards(fwdTargets, restPort, cachePort, slices.Contains(tenant.Stacks, "openbao")), tenantForwards(tenant)...),
 			UpdateFeedURL: fmt.Sprintf("https://%s/appcast.json", tenant.BaseDomain),
 			MinVersion:    "0.1.0",
 		})
@@ -340,11 +340,11 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 	return configd.PublicKeyPEM(signer.PublicKey())
 }
 
-// demoTargets are the mesh FQDNs the built-in forwards point at. They move
-// with the fleet's shape: the distributed profile splits the old single
-// `data` host into `appd` (PostgREST, Redis) and the `core*` Patroni cluster.
-// Any field left empty drops its forward.
-type demoTargets struct {
+// builtinForwardTargets are the mesh FQDNs the built-in forwards point at.
+// They move with the fleet's shape: the distributed profile splits the old
+// single `data` host into `appd` (PostgREST, Redis) and the `core*` Patroni /
+// OpenBao clusters. Any field left empty drops its forward.
+type builtinForwardTargets struct {
 	Edge     string // base host FQDN, for edge-health
 	Postgres string // raw :5432 — the Patroni primary in cluster mode
 	Rest     string // host FQDN carrying the `database` stack (PostgREST)
@@ -352,12 +352,13 @@ type demoTargets struct {
 	OpenBao  string // openbao leader FQDN — :8200 (standbys forward to the active node)
 }
 
-// demoForwards is the forward set advertised to Cloud-IT VPN clients. The
-// edge-health forward exercises the full tunnel path; database exposes raw
-// PostgreSQL; rest exposes the tenant's PostgREST data API (restPort > 0 when
-// the tenant consumes database); cache exposes shared Redis (cachePort > 0 when
-// the tenant consumes cache).
-func demoForwards(t demoTargets, restPort, cachePort int, openbao bool) []configd.Forward {
+// builtinForwards is the forward set every tenant gets automatically, ahead of
+// the ones it declares itself in tenants/<id>.yaml. edge-health exercises the
+// full tunnel path; database exposes raw PostgreSQL; rest the tenant's
+// PostgREST data API (restPort > 0 when it consumes `database`); cache shared
+// Redis (cachePort > 0 when it consumes `cache`); openbao the secrets cluster
+// (when it consumes `openbao`).
+func builtinForwards(t builtinForwardTargets, restPort, cachePort int, openbao bool) []configd.Forward {
 	var forwards []configd.Forward
 	if t.Edge != "" {
 		forwards = append(forwards, configd.Forward{
@@ -427,9 +428,9 @@ func demoForwards(t demoTargets, restPort, cachePort int, openbao bool) []config
 	return forwards
 }
 
-// fleetDemoTargets resolves the demo-forward mesh FQDNs from the fleet's
+// fleetForwardTargets resolves the built-in-forward mesh FQDNs from the fleet's
 // current shape.
-func (f *fleet) fleetDemoTargets() demoTargets {
+func (f *fleet) fleetForwardTargets() builtinForwardTargets {
 	env := f.data.Deployment.Env
 	mesh := func(host string) string {
 		if host == "" {
@@ -459,7 +460,7 @@ func (f *fleet) fleetDemoTargets() demoTargets {
 	if _, ok := f.byName[f.openbao.Leader]; ok {
 		baoHost = f.openbao.Leader // standbys forward anyway, but skip the hop
 	}
-	return demoTargets{
+	return builtinForwardTargets{
 		Edge: mesh(edge), Postgres: mesh(pgHost), Rest: mesh(dbHost),
 		Cache: mesh(cacheHost), OpenBao: mesh(baoHost),
 	}
@@ -467,7 +468,7 @@ func (f *fleet) fleetDemoTargets() demoTargets {
 
 // tenantForwards translates a tenant's declared forwards into configd.Forward,
 // filling in the boilerplate Cloud-IT VPN's validator requires. These are
-// appended to demoForwards in the broker roster.
+// appended to builtinForwards in the broker roster.
 func tenantForwards(t model.Tenant) []configd.Forward {
 	out := make([]configd.Forward, 0, len(t.Forwards))
 	for _, fwd := range t.Forwards {
