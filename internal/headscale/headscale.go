@@ -149,6 +149,32 @@ func (c *Client) CreateAPIKey(ctx context.Context, ttl time.Duration) (string, e
 	return "", fmt.Errorf("could not parse headscale api key from %q", trimmed)
 }
 
+// ExpireAPIKeysExcept expires every Headscale API key whose prefix isn't
+// keepPrefix. configd is the only consumer and reconcileConfigd mints it a
+// fresh key each run, so old ones just accumulate — and a stale one lingering
+// after a Headscale rebuild is what breaks "mint a mesh key". Best-effort.
+func (c *Client) ExpireAPIKeysExcept(ctx context.Context, keepPrefix string) error {
+	out, err := c.run(ctx, "apikeys", "list", "--output", "json")
+	if err != nil {
+		return err
+	}
+	var keys []struct {
+		Prefix string `json:"prefix"`
+	}
+	if err := json.Unmarshal([]byte(out), &keys); err != nil {
+		return fmt.Errorf("parse apikeys list: %w", err)
+	}
+	for _, k := range keys {
+		if k.Prefix == "" || k.Prefix == keepPrefix {
+			continue
+		}
+		if _, err := c.run(ctx, "apikeys", "expire", "--prefix", k.Prefix); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Node is a headscale node record (subset).
 type Node struct {
 	ID     json.Number `json:"id"`

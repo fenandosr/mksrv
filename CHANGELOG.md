@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fix (M4): a Headscale API key is bound to a specific Headscale database, so
+  an in-place relaunch (fresh Headscale) silently invalidated the one in SSM
+  — `configd` then couldn't mint pre-auth keys and the VPN client got
+  "502: could not mint a mesh key". `reconcileConfigd` reused the stored key
+  without checking it; it now mints a fresh one every `mksrv tenant apply`
+  and expires the rest.
+
 - Fix (M13/M20): `configd`'s built-in ("demo") forwards — the services the
   Cloud-IT VPN app shows out of the box — all targeted `<env>-data.<env>.mksrv`,
   a host that only exists in the old 2-host topology. On the distributed
