@@ -288,9 +288,10 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 	if err != nil {
 		return "", err
 	}
-	if err := r.Put(ctx, "/mksrv/{env}/identity/configd_tenants", string(rosterJSON)); err != nil {
-		return "", err
-	}
+	// The roster is derived from tenants/*.yaml and regenerated every run —
+	// not a secret, not read back, and large enough (with per-tenant forward
+	// boilerplate) to blow SSM's 4096-char Standard-tier value limit. It only
+	// needs to reach the edge, as the podman secret below.
 
 	secretValues := map[string]string{
 		"configd_signing_kid":      kid,

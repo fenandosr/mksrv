@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fix (M4): `mksrv tenant apply` also wrote the configd tenant roster to SSM
+  (`/mksrv/<env>/identity/configd_tenants`), which blew the 4096-char
+  Standard-tier value limit once the roster grew (5 built-in forwards × 3
+  tenants). The roster is derived from `tenants/*.yaml`, regenerated every
+  run, and never read back from SSM — it only needs to reach the edge as a
+  podman secret, which it still does. The SSM write is gone.
+
 - Refactor: `demoForwards` → `builtinForwards` (`demoTargets` →
   `builtinForwardTargets`, `fleetDemoTargets` → `fleetForwardTargets`). The
   "demo" name is from M4 when these were a tunnel smoke-test; they're now the
