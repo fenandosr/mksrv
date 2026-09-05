@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fix: `EnsureRandom` generated secrets with `base64url`, which can start with
+  `-` — and `redis-cli -a`, and other getopt-based tools, then parse the
+  password as a flag ("WRONGPASS", even though the aclfile / mirror were
+  correct). Generated secrets are now `[A-Za-z0-9]` only: safe unquoted in
+  shell args, connection URLs, Redis aclfiles, and Keycloak SMTP config.
+  Existing secrets are unchanged — rotate (delete the SSM parameter +
+  re-run the relevant `mksrv … apply`) to pick up the new format.
+
 - Fix (M20): Patroni's `pg_hba` allowed only the VPC CIDR and `127.0.0.1`, so
   a connection reaching `:5432` via `PublishPort` (the Cloud-IT VPN
   `database` forward, anything over the mesh) was rejected — podman SNATs

@@ -94,8 +94,9 @@ func (r *Resolver) EnsureString(ctx context.Context, ref, value string) (string,
 	return value, nil
 }
 
-// EnsureRandom returns the value of ref, generating and storing a URL-safe
-// random string of at least nbytes of entropy when the parameter is absent.
+// EnsureRandom returns the value of ref, generating and storing a random
+// alphanumeric string of at least nbytes of entropy when the parameter is
+// absent.
 func (r *Resolver) EnsureRandom(ctx context.Context, ref string, nbytes int) (string, error) {
 	value, err := r.Get(ctx, ref)
 	if err == nil {
@@ -108,11 +109,10 @@ func (r *Resolver) EnsureRandom(ctx context.Context, ref string, nbytes int) (st
 	if nbytes < 16 {
 		nbytes = 16
 	}
-	raw := make([]byte, nbytes)
-	if _, err := rand.Read(raw); err != nil {
+	generated, err := randomAlphanumeric(base64.RawURLEncoding.EncodedLen(nbytes))
+	if err != nil {
 		return "", fmt.Errorf("generate secret: %w", err)
 	}
-	generated := base64.RawURLEncoding.EncodeToString(raw)
 
 	name := r.Expand(ref)
 	if _, err := r.api.PutParameter(ctx, &ssm.PutParameterInput{
@@ -125,4 +125,30 @@ func (r *Resolver) EnsureRandom(ctx context.Context, ref string, nbytes int) (st
 		return "", fmt.Errorf("create parameter %s: %w", name, err)
 	}
 	return generated, nil
+}
+
+// randomAlphanumeric returns an n-character string over [A-Za-z0-9]. That set
+// is safe unquoted in shell args (`redis-cli -a`, `PGPASSWORD=`), connection
+// URLs (`scheme://user:pw@host`), Redis aclfile `>pw` directives, and
+// Keycloak's SMTP config alike — base64url (the previous encoding) could emit
+// a leading `-`, which getopt-based tools parse as a flag.
+func randomAlphanumeric(n int) (string, error) {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	out := make([]byte, 0, n)
+	buf := make([]byte, n)
+	for len(out) < n {
+		if _, err := rand.Read(buf); err != nil {
+			return "", err
+		}
+		for _, b := range buf {
+			if b >= 248 { // reject the top 8 of 256 so 62 divides evenly (no modulo bias)
+				continue
+			}
+			out = append(out, alphabet[b%62])
+			if len(out) == n {
+				break
+			}
+		}
+	}
+	return string(out), nil
 }
