@@ -45,6 +45,11 @@ func TestEnsureRandomCreatesOnceThenReads(t *testing.T) {
 	if len(first) < 20 {
 		t.Fatalf("generated value too short: %q", first)
 	}
+	for _, c := range first {
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+			t.Fatalf("generated value has a non-alphanumeric char %q: %q", c, first)
+		}
+	}
 	if _, ok := api.store["/mksrv/prod/identity/kc_db_password"]; !ok {
 		t.Fatal("parameter not stored under expanded name")
 	}
@@ -55,6 +60,30 @@ func TestEnsureRandomCreatesOnceThenReads(t *testing.T) {
 	}
 	if second != first || api.puts != 1 {
 		t.Fatalf("EnsureRandom not idempotent: puts=%d first=%q second=%q", api.puts, first, second)
+	}
+}
+
+func TestRandomAlphanumeric(t *testing.T) {
+	t.Parallel()
+	for _, n := range []int{1, 16, 43, 100} {
+		got, err := randomAlphanumeric(n)
+		if err != nil {
+			t.Fatalf("randomAlphanumeric(%d) error = %v", n, err)
+		}
+		if len(got) != n {
+			t.Fatalf("randomAlphanumeric(%d) len = %d", n, len(got))
+		}
+		for _, c := range got {
+			if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+				t.Fatalf("non-alphanumeric %q in %q", c, got)
+			}
+		}
+	}
+	// Two consecutive draws must differ (would fail ~1 in 62^43).
+	a, _ := randomAlphanumeric(43)
+	b, _ := randomAlphanumeric(43)
+	if a == b {
+		t.Fatal("two draws produced the same value")
 	}
 }
 
