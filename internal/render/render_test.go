@@ -246,7 +246,7 @@ func TestStackRendersDataPlane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stack(cache) error = %v", err)
 	}
-	if acl := string(cacheFiles["/var/lib/mksrv/stacks/cache/users.acl"]); !strings.Contains(acl, "user mksrv on >adminpw ~* &* +@all") {
+	if acl := string(cacheFiles["/var/lib/mksrv/stacks/cache/acl/users.acl"]); !strings.Contains(acl, "user mksrv on >adminpw ~* &* +@all") {
 		t.Fatalf("cache users.acl seed wrong:\n%s", acl)
 	} else if strings.Contains(acl, "#") {
 		// Redis's aclfile parser rejects comment lines and aborts startup.

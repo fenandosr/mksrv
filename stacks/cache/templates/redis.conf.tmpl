@@ -1,6 +1,9 @@
-# Rendered by mksrv. Per-tenant ACL users live in users.acl, which
-# `mksrv tenant apply` rewrites and reloads (ACL LOAD).
-aclfile /etc/redis/users.acl
+# Rendered by mksrv. Per-tenant ACL users live in acl/users.acl, which
+# `mksrv tenant apply` rewrites and reloads (ACL LOAD). The directory (not the
+# file) is bind-mounted: WriteFileSudo replaces the file by atomic rename, so a
+# single-file mount would pin the container to the original inode and ACL LOAD
+# would keep reading a stale file.
+aclfile /etc/redis/acl/users.acl
 
 appendonly yes
 appendfsync everysec

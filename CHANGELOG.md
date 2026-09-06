@@ -2,13 +2,24 @@
 
 ## Unreleased
 
-- Fix: `EnsureRandom` generated secrets with `base64url`, which can start with
-  `-` — and `redis-cli -a`, and other getopt-based tools, then parse the
-  password as a flag ("WRONGPASS", even though the aclfile / mirror were
-  correct). Generated secrets are now `[A-Za-z0-9]` only: safe unquoted in
-  shell args, connection URLs, Redis aclfiles, and Keycloak SMTP config.
-  Existing secrets are unchanged — rotate (delete the SSM parameter +
-  re-run the relevant `mksrv … apply`) to pick up the new format.
+- Fix: the `cache` stack bind-mounted `users.acl` as a **single file**. Every
+  `mksrv tenant apply` rewrites that file by atomic rename (new inode), so the
+  Redis container kept seeing the inode from container start — a seed with no
+  tenant users — and the `ACL LOAD` that follows reloaded stale data. Result:
+  a tenant's Redis password matched SSM and the OpenBao mirror but Redis
+  answered `WRONGPASS`, and no tenant ACL user ever actually loaded on a fresh
+  fleet. The container now bind-mounts the `acl/` directory (`aclfile` moved to
+  `/etc/redis/acl/users.acl`); live `ACL LOAD` picks up rewrites without a
+  restart. On an already-running fleet, `systemctl restart mksrv-redis` once
+  after upgrading loads the current file; the old
+  `/var/lib/mksrv/stacks/cache/users.acl` can be deleted.
+
+- Fix: `EnsureRandom` generated secrets with `base64url`, whose alphabet
+  includes `-`. A secret starting with `-` is a footgun for getopt-based tools
+  (`redis-cli -a`, though redis-cli's own parser tolerates it), `PGPASSWORD=`,
+  and `scheme://user:pw@host` URLs. Generated secrets are now `[A-Za-z0-9]`
+  only, same length. Existing secrets are unchanged — rotate (delete the SSM
+  parameter + re-run the relevant `mksrv … apply`) to pick up the new format.
 
 - Fix (M20): Patroni's `pg_hba` allowed only the VPC CIDR and `127.0.0.1`, so
   a connection reaching `:5432` via `PublishPort` (the Cloud-IT VPN

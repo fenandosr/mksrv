@@ -70,7 +70,7 @@ func (f *fleet) provisionRedis(ctx context.Context, printer ui.Printer, tenants 
 	defer client.Close()
 
 	content := strings.Join(lines, "\n") + "\n"
-	if err := client.WriteFileSudo(ctx, "/var/lib/mksrv/stacks/cache/users.acl", []byte(content), 0o644); err != nil {
+	if err := client.WriteFileSudo(ctx, "/var/lib/mksrv/stacks/cache/acl/users.acl", []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write redis acl: %w", err)
 	}
 	if _, err := client.Run(ctx, "sudo podman exec mksrv-redis redis-cli -a "+quoteArg(admin)+
