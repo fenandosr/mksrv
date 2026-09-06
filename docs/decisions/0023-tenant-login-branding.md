@@ -33,7 +33,13 @@ member sees — used the stock `keycloak.v2` theme for every realm, unbranded.
   The selectors targeting `keycloak.v2`'s PatternFly classes are a first pass
   — verify against a live login page and adjust; that part of the CSS is the
   one piece of this milestone not proven against a running Keycloak in this
-  session.
+  session. **Update (2026-09-06):** selectors verified against a live
+  `keycloak.v2` login + reset-credentials page, and the theme reworked into a
+  glassmorphism design — a background gradient blended from `primary` +
+  `secondary` over a dark scrim, a `backdrop-filter` card, light-on-glass
+  controls. `secondary` now defaults to `primary` (the gradient always
+  renders). Still CSS-only. Glass parameters are exposed as CSS custom
+  properties for tuning without touching selectors.
 - **Theme placement**: each tenant gets `/opt/keycloak/themes/<id>` as a
   sibling of Keycloak's own bundled themes (`Volume=.../themes/<id>:/opt/
   keycloak/themes/<id>:Z,ro`, one per tenant in `render.Context.TenantIDs`) —
