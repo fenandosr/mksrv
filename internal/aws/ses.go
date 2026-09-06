@@ -16,6 +16,10 @@ import (
 // "11111111" as a stand-in date, the fixed "aws4_request" terminal, and the
 // version byte 0x04) are exactly as AWS's own reference implementation
 // defines them — not values mksrv chose.
+//
+// Verified end to end on 2026-09-06: a key derived here authenticated over
+// STARTTLS + AUTH LOGIN against email-smtp.us-east-1.amazonaws.com:587 and
+// SES accepted the message.
 const (
 	sesSMTPDate     = "11111111"
 	sesSMTPService  = "ses"
