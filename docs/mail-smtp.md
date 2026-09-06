@@ -62,7 +62,7 @@ individually verified addresses, capped at 200/day. Turning
   recipient address, or request production access.
 - **Keycloak shows an SMTP error when testing** (Realm settings → Email →
   "Test connection"): the derived SMTP password
-  (`internal/aws.DeriveSESSMTPPassword`) has not been verified against a
-  live endpoint in this codebase yet — if authentication itself fails (not a
-  sandbox/delivery issue), that derivation is the first thing to double
-  check against AWS's reference implementation.
+  (`internal/aws.DeriveSESSMTPPassword`) is verified against a live SES SMTP
+  endpoint and pinned by a regression test, so an auth failure here is almost
+  always a stale credential — re-run `mksrv apply && mksrv tenant apply` to
+  re-mirror the current IAM key into SSM and back onto the realm.

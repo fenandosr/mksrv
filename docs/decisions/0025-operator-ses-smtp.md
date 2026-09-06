@@ -39,9 +39,10 @@ realm with SMTP configured. No realm had one.
   the secret access key is converted via AWS's published SigV4-based
   derivation (`internal/aws.DeriveSESSMTPPassword`): a fixed literal date
   string, "aws4_request", "SendRawEmail", and a version byte, all exactly as
-  AWS's own reference implementation defines them. **Not verified against a
-  live SES SMTP endpoint in this session** — spot-check by actually
-  authenticating once before relying on it.
+  AWS's own reference implementation defines them. **Verified 2026-09-06**: a
+  derived key authenticated over STARTTLS + AUTH LOGIN against
+  `email-smtp.us-east-1.amazonaws.com:587` and SES accepted the message; the
+  derivation is now pinned by a regression test.
 - **Where the credential lives**: Terraform necessarily holds the IAM access
   key (it's the resource's source of truth), exposed via a `sensitive`
   output. mksrv immediately mirrors the *derived* SMTP username/password into

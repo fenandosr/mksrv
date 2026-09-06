@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Docs (M25): `internal/aws.DeriveSESSMTPPassword` is now verified — a derived
+  key authenticated over STARTTLS + AUTH LOGIN against
+  `email-smtp.us-east-1.amazonaws.com:587` and SES accepted the message. The
+  "not verified against a live endpoint, spot-check before relying on it"
+  caveat is dropped from ADR 0025, `docs/mail-smtp.md`, the implementation
+  status, and the code comment; the derivation is pinned by a regression test
+  (`ses_test.go` now asserts exact vectors, not just structure).
+
 - Fix: the `cache` stack bind-mounted `users.acl` as a **single file**. Every
   `mksrv tenant apply` rewrites that file by atomic rename (new inode), so the
   Redis container kept seeing the inode from container start — a seed with no
