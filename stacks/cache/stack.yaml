@@ -24,7 +24,7 @@ templates:
     dst: /var/lib/mksrv/stacks/cache/redis.conf
     scope: shared
   - src: templates/users.acl.tmpl
-    dst: /var/lib/mksrv/stacks/cache/users.acl
+    dst: /var/lib/mksrv/stacks/cache/acl/users.acl
     scope: shared
   - src: templates/redis.container.tmpl
     dst: /etc/containers/systemd/mksrv-redis.container
