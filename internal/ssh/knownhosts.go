@@ -49,8 +49,9 @@ func isHostKeyError(err error) bool {
 }
 
 // FetchHostKey opens an unauthenticated connection to target solely to read its
-// advertised host key.
-func FetchHostKey(ctx context.Context, target Target) (ssh.PublicKey, error) {
+// advertised host key. When target.Jump is set the connection is tunnelled
+// through that bastion (authenticated, its key checked against knownHostsPath).
+func FetchHostKey(ctx context.Context, target Target, knownHostsPath string) (ssh.PublicKey, error) {
 	var captured ssh.PublicKey
 	config := &ssh.ClientConfig{
 		User: target.User,
@@ -61,12 +62,36 @@ func FetchHostKey(ctx context.Context, target Target) (ssh.PublicKey, error) {
 		Auth:    []ssh.AuthMethod{},
 		Timeout: 15 * time.Second,
 	}
-	dialer := net.Dialer{Timeout: config.Timeout}
-	conn, err := dialer.DialContext(ctx, "tcp", target.addr())
-	if err != nil {
-		return nil, fmt.Errorf("dial %s: %w", target.addr(), err)
+
+	var conn net.Conn
+	var bastion *Client
+	if target.Jump == nil {
+		dialer := net.Dialer{Timeout: config.Timeout}
+		c, err := dialer.DialContext(ctx, "tcp", target.addr())
+		if err != nil {
+			return nil, fmt.Errorf("dial %s: %w", target.addr(), err)
+		}
+		conn = c
+	} else {
+		b, err := Dial(ctx, *target.Jump, knownHostsPath)
+		if err != nil {
+			return nil, fmt.Errorf("dial bastion %s: %w", target.Jump.Host, err)
+		}
+		bastion = b
+		c, err := b.ssh.DialContext(ctx, "tcp", target.addr())
+		if err != nil {
+			_ = b.Close()
+			return nil, fmt.Errorf("dial %s via %s: %w", target.addr(), target.Jump.Host, err)
+		}
+		conn = c
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+		if bastion != nil {
+			_ = bastion.Close()
+		}
+	}()
+
 	sshConn, _, _, err := ssh.NewClientConn(conn, target.addr(), config)
 	if sshConn != nil {
 		_ = sshConn.Close()
@@ -87,7 +112,7 @@ type TrustResult struct {
 // Trust fetches target's host key and appends it to knownHostsPath if not
 // already present. It returns an error if a different key is already recorded.
 func Trust(ctx context.Context, knownHostsPath string, target Target) (TrustResult, error) {
-	key, err := FetchHostKey(ctx, target)
+	key, err := FetchHostKey(ctx, target, knownHostsPath)
 	if err != nil {
 		return TrustResult{Host: target.Host}, err
 	}

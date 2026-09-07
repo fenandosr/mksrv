@@ -85,6 +85,70 @@ func TestRenderContextPopulatesOperatorFQDNs(t *testing.T) {
 	}
 }
 
+func TestWireBastion(t *testing.T) {
+	t.Parallel()
+	mk := func(hosts ...struct {
+		name     string
+		provider string
+		stacks   []string
+	}) *fleet {
+		f := &fleet{byName: map[string]hostTarget{}}
+		for _, h := range hosts {
+			ht := hostTarget{Name: h.name, Host: model.Host{Provider: h.provider, Stacks: h.stacks}}
+			ht.Target.Host = h.name + "-ip"
+			f.targets = append(f.targets, ht)
+			f.byName[h.name] = ht
+		}
+		return f
+	}
+	type hs = struct {
+		name     string
+		provider string
+		stacks   []string
+	}
+
+	// Multi-host AWS fleet: private hosts jump through the base host.
+	f := mk(
+		hs{"appd", "aws", []string{"database"}},
+		hs{"core1", "aws", []string{"postgres"}},
+		hs{"edge", "aws", []string{"base", "identity"}},
+	)
+	f.wireBastion()
+	for _, ht := range f.targets {
+		if ht.Name == "edge" {
+			if ht.Target.Jump != nil {
+				t.Fatal("edge must not jump through itself")
+			}
+			continue
+		}
+		if ht.Target.Jump == nil || ht.Target.Jump.Host != "edge-ip" {
+			t.Fatalf("%s should jump through edge, got %+v", ht.Name, ht.Target.Jump)
+		}
+		if f.byName[ht.Name].Target.Jump == nil {
+			t.Fatalf("byName[%s] not updated with the jump", ht.Name)
+		}
+	}
+
+	// Single-host fleet: nothing to jump through.
+	one := mk(hs{"edge", "aws", []string{"base", "identity", "database"}})
+	one.wireBastion()
+	if one.targets[0].Target.Jump != nil {
+		t.Fatal("single-host fleet needs no bastion")
+	}
+
+	// `existing` hosts are the tenant's own hardware — never jumped.
+	ex := mk(
+		hs{"edge", "aws", []string{"base"}},
+		hs{"login", "existing", []string{}},
+	)
+	ex.wireBastion()
+	for _, ht := range ex.targets {
+		if ht.Target.Jump != nil {
+			t.Fatalf("%s should not be wired through the bastion", ht.Name)
+		}
+	}
+}
+
 func TestThemeDirsCommand(t *testing.T) {
 	t.Parallel()
 	if got := themeDirsCommand(nil); got != "sudo mkdir -p" {

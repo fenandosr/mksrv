@@ -12,6 +12,16 @@ output "subnet_ids" {
   value       = aws_subnet.public[*].id
 }
 
+output "private_subnet_ids" {
+  description = "All private subnet ids, one per AZ (ADR 0027)."
+  value       = aws_subnet.private[*].id
+}
+
+output "public_route_table_id" {
+  description = "Route table for the public subnets — the S3 gateway endpoint attaches here too."
+  value       = aws_route_table.public.id
+}
+
 output "azs" {
   value = aws_subnet.public[*].availability_zone
 }

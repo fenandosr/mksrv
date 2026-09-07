@@ -156,12 +156,41 @@ func (a *App) openFleet(ctx context.Context, printer ui.Printer, globals *global
 		f.targets = append(f.targets, ht)
 		f.byName[name] = ht
 	}
+	f.wireBastion()
 	return f, nil
+}
+
+// wireBastion routes every private AWS host's SSH through the edge (ADR 0027).
+// A private host's `management_ip` is a VPC address with no public route, so
+// `openFleet` sets its `Target.Jump` to the `base` host, which the CLI always
+// bootstraps first. A single-host fleet and `existing` hosts are untouched.
+func (f *fleet) wireBastion() {
+	var edge sshx.Target
+	found := false
+	for _, ht := range f.targets {
+		if slices.Contains(ht.Host.Stacks, "base") && ht.Host.Provider != "existing" {
+			edge = ht.Target
+			found = true
+			break
+		}
+	}
+	if !found || len(f.targets) < 2 {
+		return
+	}
+	for i := range f.targets {
+		ht := &f.targets[i]
+		if ht.Host.Provider == "existing" || slices.Contains(ht.Host.Stacks, "base") {
+			continue
+		}
+		jump := edge
+		ht.Target.Jump = &jump
+		f.byName[ht.Name] = *ht
+	}
 }
 
 func (f *fleet) selected(names []string) ([]hostTarget, error) {
 	if len(names) == 0 {
-		return f.targets, nil
+		return baseFirst(f.targets), nil
 	}
 	var out []hostTarget
 	for _, name := range names {
@@ -171,7 +200,25 @@ func (f *fleet) selected(names []string) ([]hostTarget, error) {
 		}
 		out = append(out, ht)
 	}
-	return out, nil
+	return baseFirst(out), nil
+}
+
+// baseFirst reorders hosts so the `base` host (the edge / SSH bastion) comes
+// first — it must be reachable and trusted before the CLI can jump to the
+// private hosts behind it (ADR 0027). Order within each group is preserved.
+func baseFirst(hosts []hostTarget) []hostTarget {
+	out := make([]hostTarget, 0, len(hosts))
+	for _, ht := range hosts {
+		if slices.Contains(ht.Host.Stacks, "base") {
+			out = append(out, ht)
+		}
+	}
+	for _, ht := range hosts {
+		if !slices.Contains(ht.Host.Stacks, "base") {
+			out = append(out, ht)
+		}
+	}
+	return out
 }
 
 func (a *App) newHostCommand(opts *globalOptions) *cobra.Command {
@@ -481,8 +528,10 @@ func (f *fleet) bootstrapParams(ht hostTarget) deploy.BootstrapParams {
 		vols = append(vols, deploy.VolumeMount{Name: name, VolumeID: out.Volumes[name]})
 	}
 	sort.Slice(vols, func(i, j int) bool { return vols[i].Name < vols[j].Name })
+	isEdge := slices.Contains(ht.Host.Stacks, "base")
 	return deploy.BootstrapParams{
-		IsEdge:       slices.Contains(ht.Host.Stacks, "base"),
+		IsEdge:       isEdge,
+		NAT:          isEdge && ht.Host.Provider != "existing" && len(f.targets) > 1,
 		Timezone:     f.data.Deployment.Timezone,
 		SwapMB:       model.SwapForStacks(ht.Host.Stacks, f.catalog, itype),
 		DataVolumeID: out.DataVolumeID,
@@ -516,17 +565,7 @@ func (a *App) runFleetApply(ctx context.Context, printer ui.Printer, globals *gl
 		return err
 	}
 
-	ordered := make([]hostTarget, 0, len(f.targets))
-	for _, ht := range f.targets {
-		if slices.Contains(ht.Host.Stacks, "base") {
-			ordered = append(ordered, ht)
-		}
-	}
-	for _, ht := range f.targets {
-		if !slices.Contains(ht.Host.Stacks, "base") {
-			ordered = append(ordered, ht)
-		}
-	}
+	ordered := baseFirst(f.targets)
 
 	for _, ht := range ordered {
 		if trustHosts {

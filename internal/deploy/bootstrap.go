@@ -19,7 +19,7 @@ var bootstrapTemplate string
 
 // BootstrapVersion is bumped when the bootstrap script changes in a way that
 // must re-run on already-provisioned hosts.
-const BootstrapVersion = 10
+const BootstrapVersion = 11
 
 // VolumeMount pairs a stack storage name with the EBS volume id backing it, so
 // the bootstrap can match the NVMe disk by serial.
@@ -31,6 +31,7 @@ type VolumeMount struct {
 // BootstrapParams controls the rendered bootstrap script.
 type BootstrapParams struct {
 	IsEdge        bool
+	NAT           bool // this host NATs the fleet's private subnets (ADR 0027)
 	Timezone      string
 	SwapMB        int
 	DataVolumeID  string

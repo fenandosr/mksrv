@@ -1,6 +1,6 @@
 output "management_ip" {
-  description = "Address the operator uses for SSH (the Elastic IP)."
-  value       = aws_eip.host.public_ip
+  description = "Address the CLI connects to: the edge's Elastic IP, or a private host's VPC IP (reached via the edge jump, ADR 0027)."
+  value       = local.is_edge ? aws_eip.host[0].public_ip : aws_instance.host.private_ip
 }
 
 output "private_ip" {
@@ -8,7 +8,13 @@ output "private_ip" {
 }
 
 output "public_ip" {
-  value = aws_eip.host.public_ip
+  description = "The Elastic IP on the edge; empty on private hosts."
+  value       = local.is_edge ? aws_eip.host[0].public_ip : ""
+}
+
+output "primary_network_interface_id" {
+  description = "The instance's primary ENI — the private route table's default route targets the edge's."
+  value       = aws_instance.host.primary_network_interface_id
 }
 
 output "instance_id" {

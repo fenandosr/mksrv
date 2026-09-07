@@ -146,6 +146,15 @@ if [ "$IS_EDGE" = "1" ]; then
   firewall-cmd --permanent --zone=public --add-service=http >/dev/null
   firewall-cmd --permanent --zone=public --add-service=https >/dev/null
 fi
+{{- if .NAT }}
+# Edge is the NAT for the private subnets (ADR 0027): masquerade everything
+# forwarded out of the public zone and permit intra-zone forwarding. AWS
+# source/dest check is disabled by Terraform.
+firewall-cmd --permanent --zone=public --add-masquerade >/dev/null
+firewall-cmd --permanent --zone=public --add-forward >/dev/null 2>&1 || true
+echo 'net.ipv4.ip_forward = 1' >/etc/sysctl.d/91-mksrv-nat.conf
+sysctl -q -w net.ipv4.ip_forward=1
+{{- end }}
 firewall-cmd --reload >/dev/null
 
 # ---------------------------------------------------------------------------

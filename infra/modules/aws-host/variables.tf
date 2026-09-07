@@ -51,6 +51,12 @@ variable "advertise_exitnode" {
   default = false
 }
 
+variable "is_nat" {
+  description = "This host is the fleet's NAT instance (the edge of a multi-host fleet, ADR 0027) — disables the source/dest check."
+  type        = bool
+  default     = false
+}
+
 variable "ami_id" {
   type    = string
   default = ""

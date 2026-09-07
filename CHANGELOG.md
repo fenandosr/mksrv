@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Change (M27, ADR 0027): only the `base` host (edge) is public now. On a
+  multi-host fleet every other host moves to a private subnet with **no
+  Elastic IP** (~$3.65/mo each — the distributed profile drops ~$14.6/mo);
+  edge keeps its one EIP and runs as the NAT for the private subnets
+  (firewalld masquerade, `source_dest_check = false`, `net.ipv4.ip_forward`)
+  and the SSH bastion. `internal/ssh.Target` gains `Jump`; `Dial` /
+  `FetchHostKey` tunnel through it, and `openFleet` wires every private AWS
+  host's jump to edge. `mksrv bootstrap` / `apply` / `host trust` order the
+  base host first so the bastion exists before the CLI reaches the hosts
+  behind it. A free S3 gateway VPC endpoint keeps `backup` off the NAT.
+  `BootstrapVersion` 10 → 11. Single-node fleets and `existing` hosts are
+  unchanged. **Not an in-place migration** — destroy + `mksrv apply` (edge
+  keeps its EIP, so operator-zone DNS is untouched).
+
 - Change (M26, ADR 0026): the per-tenant Postgres RBAC roles (`<id>`,
   `<id>_app`, `<id>_web`, `<id>_anon` — five per tenant with `<id>_auth`) become
   four **cluster-global** buckets `mksrv_owner` / `mksrv_app` / `mksrv_anon` /
