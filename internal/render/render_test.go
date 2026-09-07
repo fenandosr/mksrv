@@ -143,11 +143,18 @@ func TestStackRendersTenantLoginTheme(t *testing.T) {
 	if !strings.Contains(css, "--mksrv-primary: #112233;") {
 		t.Fatalf("login.css missing primary color:\n%s", css)
 	}
-	if strings.Contains(css, "--mksrv-secondary:") || strings.Contains(css, "background-image") {
-		t.Fatalf("login.css should omit unset secondary/logo blocks:\n%s", css)
+	// An unset secondary falls back to the primary, so the blended gradient
+	// still renders (just single-hue); the logo block is the only part gated
+	// on a branding field being present.
+	if !strings.Contains(css, "--mksrv-secondary: #112233;") {
+		t.Fatalf("login.css should default --mksrv-secondary to the primary:\n%s", css)
+	}
+	if strings.Contains(css, "text-indent: -9999px") || strings.Contains(css, `url("data:`) {
+		t.Fatalf("login.css should omit the logo block when logo_data_uri is unset:\n%s", css)
 	}
 
-	// A second tenant with secondary + logo set gets both blocks.
+	// A second tenant with secondary + logo set gets a distinct secondary and
+	// the logo block.
 	ctx.Tenant = &model.Tenant{ID: "hg", Branding: model.Branding{
 		Primary: "#112233", Secondary: "#445566", LogoDataURI: "data:image/png;base64,AAAA",
 	}}
@@ -159,6 +166,7 @@ func TestStackRendersTenantLoginTheme(t *testing.T) {
 	for _, want := range []string{
 		"--mksrv-secondary: #445566;",
 		`background-image: url("data:image/png;base64,AAAA");`,
+		"text-indent: -9999px",
 	} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("login.css missing %q:\n%s", want, css)

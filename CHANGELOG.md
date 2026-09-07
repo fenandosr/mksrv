@@ -2,13 +2,17 @@
 
 ## Unreleased
 
-- Docs (M25): `internal/aws.DeriveSESSMTPPassword` is now verified — a derived
-  key authenticated over STARTTLS + AUTH LOGIN against
-  `email-smtp.us-east-1.amazonaws.com:587` and SES accepted the message. The
-  "not verified against a live endpoint, spot-check before relying on it"
-  caveat is dropped from ADR 0025, `docs/mail-smtp.md`, the implementation
-  status, and the code comment; the derivation is pinned by a regression test
-  (`ses_test.go` now asserts exact vectors, not just structure).
+- Feature (M24): the tenant login theme is now a glassmorphism design — a
+  background gradient blended from `branding.primary` and `branding.secondary`
+  (with a dark scrim that keeps text legible whatever the two hues are), a
+  translucent `backdrop-filter` card, and light-on-glass form controls. Still
+  CSS-only (no FreeMarker overrides). `branding.secondary` now defaults to
+  `branding.primary` when unset, so the gradient always renders (single-hue
+  until a second colour is set) rather than the block being omitted. New
+  tunables as CSS custom properties (`--mksrv-glass-blur` / `-tint` / `-radius`,
+  `--mksrv-scrim`); `color-mix()` / `backdrop-filter` sit behind `@supports`
+  with opaque fallbacks. Selectors verified against a live `keycloak.v2` login
+  page. Re-run `mksrv tenant apply <id>` to pick it up.
 
 - Fix: the `cache` stack bind-mounted `users.acl` as a **single file**. Every
   `mksrv tenant apply` rewrites that file by atomic rename (new inode), so the

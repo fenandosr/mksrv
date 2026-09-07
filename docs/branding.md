@@ -5,10 +5,16 @@ client's UI and, since M24, the tenant's Keycloak login page:
 
 ```yaml
 branding:
-  primary: "#0C6D77"      # CTA buttons, links
-  secondary: "#F2A900"    # optional — hover/focus accents
+  primary: "#0C6D77"      # CTA button, focus rings, links
+  secondary: "#16B8A6"    # the other end of the background gradient + accents
   logo_data_uri: "data:image/png;base64,..."
 ```
+
+The login page is a glassmorphism design: the background is a gradient blended
+from `primary` and `secondary` (over a dark scrim that keeps the form legible
+whatever the two hues are), the card is a translucent `backdrop-filter` panel,
+and the form text is light-on-glass. `secondary` defaults to `primary` when
+unset — the gradient still renders, just single-hue.
 
 See ADR 0023 for why it's deliberately just these two colors (not
 background/text) and why the logo is a data URI, not a file.
@@ -51,14 +57,19 @@ in the admin console.
 ## Iterating on the CSS
 
 The shipped `stacks/identity/templates/login-theme/login.css.tmpl` targets
-`keycloak.v2`'s PatternFly class names as a first pass — confirm them against
-your actual login page and adjust if they don't match:
+`keycloak.v2`'s PatternFly v5 class names, verified against a live login page.
+The glass look is tunable through CSS custom properties near the top of the
+template — `--mksrv-glass-blur`, `--mksrv-glass-tint`, `--mksrv-glass-radius`,
+`--mksrv-scrim` — change those before reaching for new selectors. To iterate:
 
-1. Open `https://<keycloak-domain>/realms/<tenant-realm>/account/` (or
-   trigger a login flow from the VPN client / a tenant service) in a browser.
-2. Open devtools, inspect the header/logo area and the primary button.
-3. Compare the classes you see to the ones in `login.css.tmpl`; edit the
-   template and re-run `mksrv tenant apply <id>` to iterate.
+1. Open a real login page — trigger a flow from the VPN client or a tenant
+   service, or `https://<keycloak-domain>/realms/<realm>/login-actions/reset-credentials`.
+2. Open devtools, inspect the card, the header/logo area, and the primary button.
+3. Edit `login.css.tmpl` and re-run `mksrv tenant apply <id>` (renders the
+   theme, sets `loginTheme`, restarts Keycloak once).
+
+`color-mix()` and `backdrop-filter` are wrapped in `@supports` with opaque
+fallbacks, so an old browser degrades to a solid card on a flat gradient.
 
 ## Restore literal stock Keycloak (no mksrv theme at all)
 
