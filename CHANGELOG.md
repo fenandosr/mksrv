@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Change (M26, ADR 0026): the per-tenant Postgres RBAC roles (`<id>`,
+  `<id>_app`, `<id>_web`, `<id>_anon` — five per tenant with `<id>_auth`) become
+  four **cluster-global** buckets `mksrv_owner` / `mksrv_app` / `mksrv_anon` /
+  `mksrv_web`. Only the two roles that carry a password and the
+  `GRANT CONNECT ON db_<id>` gate stay per-tenant: `<id>_login` (humans over the
+  VPN) and `<id>_auth` (PostgREST authenticator). PostgreSQL object privileges
+  are per-database, so a global bucket used in a `db_<id>` session only ever
+  sees that tenant's data — isolation is unchanged. `<id>_login` sessions start
+  as `mksrv_owner` (`ALTER ROLE … SET role`) so DDL ownership and default
+  privileges are uniform; `session_user` and the logs still name the tenant.
+  The `role` claim is the constant `mksrv_web`; `app.pgrst_pre_request()` is one
+  definition. `pg_roles` no longer lists four roles per tenant.
+  **Rollout (no data yet):** drop every `db_<id>` and the old `<id>` /
+  `<id>_{app,web,anon}` roles on the Patroni primary, then `mksrv tenant apply`
+  (recreates everything + rewrites the Keycloak mapper) and redeploy the
+  PostgREST containers for `PGRST_DB_ANON_ROLE=mksrv_anon`.
+
 - Fix (M24): the per-tenant login theme never actually loaded. The realm's
   `loginTheme` was set to `mksrv-<id>` (`cli.themeName`), but the theme
   directory — the `mkdir` in `ensureTenantThemeDirs`, the write target in

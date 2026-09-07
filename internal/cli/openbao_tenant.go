@@ -77,12 +77,14 @@ func tenantDBSecretFields(pg postgresCluster, env, id, password string) []string
 		host = strings.Join(parts, ",")
 		suffix = "?target_session_attrs=read-write"
 	}
+	// The human login role is <id>_login (ADR 0026); the mirrored credential is
+	// the same one in SSM tenant_<id>_password.
 	return []string{
 		"dbname=db_" + id,
-		"username=" + id,
+		"username=" + id + "_login",
 		"password=" + password,
 		"hosts=" + host,
-		"url=postgres://" + id + ":" + password + "@" + host + "/db_" + id + suffix,
+		"url=postgres://" + id + "_login:" + password + "@" + host + "/db_" + id + suffix,
 	}
 }
 
