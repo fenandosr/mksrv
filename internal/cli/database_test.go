@@ -98,29 +98,58 @@ func TestHostNameForPrivateIP(t *testing.T) {
 	}
 }
 
+func TestGlobalRBACRolesSQL(t *testing.T) {
+	t.Parallel()
+	sql := globalRBACRolesSQL()
+	for _, want := range []string{
+		`'CREATE ROLE mksrv_owner NOLOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mksrv_owner')`,
+		`'CREATE ROLE mksrv_web NOLOGIN NOINHERIT' WHERE NOT EXISTS`,
+		`GRANT mksrv_owner, mksrv_app, mksrv_anon TO mksrv_web;`,
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("global RBAC SQL missing %q:\n%s", want, sql)
+		}
+	}
+}
+
 func TestTenantDatabaseSQL(t *testing.T) {
 	t.Parallel()
 	sql := tenantDatabaseSQL("bitabit", "s3cr3t'value", "auth'pw")
 	for _, want := range []string{
-		`CREATE DATABASE %I OWNER %I`,
+		// two per-tenant login roles only
 		`CREATE ROLE %I LOGIN PASSWORD %L`,
-		`\connect "db_bitabit"`,
-		`CREATE SCHEMA IF NOT EXISTS app AUTHORIZATION "bitabit"`,
+		`'bitabit_login'`,
 		`'s3cr3t''value'`, // single quote doubled
 		`CREATE ROLE %I LOGIN NOINHERIT PASSWORD %L`,
+		`'bitabit_auth'`,
 		`'auth''pw'`, // authenticator password quoted
-		// RBAC role graph (M19)
-		`'bitabit_app'`,
-		`'bitabit_web'`,
-		`GRANT "bitabit", "bitabit_app", "bitabit_anon" TO "bitabit_web"`,
-		`GRANT "bitabit_web" TO "bitabit_auth"`,
-		`CREATE OR REPLACE FUNCTION app.pgrst_pre_request()`,
-		`IF grps ? 'admin' OR grps ? 'dev' THEN SET LOCAL ROLE "bitabit";`,
-		`ELSIF grps ? 'apps' THEN SET LOCAL ROLE "bitabit_app";`,
-		`GRANT EXECUTE ON FUNCTION app.pgrst_pre_request() TO "bitabit_web", "bitabit_anon"`,
+		// wired to the global buckets
+		`GRANT mksrv_owner TO "bitabit_login";`,
+		`ALTER ROLE "bitabit_login" SET role TO mksrv_owner;`,
+		`GRANT mksrv_web TO "bitabit_auth";`,
+		`CREATE DATABASE %I OWNER %I`, // owner is the per-tenant login role
+		`'db_bitabit'`,
+		`REVOKE ALL ON DATABASE "db_bitabit" FROM PUBLIC;`,
+		`GRANT CONNECT, CREATE ON DATABASE "db_bitabit" TO "bitabit_login";`,
+		`GRANT CONNECT ON DATABASE "db_bitabit" TO "bitabit_auth";`,
+		`\connect "db_bitabit"`,
+		`CREATE SCHEMA IF NOT EXISTS app AUTHORIZATION mksrv_owner;`,
+		`ALTER SCHEMA app OWNER TO mksrv_owner;`,
+		`GRANT USAGE ON SCHEMA app TO mksrv_app, mksrv_anon, mksrv_web;`,
+		`ALTER DEFAULT PRIVILEGES FOR ROLE mksrv_owner IN SCHEMA app GRANT SELECT ON TABLES TO mksrv_app, mksrv_anon;`,
+		// constant pre-request function
+		`IF grps ? 'admin' OR grps ? 'dev' THEN SET LOCAL ROLE mksrv_owner;`,
+		`ELSIF grps ? 'apps' THEN SET LOCAL ROLE mksrv_app;`,
+		`GRANT EXECUTE ON FUNCTION app.pgrst_pre_request() TO mksrv_web, mksrv_anon;`,
 	} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("SQL missing %q:\n%s", want, sql)
+		}
+	}
+	// no per-tenant privilege buckets any more
+	for _, absent := range []string{`'bitabit_app'`, `'bitabit_web'`, `'bitabit_anon'`} {
+		if strings.Contains(sql, absent) {
+			t.Fatalf("SQL should not create per-tenant bucket %s:\n%s", absent, sql)
 		}
 	}
 }

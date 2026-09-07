@@ -308,3 +308,14 @@ reference.
 - Also fixed: `reconcileConfigd`'s roster never set `LogoDataURI`, so the
   Cloud-IT VPN desktop app never actually received a tenant's logo despite
   the field existing end to end since the client protocol was built.
+
+## M26 — implemented
+
+- Global Postgres RBAC roles (ADR 0026, supersedes the Postgres part of M19).
+  `provisionDatabases` calls `ensureGlobalDBRoles` once (`mksrv_owner` /
+  `mksrv_app` / `mksrv_anon` / `mksrv_web`, `NOLOGIN`), then `tenantDatabaseSQL`
+  creates just `<id>_login` and `<id>_auth` per tenant. `<id>_login` is a
+  member of `mksrv_owner` with `ALTER ROLE … SET role`. `app.pgrst_pre_request()`
+  and `PGRST_DB_ANON_ROLE` are constant; the `role` claim mapper is `mksrv_web`;
+  the OpenBao KV mirror and the pgAdmin registration use `<id>_login`. Tenant
+  data isolation is unchanged (per-database `GRANT CONNECT`).

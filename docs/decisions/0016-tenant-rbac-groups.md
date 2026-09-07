@@ -55,6 +55,11 @@ Four additive groups per tenant realm. A user is in any combination.
   three; a `db-pre-request` plpgsql function reads `request.jwt.claims->groups`
   and `SET LOCAL ROLE`s to `<id>` / `<id>_app` / `<id>_anon`. The group→role
   logic lives in SQL, not Keycloak.
+  **Superseded by ADR 0026 (M26):** the four per-tenant roles above become
+  cluster-global buckets `mksrv_owner` / `mksrv_app` / `mksrv_anon` /
+  `mksrv_web`; only two per-tenant LOGIN roles remain (`<id>_login`,
+  `<id>_auth`). The `role` claim is the constant `mksrv_web`. The RBAC model is
+  unchanged — this is a realisation detail.
 
 ## Consequences
 

@@ -85,8 +85,8 @@ func TestTenantSecretFields(t *testing.T) {
 	// Standalone: the container name, unchanged.
 	std := strings.Join(tenantDBSecretFields(postgresCluster{}, "prod", "acme", "p-w_1"), " ")
 	for _, want := range []string{
-		"dbname=db_acme", "username=acme", "password=p-w_1",
-		"url=postgres://acme:p-w_1@mksrv-postgres:5432/db_acme",
+		"dbname=db_acme", "username=acme_login", "password=p-w_1",
+		"url=postgres://acme_login:p-w_1@mksrv-postgres:5432/db_acme",
 	} {
 		if !strings.Contains(std, want) {
 			t.Fatalf("standalone db fields missing %q: %s", want, std)
@@ -103,7 +103,7 @@ func TestTenantSecretFields(t *testing.T) {
 		{Host: "core1", IP: "10.20.0.11"}, {Host: "core2", IP: "10.20.0.12"}, {Host: "core3", IP: "10.20.0.13"},
 	}}, "prod", "acme", "p-w_1"), " ")
 	nodeList := "core1." + "prod.mksrv:5432,prod-core2." + "prod.mksrv:5432,prod-core3." + "prod.mksrv:5432"
-	if !strings.Contains(cl, "url=postgres://acme:p-w_1@prod-"+nodeList+"/db_acme?target_session_attrs=read-write") {
+	if !strings.Contains(cl, "url=postgres://acme_login:p-w_1@prod-"+nodeList+"/db_acme?target_session_attrs=read-write") {
 		t.Fatalf("cluster db url wrong:\n%s", cl)
 	}
 	if !strings.Contains(cl, "hosts=prod-"+nodeList) {

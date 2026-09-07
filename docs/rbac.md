@@ -33,13 +33,26 @@ users:
 | Change what's published (`forwards`, `dns`, mesh nodes, `stacks`) | ✅³ | — | — | — |
 
 ¹ subject to the tenant's Headscale ACL.
-² `apps` requests land on the `<id>_app` Postgres role, which has `SELECT` on
+² `apps` requests land on the `mksrv_app` Postgres role, which has `SELECT` on
 `app` by default; the dev opens `INSERT`/`UPDATE`/`DELETE` per-table with `GRANT`
 / RLS. PostgREST picks the role from the token's `groups` claim via a
-`db-pre-request` function (`admin`/`dev` → `<id>`, `apps` → `<id>_app`,
-token-less → `<id>_anon`).
+`db-pre-request` function (`admin`/`dev` → `mksrv_owner`, `apps` → `mksrv_app`,
+token-less → `mksrv_anon`). Those buckets are cluster-global (ADR 0026) but
+scoped to the tenant by the connection — PostgREST connects to `db_<id>` as the
+per-tenant `<id>_auth` role.
 ³ via a reviewed PR to `tenants/<id>.yaml` — the admin is the CODEOWNER; there is
 no runtime "publish" API.
+
+## Connecting directly to Postgres
+
+A `dev` / `admin` connects over the VPN as the per-tenant role **`<id>_login`**
+(password in SSM `tenant_<id>_password`, mirrored to
+`kv/tenants/<id>/database`). It can only connect to `db_<id>`. Every session
+starts as `mksrv_owner` (ADR 0026), so `SELECT current_user` returns
+`mksrv_owner` while `session_user` — and the Postgres logs — stay `<id>_login`.
+`RESET role` steps back to `<id>_login` (fewer privileges). PostgreSQL role
+*names* are cluster-wide, so `\du` lists `mksrv_*` plus every tenant's
+`<id>_login` / `<id>_auth`; that reveals no data and grants no access.
 
 ## admin vs dev
 
@@ -66,5 +79,9 @@ clients, protocol mappers, or realm settings.
   roles bound on the `groups` claim. *Done.*
 - **M19** — Postgres `<id>_app` role; PostgREST resolves the effective role from
   the token's `groups` claim (`db-pre-request` function). *Done.*
+- **M26** — the per-tenant Postgres RBAC roles collapse to cluster-global
+  buckets `mksrv_owner` / `mksrv_app` / `mksrv_anon` / `mksrv_web` (ADR 0026);
+  only `<id>_login` / `<id>_auth` stay per-tenant. Isolation and the group→role
+  mapping are unchanged. *Done.*
 
 The RBAC model is fully enforced across Keycloak, the VPN, OpenBao, and Postgres.

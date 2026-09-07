@@ -151,7 +151,7 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 				ClientID:        vpnClientID,
 				Public:          true,
 				RedirectURIs:    vpnRedirectURIs,
-				HardcodedClaims: map[string]string{"role": id + "_web"},
+				HardcodedClaims: map[string]string{"role": dbWebRole}, // global PostgREST landing role (ADR 0026)
 				GroupsClaim:     true,
 			},
 			{ClientID: configdClientID, Public: false, RedirectURIs: []string{}},

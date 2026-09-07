@@ -158,6 +158,21 @@ func (f *fleet) provisionDatabases(ctx context.Context, printer ui.Printer, tena
 	pg, client = f.ensurePrimary(ctx, client, pg)
 	defer client.Close()
 
+	psql := func(db, sql string) error {
+		cmd := fmt.Sprintf(
+			"sudo podman exec -e PGPASSWORD=%s -i %s psql -v ON_ERROR_STOP=1 -U %s -d %s",
+			quoteArg(superPass), pg.container, pg.psqlUser, db,
+		)
+		_, e := client.RunInput(ctx, cmd, []byte(sql))
+		return e
+	}
+
+	// The RBAC privilege buckets are cluster-global (ADR 0026): create them
+	// once, not per tenant.
+	if err := psql("postgres", globalRBACRolesSQL()); err != nil {
+		return fmt.Errorf("ensure global RBAC roles: %w", err)
+	}
+
 	var pgTenants []string
 	for _, id := range tenants {
 		if !slices.Contains(f.data.Tenants[id].Stacks, "database") {
@@ -171,16 +186,11 @@ func (f *fleet) provisionDatabases(ctx context.Context, printer ui.Printer, tena
 		if err != nil {
 			return err
 		}
-		sql := tenantDatabaseSQL(id, dbPass, authPass)
-		cmd := fmt.Sprintf(
-			"sudo podman exec -e PGPASSWORD=%s -i %s psql -v ON_ERROR_STOP=1 -U %s -d postgres",
-			quoteArg(superPass), pg.container, pg.psqlUser,
-		)
-		if _, err := client.RunInput(ctx, cmd, []byte(sql)); err != nil {
+		if err := psql("postgres", tenantDatabaseSQL(id, dbPass, authPass)); err != nil {
 			return fmt.Errorf("provision database for %s: %w", id, err)
 		}
 		pgTenants = append(pgTenants, id)
-		printer.Success("tenant %s: database db_%s and role %s ready", id, id, id)
+		printer.Success("tenant %s: database db_%s and role %s_login ready", id, id, id)
 	}
 
 	if len(pgTenants) > 0 {
@@ -212,7 +222,7 @@ func loadPgAdminServers(ctx context.Context, client *sshx.Client, pgadminUser, p
 			"Host":          pgHost,
 			"Port":          5432,
 			"MaintenanceDB": "db_" + id,
-			"Username":      id,
+			"Username":      id + "_login",
 			"SSLMode":       "prefer",
 			"Shared":        true,
 		}
@@ -234,55 +244,93 @@ func loadPgAdminServers(ctx context.Context, client *sshx.Client, pgadminUser, p
 	return err
 }
 
-func tenantDatabaseSQL(id, password, authPassword string) string {
-	db := "db_" + id
-	role := id           // dev / admin: owns schema app, full DML + DDL
-	app := id + "_app"   // apps group: SELECT by default, dev grants writes per table
-	anon := id + "_anon" // token-less
-	web := id + "_web"   // PostgREST impersonation landing role
-	auth := id + "_auth" // authenticator (connection role)
-	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
-	create := func(name, opts string) string {
-		return fmt.Sprintf(`SELECT format('CREATE ROLE %%I %s', %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, opts, q(name), q(name))
-	}
-	return strings.Join([]string{
-		fmt.Sprintf(`SELECT format('CREATE ROLE %%I LOGIN PASSWORD %%L', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(role), q(password), q(role)),
-		fmt.Sprintf(`ALTER ROLE %q WITH LOGIN PASSWORD %s;`, role, q(password)),
-		fmt.Sprintf(`SELECT format('CREATE DATABASE %%I OWNER %%I', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = %s)\gexec`, q(db), q(role), q(db)),
-		fmt.Sprintf(`REVOKE ALL ON DATABASE %q FROM PUBLIC;`, db),
-		fmt.Sprintf(`GRANT CONNECT, CREATE ON DATABASE %q TO %q;`, db, role),
-		// PostgREST role graph (ADR 0016). auth logs in; a db-pre-request
-		// function switches from web to role / app / anon by the token's groups.
-		create(anon, "NOLOGIN"),
-		create(app, "NOLOGIN"),
-		create(web, "NOLOGIN NOINHERIT"),
-		fmt.Sprintf(`SELECT format('CREATE ROLE %%I LOGIN NOINHERIT PASSWORD %%L', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(auth), q(authPassword), q(auth)),
-		fmt.Sprintf(`ALTER ROLE %q WITH LOGIN NOINHERIT PASSWORD %s;`, auth, q(authPassword)),
-		fmt.Sprintf(`GRANT %q, %q, %q TO %q;`, role, app, anon, web),
-		fmt.Sprintf(`GRANT %q TO %q;`, web, auth),
-		fmt.Sprintf(`GRANT CONNECT ON DATABASE %q TO %q;`, db, auth),
-		fmt.Sprintf(`\connect %q`, db),
-		fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS app AUTHORIZATION %q;`, role),
-		fmt.Sprintf(`ALTER DATABASE %q SET search_path TO app, public;`, db),
-		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %q IN SCHEMA app GRANT ALL ON TABLES TO %q;`, role, role),
-		fmt.Sprintf(`GRANT USAGE ON SCHEMA app TO %q, %q, %q;`, anon, app, web),
-		fmt.Sprintf(`GRANT SELECT ON ALL TABLES IN SCHEMA app TO %q, %q;`, anon, app),
-		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %q IN SCHEMA app GRANT SELECT ON TABLES TO %q, %q;`, role, anon, app),
-		// db-pre-request: token-less requests early-return (PostgREST already
-		// set anon); otherwise SET LOCAL ROLE by the `groups` claim.
-		fmt.Sprintf(`CREATE OR REPLACE FUNCTION app.pgrst_pre_request() RETURNS void LANGUAGE plpgsql AS $mksrv$
+// RBAC roles (ADR 0026). The privilege buckets are cluster-global — their job
+// is identical for every tenant and PostgreSQL object privileges are already
+// per-database, so a bucket used in a db_<id> session only ever sees that
+// tenant's data. mksrv sets no role attributes on them.
+const (
+	dbOwnerRole = "mksrv_owner" // owns schema app + its objects in every tenant DB; the admin/dev DDL identity
+	dbAppRole   = "mksrv_app"   // apps group: SELECT on app by default
+	dbAnonRole  = "mksrv_anon"  // token-less
+	dbWebRole   = "mksrv_web"   // PostgREST impersonation landing role
+)
+
+// pgrstPreRequestSQL is now tenant-independent — it targets the global buckets.
+// Token-less requests early-return (PostgREST already set the anon role);
+// otherwise SET LOCAL ROLE by the `groups` claim.
+const pgrstPreRequestSQL = `CREATE OR REPLACE FUNCTION app.pgrst_pre_request() RETURNS void LANGUAGE plpgsql AS $mksrv$
 DECLARE claims text := current_setting('request.jwt.claims', true); grps jsonb;
 BEGIN
   IF claims IS NULL OR claims = '' THEN RETURN; END IF;
   grps := coalesce((claims::jsonb) -> 'groups', '[]'::jsonb);
-  IF grps ? 'admin' OR grps ? 'dev' THEN SET LOCAL ROLE %q;
-  ELSIF grps ? 'apps' THEN SET LOCAL ROLE %q;
-  ELSE SET LOCAL ROLE %q;
+  IF grps ? 'admin' OR grps ? 'dev' THEN SET LOCAL ROLE mksrv_owner;
+  ELSIF grps ? 'apps' THEN SET LOCAL ROLE mksrv_app;
+  ELSE SET LOCAL ROLE mksrv_anon;
   END IF;
 END;
-$mksrv$;`, role, app, anon),
-		fmt.Sprintf(`ALTER FUNCTION app.pgrst_pre_request() OWNER TO %q;`, role),
-		fmt.Sprintf(`GRANT EXECUTE ON FUNCTION app.pgrst_pre_request() TO %q, %q;`, web, anon),
+$mksrv$;`
+
+// globalRBACRolesSQL creates the four cluster-global buckets and their
+// membership graph. Idempotent; run once per `mksrv tenant apply`, before any
+// tenant database. Fixed role names — no user input, so a plain \gexec guard is
+// enough.
+func globalRBACRolesSQL() string {
+	create := func(name, opts string) string {
+		return fmt.Sprintf(`SELECT 'CREATE ROLE %s %s' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '%s')\gexec`, name, opts, name)
+	}
+	return strings.Join([]string{
+		create(dbOwnerRole, "NOLOGIN"),
+		create(dbAppRole, "NOLOGIN"),
+		create(dbAnonRole, "NOLOGIN"),
+		create(dbWebRole, "NOLOGIN NOINHERIT"),
+		fmt.Sprintf(`GRANT %s, %s, %s TO %s;`, dbOwnerRole, dbAppRole, dbAnonRole, dbWebRole),
+		"",
+	}, "\n")
+}
+
+// tenantDatabaseSQL provisions one tenant: the two per-tenant LOGIN roles (their
+// password + the db CONNECT grant are the isolation boundary), the database,
+// and the `app` schema wired to the global buckets (ADR 0026). Idempotent.
+func tenantDatabaseSQL(id, password, authPassword string) string {
+	db := "db_" + id
+	login := id + "_login" // humans (admin/dev) over the VPN; member of mksrv_owner
+	auth := id + "_auth"   // PostgREST authenticator; member of mksrv_web
+	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	return strings.Join([]string{
+		fmt.Sprintf(`SELECT format('CREATE ROLE %%I LOGIN PASSWORD %%L', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(login), q(password), q(login)),
+		fmt.Sprintf(`ALTER ROLE %q WITH LOGIN PASSWORD %s;`, login, q(password)),
+		fmt.Sprintf(`GRANT %s TO %q;`, dbOwnerRole, login),
+		// Objects are owned by whoever runs CREATE, not an inherited role. This
+		// makes every <id>_login session start as mksrv_owner, so DDL — direct
+		// or via PostgREST's SET LOCAL ROLE mksrv_owner — always produces
+		// mksrv_owner-owned objects and one set of default privileges applies.
+		// session_user stays <id>_login (logs / pg_stat_activity keep the
+		// tenant); only current_user reads mksrv_owner.
+		fmt.Sprintf(`ALTER ROLE %q SET role TO %s;`, login, dbOwnerRole),
+
+		fmt.Sprintf(`SELECT format('CREATE ROLE %%I LOGIN NOINHERIT PASSWORD %%L', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(auth), q(authPassword), q(auth)),
+		fmt.Sprintf(`ALTER ROLE %q WITH LOGIN NOINHERIT PASSWORD %s;`, auth, q(authPassword)),
+		fmt.Sprintf(`GRANT %s TO %q;`, dbWebRole, auth),
+
+		// db_<id> owner stays the per-tenant role: a global database owner could
+		// ALTER DATABASE db_<other> from any session.
+		fmt.Sprintf(`SELECT format('CREATE DATABASE %%I OWNER %%I', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = %s)\gexec`, q(db), q(login), q(db)),
+		fmt.Sprintf(`REVOKE ALL ON DATABASE %q FROM PUBLIC;`, db),
+		fmt.Sprintf(`GRANT CONNECT, CREATE ON DATABASE %q TO %q;`, db, login),
+		fmt.Sprintf(`GRANT CONNECT ON DATABASE %q TO %q;`, db, auth),
+
+		fmt.Sprintf(`\connect %q`, db),
+		fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS app AUTHORIZATION %s;`, dbOwnerRole),
+		fmt.Sprintf(`ALTER SCHEMA app OWNER TO %s;`, dbOwnerRole),
+		fmt.Sprintf(`ALTER DATABASE %q SET search_path TO app, public;`, db),
+		fmt.Sprintf(`GRANT USAGE ON SCHEMA app TO %s, %s, %s;`, dbAppRole, dbAnonRole, dbWebRole),
+		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %s IN SCHEMA app GRANT ALL ON TABLES TO %s;`, dbOwnerRole, dbOwnerRole),
+		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %s IN SCHEMA app GRANT SELECT ON TABLES TO %s, %s;`, dbOwnerRole, dbAppRole, dbAnonRole),
+		fmt.Sprintf(`GRANT SELECT ON ALL TABLES IN SCHEMA app TO %s, %s;`, dbAppRole, dbAnonRole),
+
+		pgrstPreRequestSQL,
+		fmt.Sprintf(`ALTER FUNCTION app.pgrst_pre_request() OWNER TO %s;`, dbOwnerRole),
+		fmt.Sprintf(`GRANT EXECUTE ON FUNCTION app.pgrst_pre_request() TO %s, %s;`, dbWebRole, dbAnonRole),
 		"",
 	}, "\n")
 }
