@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Fix (M24): the per-tenant login theme never actually loaded. The realm's
+  `loginTheme` was set to `mksrv-<id>` (`cli.themeName`), but the theme
+  directory — the `mkdir` in `ensureTenantThemeDirs`, the write target in
+  `provisionTenantBranding`, the `stacks/identity` per-tenant template dst, and
+  the bind mount in `keycloak.container.tmpl` — all used the bare `<id>`. So
+  Keycloak looked for a theme that wasn't on disk and silently served the
+  default `keycloak.v2` for every realm. All four now use `mksrv-<id>`.
+  Remediation on a live fleet: `mksrv apply` (re-renders the Keycloak unit with
+  the corrected mounts + `mkdir`s the new dirs) then `mksrv tenant apply` (writes
+  the theme files there, restarts Keycloak); the stale `themes/<id>/` dirs on
+  the identity host can then be deleted.
+
 - Feature (M24): the tenant login theme is now a glassmorphism design — a
   background gradient blended from `branding.primary` and `branding.secondary`
   (with a dark scrim that keeps text legible whatever the two hues are), a

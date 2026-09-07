@@ -3,6 +3,8 @@
 package cli
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/fenandosr/mksrv/internal/infra"
@@ -89,9 +91,32 @@ func TestThemeDirsCommand(t *testing.T) {
 		t.Fatalf("themeDirsCommand(nil) = %q", got)
 	}
 	got := themeDirsCommand([]string{"bitabit", "hg"})
-	want := "sudo mkdir -p /var/lib/mksrv/stacks/identity/themes/'bitabit'/login/resources/css" +
-		" /var/lib/mksrv/stacks/identity/themes/'hg'/login/resources/css"
+	want := "sudo mkdir -p /var/lib/mksrv/stacks/identity/themes/'mksrv-bitabit'/login/resources/css" +
+		" /var/lib/mksrv/stacks/identity/themes/'mksrv-hg'/login/resources/css"
 	if got != want {
 		t.Fatalf("themeDirsCommand() = %q, want %q", got, want)
+	}
+}
+
+// The Keycloak theme name has to agree in four places or Keycloak silently
+// serves the default theme: cli.themeName (the realm loginTheme), the mkdir in
+// themeDirsCommand, the write target in themeFiles, and the container mount in
+// keycloak.container.tmpl (covered by render_test). This pins the three
+// cli-side ones to themeName.
+func TestThemeNameConsistency(t *testing.T) {
+	t.Parallel()
+	const id = "hg"
+	name := themeName(id)
+	if name != "mksrv-hg" {
+		t.Fatalf("themeName(%q) = %q, want mksrv-hg", id, name)
+	}
+	seg := "/themes/" + name + "/login/"
+	if !strings.Contains(themeDirsCommand([]string{id}), "/themes/"+quoteArg(name)+"/login/") {
+		t.Errorf("themeDirsCommand does not target %s: %s", seg, themeDirsCommand([]string{id}))
+	}
+	for _, tf := range themeFiles {
+		if !strings.Contains(fmt.Sprintf(tf.dst, name), seg) {
+			t.Errorf("themeFiles dst %q does not target %s once filled", tf.dst, seg)
+		}
 	}
 }

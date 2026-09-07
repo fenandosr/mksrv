@@ -114,8 +114,8 @@ func TestStackRendersIdentity(t *testing.T) {
 	}
 	kc := string(tfiles["/etc/containers/systemd/mksrv-keycloak.container"])
 	for _, want := range []string{
-		"Volume=/var/lib/mksrv/stacks/identity/themes/bitabit:/opt/keycloak/themes/bitabit:Z,ro",
-		"Volume=/var/lib/mksrv/stacks/identity/themes/hg:/opt/keycloak/themes/hg:Z,ro",
+		"Volume=/var/lib/mksrv/stacks/identity/themes/mksrv-bitabit:/opt/keycloak/themes/mksrv-bitabit:Z,ro",
+		"Volume=/var/lib/mksrv/stacks/identity/themes/mksrv-hg:/opt/keycloak/themes/mksrv-hg:Z,ro",
 	} {
 		if !strings.Contains(kc, want) {
 			t.Fatalf("keycloak unit missing %q:\n%s", want, kc)
@@ -135,11 +135,13 @@ func TestStackRendersTenantLoginTheme(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stack() error = %v", err)
 	}
-	props := string(files["/var/lib/mksrv/stacks/identity/themes/bitabit/login/theme.properties"])
+	// Theme dir is themes/mksrv-<id> — must match the realm loginTheme and the
+	// keycloak.container mount, or Keycloak silently falls back to default.
+	props := string(files["/var/lib/mksrv/stacks/identity/themes/mksrv-bitabit/login/theme.properties"])
 	if !strings.Contains(props, "parent=keycloak.v2") || !strings.Contains(props, "styles=css/styles.css css/login.css") {
 		t.Fatalf("theme.properties wrong:\n%s", props)
 	}
-	css := string(files["/var/lib/mksrv/stacks/identity/themes/bitabit/login/resources/css/login.css"])
+	css := string(files["/var/lib/mksrv/stacks/identity/themes/mksrv-bitabit/login/resources/css/login.css"])
 	if !strings.Contains(css, "--mksrv-primary: #112233;") {
 		t.Fatalf("login.css missing primary color:\n%s", css)
 	}
@@ -162,7 +164,7 @@ func TestStackRendersTenantLoginTheme(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stack() error = %v", err)
 	}
-	css = string(files["/var/lib/mksrv/stacks/identity/themes/hg/login/resources/css/login.css"])
+	css = string(files["/var/lib/mksrv/stacks/identity/themes/mksrv-hg/login/resources/css/login.css"])
 	for _, want := range []string{
 		"--mksrv-secondary: #445566;",
 		`background-image: url("data:image/png;base64,AAAA");`,

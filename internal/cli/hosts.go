@@ -371,7 +371,7 @@ func themeDirsCommand(ids []string) string {
 	var b strings.Builder
 	b.WriteString("sudo mkdir -p")
 	for _, id := range ids {
-		fmt.Fprintf(&b, " /var/lib/mksrv/stacks/identity/themes/%s/login/resources/css", quoteArg(id))
+		fmt.Fprintf(&b, " /var/lib/mksrv/stacks/identity/themes/%s/login/resources/css", quoteArg(themeName(id)))
 	}
 	return b.String()
 }
