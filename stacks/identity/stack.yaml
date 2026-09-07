@@ -40,11 +40,13 @@ templates:
   - src: templates/identity.caddy.tmpl
     dst: /var/lib/mksrv/caddy.d/10-identity.caddy
     scope: shared
+  # themes/mksrv-<id> — the `mksrv-` prefix must match cli.themeName, the realm
+  # loginTheme, and the theme mount in keycloak.container.tmpl.
   - src: templates/login-theme/theme.properties.tmpl
-    dst: /var/lib/mksrv/stacks/identity/themes/{tenant}/login/theme.properties
+    dst: /var/lib/mksrv/stacks/identity/themes/mksrv-{tenant}/login/theme.properties
     scope: per_tenant
   - src: templates/login-theme/login.css.tmpl
-    dst: /var/lib/mksrv/stacks/identity/themes/{tenant}/login/resources/css/login.css
+    dst: /var/lib/mksrv/stacks/identity/themes/mksrv-{tenant}/login/resources/css/login.css
     scope: per_tenant
 hooks:
   post_deploy:
