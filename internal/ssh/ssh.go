@@ -23,11 +23,14 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-// Target identifies one host to connect to.
+// Target identifies one host to connect to. When Jump is set the TCP
+// connection is opened through that host first (an SSH bastion / ProxyJump);
+// the operator's key authenticates both hops (ADR 0027).
 type Target struct {
 	Host string
 	Port int
 	User string
+	Jump *Target
 }
 
 func (t Target) addr() string {
@@ -43,10 +46,12 @@ type Client struct {
 	target Target
 	ssh    *ssh.Client
 	sftp   *sftp.Client
+	jump   *Client // the bastion connection, kept open for this client's lifetime
 }
 
 // Dial connects to target, verifying the host key against knownHostsPath.
-// ErrUnknownHostKey is returned when the host is not yet enrolled.
+// ErrUnknownHostKey is returned when the host is not yet enrolled. When
+// target.Jump is set the connection is tunnelled through that bastion.
 func Dial(ctx context.Context, target Target, knownHostsPath string) (*Client, error) {
 	callback, err := hostKeyCallback(knownHostsPath)
 	if err != nil {
@@ -63,14 +68,17 @@ func Dial(ctx context.Context, target Target, knownHostsPath string) (*Client, e
 		Timeout:         15 * time.Second,
 	}
 
-	dialer := net.Dialer{Timeout: config.Timeout}
-	conn, err := dialer.DialContext(ctx, "tcp", target.addr())
+	var jump *Client
+	conn, err := dialTCP(ctx, target, config.Timeout, knownHostsPath, &jump)
 	if err != nil {
-		return nil, fmt.Errorf("dial %s: %w", target.addr(), err)
+		return nil, err
 	}
 	sshConn, channels, requests, err := ssh.NewClientConn(conn, target.addr(), config)
 	if err != nil {
 		_ = conn.Close()
+		if jump != nil {
+			_ = jump.Close()
+		}
 		if isHostKeyError(err) {
 			return nil, fmt.Errorf("%w: %s", ErrUnknownHostKey, target.Host)
 		}
@@ -81,12 +89,40 @@ func Dial(ctx context.Context, target Target, knownHostsPath string) (*Client, e
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
 		_ = client.Close()
+		if jump != nil {
+			_ = jump.Close()
+		}
 		return nil, fmt.Errorf("start sftp on %s: %w", target.Host, err)
 	}
-	return &Client{target: target, ssh: client, sftp: sftpClient}, nil
+	return &Client{target: target, ssh: client, sftp: sftpClient, jump: jump}, nil
 }
 
-// Close tears down the SFTP subsystem and the connection.
+// dialTCP opens the raw TCP connection to target — directly, or through
+// target.Jump when set. On success via a jump, *jumpOut holds the bastion
+// client the caller must close alongside the connection.
+func dialTCP(ctx context.Context, target Target, timeout time.Duration, knownHostsPath string, jumpOut **Client) (net.Conn, error) {
+	if target.Jump == nil {
+		dialer := net.Dialer{Timeout: timeout}
+		conn, err := dialer.DialContext(ctx, "tcp", target.addr())
+		if err != nil {
+			return nil, fmt.Errorf("dial %s: %w", target.addr(), err)
+		}
+		return conn, nil
+	}
+	bastion, err := Dial(ctx, *target.Jump, knownHostsPath)
+	if err != nil {
+		return nil, fmt.Errorf("dial bastion %s: %w", target.Jump.Host, err)
+	}
+	conn, err := bastion.ssh.DialContext(ctx, "tcp", target.addr())
+	if err != nil {
+		_ = bastion.Close()
+		return nil, fmt.Errorf("dial %s via %s: %w", target.addr(), target.Jump.Host, err)
+	}
+	*jumpOut = bastion
+	return conn, nil
+}
+
+// Close tears down the SFTP subsystem, the connection, and any bastion.
 func (c *Client) Close() error {
 	var errs []error
 	if c.sftp != nil {
@@ -94,6 +130,9 @@ func (c *Client) Close() error {
 	}
 	if c.ssh != nil {
 		errs = append(errs, c.ssh.Close())
+	}
+	if c.jump != nil {
+		errs = append(errs, c.jump.Close())
 	}
 	return errors.Join(errs...)
 }

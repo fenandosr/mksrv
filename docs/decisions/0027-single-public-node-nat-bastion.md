@@ -33,8 +33,9 @@ and S3 for `backup`.
   gains two roles: NAT for the private subnets and SSH bastion.
 - **`core*` and `appd` move to private subnets**, one per AZ, no EIP,
   `map_public_ip_on_launch = false`. `infra/modules/network` grows a private
-  subnet per AZ alongside each public one; the CLI places every non-`base` host
-  in a private subnet and `edge` in the public one.
+  subnet per AZ (`cidrsubnet(cidr, 8, i + 100)`) alongside each public one;
+  `infra/root` places every non-`base` host in a private subnet and `edge` in
+  the public one, gated on `nat_via_edge` (`length(aws_hosts) > 1`).
 - "Public" is **derived, not configured**: the host carrying `base` is `edge`
   (already how `infra/root` computes `base_host`). No new `deployment.yaml`
   field. A single-node fleet is unaffected — its one host carries `base`, so it
@@ -46,9 +47,11 @@ and S3 for `backup`.
   private route table with `0.0.0.0/0 → edge`'s ENI, and associates the private
   subnets with it. This route lives in `infra/root` (it needs `edge`'s network
   interface id), not the `network` module.
-- The bootstrap script enables IP forwarding and installs an `nftables`
-  masquerade rule for the VPC CIDR on `edge` only. `BootstrapParams` gains
-  `NATForCIDR` (empty on every host but `edge`); `BootstrapVersion` bumps.
+- The bootstrap script enables IP forwarding and turns on firewalld masquerade
+  + intra-zone forwarding on the public zone, on `edge` only. `BootstrapParams`
+  gains `NAT bool` (true only for the `base` host of a multi-host fleet);
+  `BootstrapVersion` 10 → 11. firewalld masquerade needs no CIDR — it SNATs
+  everything forwarded out of the zone, and nothing else routes through `edge`.
 - An **S3 gateway VPC endpoint** (free) is added so `backup` traffic and image
   layers served from S3 skip the NAT path entirely.
 
@@ -73,9 +76,11 @@ and S3 for `backup`.
 ### Security groups
 
 - The `mgmt_cidr → :22` ingress rule (including `mgmt_cidr: auto`) is applied to
-  **`edge` only**. Inner hosts accept `:22` only from `edge`'s security group.
-- `intra_vpc` (all TCP within the VPC CIDR) and `all egress` are unchanged — the
-  VPC boundary stays the data-plane perimeter.
+  **`edge` only**. Inner hosts have no public SSH rule at all; the existing
+  `intra_vpc` rule (all TCP from the VPC CIDR) is what lets `edge` jump to them
+  — the same VPC-boundary-as-perimeter posture that already governs every
+  data-plane port.
+- `intra_vpc` and `all egress` are unchanged.
 - Recovery from an operator IP lockout is still one `mksrv apply --infra-only`,
   now touching only `edge`'s SG.
 
@@ -100,7 +105,7 @@ and S3 for `backup`.
 - **Tooling touchpoints**: `internal/ssh` (`Target.Jump`, `Dial`),
   `internal/cli/hosts.go` (`openFleet` jump wiring, bootstrap ordering),
   `internal/infra` (private-host `ManagementIP`, an `edge` reference in the
-  outputs), `internal/deploy` bootstrap (`NATForCIDR`, `BootstrapVersion`),
+  outputs), `internal/deploy` bootstrap (`NAT`, `BootstrapVersion` 11),
   `infra/modules/network` (private subnets), `infra/modules/aws-host`
   (conditional EIP, private `subnet_id`, `source_dest_check`, SSH SG source),
   `infra/root` (private route table → `edge` ENI, S3 gateway endpoint).

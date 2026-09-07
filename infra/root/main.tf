@@ -73,12 +73,25 @@ module "network" {
 }
 
 locals {
+  # ADR 0027: a fleet with more than one host puts every non-`base` host on a
+  # private subnet with no public IP; `edge` (the `base` host) is the only
+  # public node and acts as NAT + SSH bastion. A single-node fleet stays on the
+  # public subnet.
+  nat_via_edge = length(local.aws_hosts) > 1
+
   # Round-robin AWS hosts across the AZ subnets by sorted host name, so a
-  # 3-node cluster (pg1/pg2/pg3) lands one node per AZ.
+  # 3-node cluster lands one node per AZ. `edge` always takes public subnet 0
+  # (a stable AZ); private hosts round-robin the private subnets.
   sorted_aws_hosts = sort(keys(local.aws_hosts))
   host_subnet = {
     for i, name in local.sorted_aws_hosts :
-    name => module.network.subnet_ids[i % length(module.network.subnet_ids)]
+    name => (
+      !local.nat_via_edge
+      ? module.network.subnet_ids[i % length(module.network.subnet_ids)]
+      : name == local.base_host
+      ? module.network.subnet_ids[0]
+      : module.network.private_subnet_ids[i % length(module.network.private_subnet_ids)]
+    )
   }
 }
 
@@ -190,6 +203,37 @@ module "aws_host" {
   backup_bucket_arn   = contains(each.value.stacks, "backup") && length(local.backup_hosts) > 0 ? aws_s3_bucket.backups[0].arn : ""
 
   advertise_exitnode = try(each.value.advertise_exitnode, false)
+  is_nat             = local.nat_via_edge && each.key == local.base_host
+}
+
+# ADR 0027: the private subnets default-route through the edge's ENI, which runs
+# as a NAT instance. Created here (not in the `network` module) because it needs
+# the edge instance's network interface.
+resource "aws_route_table" "private" {
+  count  = local.nat_via_edge ? 1 : 0
+  vpc_id = module.network.vpc_id
+  route {
+    cidr_block           = "0.0.0.0/0"
+    network_interface_id = module.aws_host[local.base_host].primary_network_interface_id
+  }
+  tags = { "mksrv:env" = local.env, Name = "mksrv-${local.env}-private" }
+}
+
+resource "aws_route_table_association" "private" {
+  count          = local.nat_via_edge ? length(module.network.private_subnet_ids) : 0
+  subnet_id      = module.network.private_subnet_ids[count.index]
+  route_table_id = aws_route_table.private[0].id
+}
+
+# Free gateway endpoint so S3 traffic (restic backups, image layers served from
+# S3) never transits the NAT / cross-AZ hop.
+resource "aws_vpc_endpoint" "s3" {
+  count             = local.nat_via_edge ? 1 : 0
+  vpc_id            = module.network.vpc_id
+  service_name      = "com.amazonaws.${local.region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [aws_route_table.private[0].id, module.network.public_route_table_id]
+  tags              = { "mksrv:env" = local.env }
 }
 
 module "existing_host" {

@@ -1,7 +1,8 @@
 # One Rocky Linux 9 (arm64) EC2 host with an attached gp3 data volume. The host
-# carrying `base` is the edge: it gets an Elastic IP and public 80/443. Every
-# host gets SSH from the management CIDR and an instance profile that can read
-# its own SSM parameter path and use Session Manager.
+# carrying `base` is the edge: it gets an Elastic IP, public 80/443, and SSH
+# from the management CIDR. Every other host is private — no public IP, SSH only
+# from within the VPC (the edge bastion, ADR 0027). All hosts get an instance
+# profile that can read their own SSM parameter path and use Session Manager.
 
 terraform {
   required_version = ">= 1.8.0"
@@ -52,8 +53,11 @@ resource "aws_security_group" "host" {
   }
 }
 
+# Only the edge takes SSH from the operator's management network. Private hosts
+# are reached by jumping through the edge, which the intra-VPC rule already
+# permits (ADR 0027).
 resource "aws_vpc_security_group_ingress_rule" "ssh_v4" {
-  count             = local.mgmt_is_ipv6 ? 0 : 1
+  count             = local.is_edge && !local.mgmt_is_ipv6 ? 1 : 0
   security_group_id = aws_security_group.host.id
   description       = "SSH from management network"
   cidr_ipv4         = var.mgmt_cidr
@@ -63,7 +67,7 @@ resource "aws_vpc_security_group_ingress_rule" "ssh_v4" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "ssh_v6" {
-  count             = local.mgmt_is_ipv6 ? 1 : 0
+  count             = local.is_edge && local.mgmt_is_ipv6 ? 1 : 0
   security_group_id = aws_security_group.host.id
   description       = "SSH from management network"
   cidr_ipv6         = var.mgmt_cidr
@@ -177,6 +181,8 @@ resource "aws_instance" "host" {
   key_name                = var.key_name != "" ? var.key_name : null
   monitoring              = false
   disable_api_termination = false
+  # The NAT instance forwards packets whose source is a private host, not itself.
+  source_dest_check = !var.is_nat
 
   root_block_device {
     volume_type = "gp3"
@@ -239,7 +245,10 @@ resource "aws_volume_attachment" "extra" {
   instance_id = aws_instance.host.id
 }
 
+# Only the edge is public. A private host reaches the internet through the edge
+# NAT and is managed by jumping through it (ADR 0027).
 resource "aws_eip" "host" {
+  count    = local.is_edge ? 1 : 0
   domain   = "vpc"
   instance = aws_instance.host.id
   tags     = merge(local.tags, { Name = local.name })

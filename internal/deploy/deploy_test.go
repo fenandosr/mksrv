@@ -11,6 +11,7 @@ func TestRenderBootstrapEdge(t *testing.T) {
 	t.Parallel()
 	script, err := RenderBootstrap(BootstrapParams{
 		IsEdge:       true,
+		NAT:          true,
 		Timezone:     "America/Mexico_City",
 		SwapMB:       1024,
 		DataVolumeID: "vol-0base",
@@ -25,17 +26,30 @@ func TestRenderBootstrapEdge(t *testing.T) {
 		"TARGET_SWAP_MB=1024",
 		"SELINUX=enforcing",
 		"--add-service=http",
+		"--add-masquerade",
+		"net.ipv4.ip_forward = 1",
 		`GRAPHROOT="$MARKER_DIR/containers"`,
 		"semanage fcontext -a -e /var/lib/containers/storage",
 		`log_driver = "journald"`,
 		"mksrv_disk_by_serial 'vol-0base'",
 		"mksrv_disk_by_serial 'vol-0abc-123'",
 		`$MARKER_DIR/vol/tsdb`,
-		".bootstrap-v10",
+		".bootstrap-v11",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("bootstrap script missing %q", want)
 		}
+	}
+}
+
+func TestRenderBootstrapNonNATHostHasNoMasquerade(t *testing.T) {
+	t.Parallel()
+	script, err := RenderBootstrap(BootstrapParams{IsEdge: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(script, "--add-masquerade") || strings.Contains(script, "ip_forward") {
+		t.Fatal("a non-NAT host must not configure masquerade")
 	}
 }
 

@@ -1,6 +1,8 @@
-# Dedicated single-subnet VPC for an mksrv fleet. No NAT gateway: hosts reach
-# the internet through the internet gateway using their own public IPs, which
-# keeps the monthly cost near zero.
+# Dedicated VPC for an mksrv fleet. One public subnet per AZ (the `base` host —
+# edge — lives here with an Elastic IP) and one private subnet per AZ for every
+# other host (ADR 0027). No NAT gateway: private hosts reach the internet
+# through edge, which acts as a NAT instance; `infra/root` owns the private
+# route table because it needs edge's ENI.
 
 terraform {
   required_version = ">= 1.8.0"
@@ -61,6 +63,18 @@ resource "aws_route_table_association" "public" {
   count          = var.subnet_count
   subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
+}
+
+# Private subnets — one per AZ, no route to the internet here. `infra/root`
+# associates them with a route table whose default route is edge's ENI when the
+# fleet has more than one host (ADR 0027).
+resource "aws_subnet" "private" {
+  count                   = var.subnet_count
+  vpc_id                  = aws_vpc.this.id
+  availability_zone       = local.azs[count.index]
+  cidr_block              = cidrsubnet(var.cidr, 8, count.index + 100)
+  map_public_ip_on_launch = false
+  tags                    = merge(local.tags, { Name = count.index == 0 ? "${local.name}-private" : "${local.name}-private-${count.index}" })
 }
 
 # Converting the single subnet/association to count-indexed must not destroy the

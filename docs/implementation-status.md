@@ -319,3 +319,18 @@ reference.
   and `PGRST_DB_ANON_ROLE` are constant; the `role` claim mapper is `mksrv_web`;
   the OpenBao KV mirror and the pgAdmin registration use `<id>_login`. Tenant
   data isolation is unchanged (per-database `GRANT CONNECT`).
+
+## M27 — implemented
+
+- One public node (ADR 0027). `infra/modules/network` grows a private subnet
+  per AZ; `infra/root` (`nat_via_edge = length(aws_hosts) > 1`) puts every
+  non-`base` host on a private subnet, gives only edge an EIP
+  (`aws_eip.host` `count`), disables edge's `source_dest_check` (`is_nat`),
+  adds a private route table `0.0.0.0/0 → edge`'s ENI and a free S3 gateway
+  endpoint. The bootstrap turns on firewalld masquerade + `ip_forward` on the
+  NAT host (`BootstrapParams.NAT`, `BootstrapVersion` 11).
+  `internal/ssh.Target.Jump` + tunnelling in `Dial` / `FetchHostKey`;
+  `fleet.wireBastion` sets every private AWS host's jump to edge; `baseFirst`
+  orders the bastion ahead of the hosts behind it in `bootstrap` / `apply` /
+  `host trust`. Only `edge` takes the `mgmt_cidr → :22` rule; inner hosts rely
+  on `intra_vpc`. Single-node fleets and `existing` hosts unchanged.
