@@ -202,11 +202,13 @@ func (c *Client) SetPolicyFile(ctx context.Context, containerPath string) error 
 	return nil
 }
 
-// PolicyTenant is one tenant's input to Policy: its id plus any subnet routes
-// its own mesh nodes are allowed to advertise.
+// PolicyTenant is one tenant's input to Policy: its id, any subnet routes its
+// own mesh nodes are allowed to advertise, and the ports the fleet (the edge)
+// may reach on its nodes to reverse-proxy `web:` endpoints (ADR 0028).
 type PolicyTenant struct {
-	ID     string
-	Routes []string
+	ID       string
+	Routes   []string
+	WebPorts []string
 }
 
 // Policy renders the tenant-isolation HuJSON ACL: fleet hosts reach everything,
@@ -226,6 +228,13 @@ func Policy(tenants []PolicyTenant) string {
 		for _, cidr := range t.Routes {
 			rules = append(rules,
 				fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s:*"] }`, t.ID, cidr),
+			)
+		}
+		if len(t.WebPorts) > 0 {
+			// The edge reverse-proxies the tenant's `web:` endpoints, so the
+			// fleet reaches this tenant's nodes on exactly those origin ports.
+			rules = append(rules,
+				fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s@:%s"] }`, fleetUser, t.ID, strings.Join(t.WebPorts, ",")),
 			)
 		}
 	}

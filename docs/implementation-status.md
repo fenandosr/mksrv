@@ -334,3 +334,16 @@ reference.
   orders the bastion ahead of the hosts behind it in `bootstrap` / `apply` /
   `host trust`. Only `edge` takes the `mgmt_cidr → :22` rule; inner hosts rely
   on `intra_vpc`. Single-node fleets and `existing` hosts unchanged.
+
+## M28 — implemented
+
+- Tenant web endpoints (ADR 0028). `web: [{hostname, target, provider?, cdn?}]`
+  in `tenants/<id>.yaml`. `provider: edge` (default): `provisionTenantWeb`
+  (`internal/cli/web.go`) writes an edge Caddy vhost fragment
+  (`25-web-<id>-<slug>.caddy`, HTTP-01), removes fragments for deleted entries,
+  reloads Caddy; `headscale.Policy` gains `fleet@ → <id>@:<web ports>`
+  (`PolicyTenant.WebPorts`, `webOriginPorts`); `infra/root`'s `tenant_dns` local
+  adds an A record `hostname → local.edge_ip`. `checkTenantWeb`
+  (`internal/workspace/semantic.go`) enforces hostname ∈ `base_domain`, no
+  `dns:` clash, `route53` `dns_override`, and rejects `cdn: true`. Deferred:
+  the CloudFront + WAF path for `cdn: true`; `provider: cloudflare`.

@@ -122,19 +122,31 @@ type TelemetryConfig struct {
 
 // Tenant is a tenants/<id>.yaml document.
 type Tenant struct {
-	Version     int               `json:"version"`
-	ID          string            `json:"id"`
-	DisplayName string            `json:"display_name"`
-	BaseDomain  string            `json:"base_domain"`
-	DNSOverride *DNSOverride      `json:"dns_override,omitempty"`
-	Keycloak    TenantKeycloak    `json:"keycloak,omitempty"`
-	Mail        *TenantMail       `json:"mail,omitempty"`
-	Stacks      []string          `json:"stacks"`
-	Forwards    []TenantForward   `json:"forwards,omitempty"`
-	DNS         []TenantDNSRecord `json:"dns,omitempty"`
-	MeshRoutes  []string          `json:"mesh_routes,omitempty"`
-	DeviceLimit int               `json:"device_limit,omitempty"`
-	Branding    Branding          `json:"branding,omitempty"`
+	Version     int                 `json:"version"`
+	ID          string              `json:"id"`
+	DisplayName string              `json:"display_name"`
+	BaseDomain  string              `json:"base_domain"`
+	DNSOverride *DNSOverride        `json:"dns_override,omitempty"`
+	Keycloak    TenantKeycloak      `json:"keycloak,omitempty"`
+	Mail        *TenantMail         `json:"mail,omitempty"`
+	Stacks      []string            `json:"stacks"`
+	Forwards    []TenantForward     `json:"forwards,omitempty"`
+	DNS         []TenantDNSRecord   `json:"dns,omitempty"`
+	MeshRoutes  []string            `json:"mesh_routes,omitempty"`
+	Web         []TenantWebEndpoint `json:"web,omitempty"`
+	DeviceLimit int                 `json:"device_limit,omitempty"`
+	Branding    Branding            `json:"branding,omitempty"`
+}
+
+// TenantWebEndpoint is a public HTTPS hostname in the tenant's own apex that the
+// edge terminates TLS for and reverse-proxies to a tenant node over the mesh
+// (ADR 0028). Provider "edge" (the default) uses the edge Caddy; "cdn" fronts it
+// with CloudFront + WAF.
+type TenantWebEndpoint struct {
+	Hostname string `json:"hostname"`           // FQDN under base_domain
+	Target   string `json:"target"`             // host:port — a MagicDNS name or private IP the edge routes to
+	Provider string `json:"provider,omitempty"` // "edge" (default)
+	CDN      bool   `json:"cdn,omitempty"`
 }
 
 // TenantForward is one Cloud-IT VPN forward a tenant exposes to its members. It
