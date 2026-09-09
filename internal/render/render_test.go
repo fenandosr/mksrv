@@ -241,6 +241,7 @@ func TestStackRendersDataPlane(t *testing.T) {
 		"ContainerName=mksrv-postgrest-bitabit",
 		"PublishPort=10.20.0.168:3010:3000",
 		"PublishPort=100.64.0.1:3010:3000",
+		"PGRST_DB_SCHEMAS=app",
 		"PGRST_DB_ANON_ROLE=mksrv_anon",
 		"PGRST_DB_PRE_REQUEST=app.pgrst_pre_request",
 		"mksrv-database-postgrest-bitabit-jwt,type=env,target=PGRST_JWT_SECRET",
@@ -248,6 +249,17 @@ func TestStackRendersDataPlane(t *testing.T) {
 		if !strings.Contains(pgrst, want) {
 			t.Fatalf("postgrest unit missing %q:\n%s", want, pgrst)
 		}
+	}
+
+	// database.schema override (ADR 0029) flows into the PostgREST env.
+	ctx.Tenant = &model.Tenant{ID: "bitabit", Database: &model.TenantDatabase{Schema: "appdata"}}
+	sFiles, err := Stack(stacksRoot, catalog["database"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(database, schema override) error = %v", err)
+	}
+	spg := string(sFiles["/etc/containers/systemd/mksrv-postgrest-bitabit.container"])
+	if !strings.Contains(spg, "PGRST_DB_SCHEMAS=appdata") || !strings.Contains(spg, "PGRST_DB_PRE_REQUEST=appdata.pgrst_pre_request") {
+		t.Fatalf("schema override not reflected in postgrest env:\n%s", spg)
 	}
 
 	ctx.Tenant = nil

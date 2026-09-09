@@ -12,6 +12,10 @@ mail:
   inbound: false
   dmarc_rua: dmarc@acme.example.com
 stacks: [database, files, analytics, monitor]
+database:
+  postgrest: false
+  extensions: [pgcrypto, uuid-ossp]
+  connection_limit: 40
 forwards:
   - id: login
     label: "Login node"

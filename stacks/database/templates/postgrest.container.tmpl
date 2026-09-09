@@ -16,16 +16,18 @@ PublishPort={{ .Host.PrivateIP }}:{{ .Secrets.listen_port }}:3000
 PublishPort={{ .Host.TailnetIP }}:{{ .Secrets.listen_port }}:3000
 {{- end }}
 PublishPort=127.0.0.1:{{ .Secrets.listen_port }}:3000
-Environment=PGRST_DB_SCHEMAS=app
+Environment=PGRST_DB_SCHEMAS={{ .Tenant.DBSchema }}
 # Global RBAC buckets (ADR 0026); the connection is still per-tenant (db_<id> as
 # <id>_auth), so mksrv_anon in this container only ever sees this tenant's data.
+# mksrv_anon gets no blanket SELECT — the tenant grants anon access per table
+# for exactly what it wants public (ADR 0029).
 Environment=PGRST_DB_ANON_ROLE=mksrv_anon
 Environment=PGRST_DB_POOL=4
 Environment=PGRST_DB_CONFIG=false
 Environment=PGRST_SERVER_PORT=3000
 Environment=PGRST_JWT_ROLE_CLAIM_KEY=.role
 # db-pre-request narrows mksrv_web to mksrv_owner / mksrv_app / mksrv_anon by the token's RBAC groups.
-Environment=PGRST_DB_PRE_REQUEST=app.pgrst_pre_request
+Environment=PGRST_DB_PRE_REQUEST={{ .Tenant.DBSchema }}.pgrst_pre_request
 Environment=PGRST_OPENAPI_SERVER_PROXY_URI=https://{{ .Secrets.rest_fqdn }}
 Secret=mksrv-database-postgrest-{{ .Tenant.ID }}-dburi,type=env,target=PGRST_DB_URI
 Secret=mksrv-database-postgrest-{{ .Tenant.ID }}-jwt,type=env,target=PGRST_JWT_SECRET

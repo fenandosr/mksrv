@@ -217,6 +217,28 @@ func TestValidateRejectsBadMeshRoute(t *testing.T) {
 	assertIssueCode(t, report, "tenant.mesh_route")
 }
 
+func TestValidateRejectsBadDatabaseExtension(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	patchTenant(t, root, "extensions: [pgcrypto, uuid-ossp]", "extensions: [pgcrypto, plpythonu]")
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid report")
+	}
+	assertIssueCode(t, report, "tenant.database.extension")
+}
+
+func TestValidateRejectsDatabaseBlockWithoutStack(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	patchTenant(t, root, "stacks: [database, files, analytics, monitor]", "stacks: [files, analytics, monitor]")
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid report")
+	}
+	assertIssueCode(t, report, "tenant.database.no_stack")
+}
+
 func TestCapacityOvercommitIsWarningOnly(t *testing.T) {
 	t.Parallel()
 	root := copyExample(t)

@@ -22,9 +22,10 @@ locals {
   ses_mail_from = "mail.${local.root_domain}"
 
   # Per-tenant PostgREST data API: <id>.rest.<root_domain>, fronted by the edge.
+  # Skipped when the tenant sets database.postgrest = false (ADR 0029).
   tenant_rest_fqdns = [
     for id, t in var.tenants : "${id}.rest.${local.root_domain}"
-    if contains(try(t.stacks, []), "database")
+    if contains(try(t.stacks, []), "database") && try(t.database.postgrest, true)
   ]
 
   # Records mksrv writes into each tenant's own hosted zone (never the operator

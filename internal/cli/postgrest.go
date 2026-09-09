@@ -51,12 +51,18 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 	}
 
 	consumers := make([]string, 0, len(tenants))
+	var disabled []string
 	for _, id := range tenants {
-		if slices.Contains(f.data.Tenants[id].Stacks, "database") {
+		if !slices.Contains(f.data.Tenants[id].Stacks, "database") {
+			continue
+		}
+		if f.data.Tenants[id].PostgRESTEnabled() {
 			consumers = append(consumers, id)
+		} else {
+			disabled = append(disabled, id) // database: {postgrest: false} — ADR 0029
 		}
 	}
-	if len(consumers) == 0 {
+	if len(consumers) == 0 && len(disabled) == 0 {
 		return nil
 	}
 
@@ -69,6 +75,20 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 		return dialError(dataHost.Name, err)
 	}
 	defer client.Close()
+
+	// Tear down PostgREST for tenants that turned it off.
+	for _, id := range disabled {
+		_, _ = client.Run(ctx, "sudo systemctl disable --now mksrv-postgrest-"+id+".service 2>/dev/null || true")
+		_, _ = client.Run(ctx, "sudo rm -f /etc/containers/systemd/mksrv-postgrest-"+id+".container")
+		_, _ = client.Run(ctx, "sudo podman secret rm mksrv-database-postgrest-"+id+"-dburi mksrv-database-postgrest-"+id+"-jwt 2>/dev/null || true")
+		_, _ = edgeClient.Run(ctx, "sudo rm -f /var/lib/mksrv/caddy.d/21-postgrest-"+id+".caddy")
+		printer.Success("tenant %s: postgrest disabled (torn down)", id)
+	}
+	if len(consumers) == 0 {
+		_, _ = client.Run(ctx, "sudo systemctl daemon-reload")
+		_, _ = edgeClient.Run(ctx, "sudo podman exec mksrv-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile || sudo systemctl restart mksrv-caddy.service")
+		return nil
+	}
 
 	dep := f.data.Deployment
 	sortedIDs := sortedTenantIDs(f.data.Tenants)
