@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Security (M29, ADR 0029): `mksrv_anon` — the role PostgREST uses for
+  token-less requests — **no longer gets a blanket `SELECT`** on the tenant's
+  application schema. The PostgREST URL is public, so anonymous read access is
+  now opt-in per table (`GRANT SELECT ON <schema>.<table> TO mksrv_anon`);
+  `mksrv_app` (authenticated, group-gated) keeps the schema default.
+  `mksrv tenant apply` revokes the old blanket grant to heal databases created
+  before this change.
+
+- Add (M29, ADR 0029): optional `database:` block in `tenants/<id>.yaml` —
+  `postgrest` (default `true`; `false` tears down the PostgREST container, its
+  edge Caddy vhost, and the `*.rest` A record / cert SAN, leaving Postgres
+  reachable only over the VPN), `schema` (default `"app"`; drives
+  `PGRST_DB_SCHEMAS` / `PGRST_DB_PRE_REQUEST`), `extensions` (allow-listed
+  contrib extensions `CREATE EXTENSION`'d in `db_<id>`), and `connection_limit`
+  (caps `<id>_login` against the shared Patroni `max_connections`). New
+  validation codes `tenant.database.no_stack` / `.schema` / `.extension` and the
+  warning `tenant.database.schema_unused`.
+
 - Feature (M28, ADR 0028): a `web:` block in `tenants/<id>.yaml` —
   `[{hostname, target, provider?, cdn?}]`. With `provider: edge` (the default)
   `mksrv tenant apply` renders an edge Caddy vhost fragment (HTTP-01 cert on

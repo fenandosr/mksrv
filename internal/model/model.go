@@ -129,6 +129,7 @@ type Tenant struct {
 	DNSOverride *DNSOverride        `json:"dns_override,omitempty"`
 	Keycloak    TenantKeycloak      `json:"keycloak,omitempty"`
 	Mail        *TenantMail         `json:"mail,omitempty"`
+	Database    *TenantDatabase     `json:"database,omitempty"`
 	Stacks      []string            `json:"stacks"`
 	Forwards    []TenantForward     `json:"forwards,omitempty"`
 	DNS         []TenantDNSRecord   `json:"dns,omitempty"`
@@ -147,6 +148,52 @@ type TenantWebEndpoint struct {
 	Target   string `json:"target"`             // host:port — a MagicDNS name or private IP the edge routes to
 	Provider string `json:"provider,omitempty"` // "edge" (default)
 	CDN      bool   `json:"cdn,omitempty"`
+}
+
+// TenantDatabase is the optional `database:` block: per-tenant knobs for the
+// `database` stack (ADR 0029).
+type TenantDatabase struct {
+	// PostgREST — deploy the auto-generated REST API for this tenant. Nil or
+	// true means deploy; false means no container, no public *.rest FQDN.
+	PostgREST *bool `json:"postgrest,omitempty"`
+	// Schema is the tenant's application schema (and, when PostgREST runs, the
+	// only schema it exposes). Default "app".
+	Schema string `json:"schema,omitempty"`
+	// Extensions are CREATE EXTENSION IF NOT EXISTS'd in db_<id>. Allow-listed
+	// in semantic validation.
+	Extensions []string `json:"extensions,omitempty"`
+	// ConnectionLimit caps concurrent connections for <id>_login. 0 = unlimited.
+	ConnectionLimit int `json:"connection_limit,omitempty"`
+}
+
+// DBSchema returns the tenant's application schema — "app" unless overridden.
+func (t Tenant) DBSchema() string {
+	if t.Database != nil && t.Database.Schema != "" {
+		return t.Database.Schema
+	}
+	return "app"
+}
+
+// PostgRESTEnabled reports whether PostgREST is deployed for this tenant (the
+// default when it consumes the `database` stack).
+func (t Tenant) PostgRESTEnabled() bool {
+	return t.Database == nil || t.Database.PostgREST == nil || *t.Database.PostgREST
+}
+
+// DBExtensions returns the Postgres extensions to install in db_<id>.
+func (t Tenant) DBExtensions() []string {
+	if t.Database == nil {
+		return nil
+	}
+	return t.Database.Extensions
+}
+
+// DBConnectionLimit returns the <id>_login connection cap (0 = unlimited).
+func (t Tenant) DBConnectionLimit() int {
+	if t.Database == nil {
+		return 0
+	}
+	return t.Database.ConnectionLimit
 }
 
 // TenantForward is one Cloud-IT VPN forward a tenant exposes to its members. It

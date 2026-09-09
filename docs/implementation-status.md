@@ -347,3 +347,23 @@ reference.
   (`internal/workspace/semantic.go`) enforces hostname ∈ `base_domain`, no
   `dns:` clash, `route53` `dns_override`, and rejects `cdn: true`. Deferred:
   the CloudFront + WAF path for `cdn: true`; `provider: cloudflare`.
+
+## M29 — implemented
+
+- Tenant `database:` block + anon-by-default fix (ADR 0029). `tenantDatabaseSQL`
+  drops `mksrv_anon` from `ALTER DEFAULT PRIVILEGES` / `GRANT SELECT ON ALL
+  TABLES` (anon keeps only schema `USAGE` + `EXECUTE` on `pgrst_pre_request`)
+  and emits idempotent `REVOKE … FROM mksrv_anon` to heal pre-0029 databases.
+  `model.TenantDatabase` (`postgrest` / `schema` / `extensions` /
+  `connection_limit`) with accessors `DBSchema` / `PostgRESTEnabled` /
+  `DBExtensions` / `DBConnectionLimit`. `tenantDatabaseSQL` now takes the
+  `model.Tenant`: `CREATE EXTENSION` per allow-listed entry, `CONNECTION LIMIT`
+  on `<id>_login`, and the schema name threaded through every `CREATE SCHEMA` /
+  `search_path` / `GRANT` / `pgrst_pre_request`. `reconcilePostgREST` gates on
+  `PostgRESTEnabled()` and tears down the container + `podman` secrets + edge
+  Caddy fragment for tenants that set `postgrest: false`; `infra/root`'s
+  `tenant_rest_fqdns` is filtered the same way. `checkTenantDatabase`
+  (`internal/workspace/semantic.go`) validates via `allowedDBExtensions` /
+  `reservedSchemas` — codes `tenant.database.no_stack` / `.schema` /
+  `.extension` and warning `.schema_unused`. Template `PGRST_DB_SCHEMAS` /
+  `PGRST_DB_PRE_REQUEST` come from `.Tenant.DBSchema`.

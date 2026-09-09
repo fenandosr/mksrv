@@ -31,6 +31,15 @@
       }
     },
     "stacks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"}},
+    "database": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "postgrest": {"type": "boolean", "default": true},
+        "schema": {"type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$", "default": "app"},
+        "extensions": {"type": "array", "uniqueItems": true, "maxItems": 16, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{1,63}$"}},
+        "connection_limit": {"type": "integer", "minimum": 1, "maximum": 500}
+      }
+    },
     "forwards": {
       "type": "array", "maxItems": 24,
       "items": {

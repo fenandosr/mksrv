@@ -34,12 +34,16 @@ users:
 
 ¹ subject to the tenant's Headscale ACL.
 ² `apps` requests land on the `mksrv_app` Postgres role, which has `SELECT` on
-`app` by default; the dev opens `INSERT`/`UPDATE`/`DELETE` per-table with `GRANT`
-/ RLS. PostgREST picks the role from the token's `groups` claim via a
-`db-pre-request` function (`admin`/`dev` → `mksrv_owner`, `apps` → `mksrv_app`,
-token-less → `mksrv_anon`). Those buckets are cluster-global (ADR 0026) but
-scoped to the tenant by the connection — PostgREST connects to `db_<id>` as the
-per-tenant `<id>_auth` role.
+the tenant's application schema by default; the dev opens `INSERT`/`UPDATE`/
+`DELETE` per-table with `GRANT` / RLS. PostgREST picks the role from the token's
+`groups` claim via a `db-pre-request` function (`admin`/`dev` → `mksrv_owner`,
+`apps` → `mksrv_app`, token-less → `mksrv_anon`). Those buckets are cluster-global
+(ADR 0026) but scoped to the tenant by the connection — PostgREST connects to
+`db_<id>` as the per-tenant `<id>_auth` role. **`mksrv_anon` gets no privileges
+by default** (ADR 0029): the PostgREST URL is public, so anything reachable
+without a token is opt-in — the dev runs `GRANT SELECT ON <schema>.<table> TO
+mksrv_anon` for exactly what should be world-readable. A tenant that exposes
+nothing publicly sets `database.postgrest: false` and no container is deployed.
 ³ via a reviewed PR to `tenants/<id>.yaml` — the admin is the CODEOWNER; there is
 no runtime "publish" API.
 
@@ -83,5 +87,9 @@ clients, protocol mappers, or realm settings.
   buckets `mksrv_owner` / `mksrv_app` / `mksrv_anon` / `mksrv_web` (ADR 0026);
   only `<id>_login` / `<id>_auth` stay per-tenant. Isolation and the group→role
   mapping are unchanged. *Done.*
+- **M29** — `mksrv_anon` no longer gets a blanket `SELECT` on the application
+  schema; anonymous read access is opt-in per table (ADR 0029). The optional
+  `database:` block adds `postgrest` (default on), `schema`, `extensions`, and
+  `connection_limit`. *Done.*
 
 The RBAC model is fully enforced across Keycloak, the VPN, OpenBao, and Postgres.

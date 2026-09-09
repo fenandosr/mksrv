@@ -163,6 +163,7 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 		checkTenantDNS(report, tenantFile, tenant)
 		checkTenantMeshRoutes(report, tenantFile, tenant)
 		checkTenantWeb(report, tenantFile, tenant)
+		checkTenantDatabase(report, tenantFile, tenant)
 	}
 
 	for tenantID, users := range data.Users {
@@ -328,6 +329,43 @@ func checkTenantWeb(report *Report, file string, tenant model.Tenant) {
 	}
 }
 
+// allowedDBExtensions are the contrib extensions a tenant may request in its
+// `database.extensions` block (ADR 0029) — all bundled with the postgres image,
+// none introduce an untrusted procedural language or a non-standard image need.
+var allowedDBExtensions = map[string]bool{
+	"pgcrypto": true, "uuid-ossp": true, "citext": true, "pg_trgm": true,
+	"btree_gist": true, "btree_gin": true, "hstore": true, "unaccent": true,
+	"ltree": true, "intarray": true, "tablefunc": true, "fuzzystrmatch": true,
+}
+
+// reservedSchemas can't be used as a tenant's application schema.
+var reservedSchemas = map[string]bool{
+	"public": true, "pg_catalog": true, "information_schema": true, "pg_toast": true,
+}
+
+func checkTenantDatabase(report *Report, file string, tenant model.Tenant) {
+	if tenant.Database == nil {
+		return
+	}
+	if !contains(tenant.Stacks, "database") {
+		semanticError(report, file, "$.database", "tenant.database.no_stack", "a database block requires the tenant to consume the `database` stack")
+		return
+	}
+	if s := tenant.Database.Schema; s != "" {
+		if reservedSchemas[s] || strings.HasPrefix(s, "pg_") {
+			semanticError(report, file, "$.database.schema", "tenant.database.schema", fmt.Sprintf("schema %q is reserved", s))
+		}
+	}
+	for i, ext := range tenant.Database.Extensions {
+		if !allowedDBExtensions[ext] {
+			semanticError(report, file, fmt.Sprintf("$.database.extensions[%d]", i), "tenant.database.extension", fmt.Sprintf("extension %q is not in the allow-list", ext))
+		}
+	}
+	if !tenant.PostgRESTEnabled() && tenant.Database.Schema != "" {
+		semanticWarning(report, file, "$.database.schema", "tenant.database.schema_unused", "schema is set but postgrest is disabled — it only names the tenant's application schema")
+	}
+}
+
 func checkCatalogCycles(catalog map[string]model.Stack, report *Report) {
 	state := make(map[string]int)
 	var visit func(string, []string)
@@ -395,6 +433,10 @@ func parseSemver(value string) ([3]int, error) {
 
 func semanticError(report *Report, file, path, code, message string) {
 	addIssue(report, Issue{Severity: "error", File: file, Path: path, Code: code, Message: message})
+}
+
+func semanticWarning(report *Report, file, path, code, message string) {
+	addIssue(report, Issue{Severity: "warning", File: file, Path: path, Code: code, Message: message})
 }
 
 // checkHostCapacity warns (not errors) when a host's assigned stacks' declared

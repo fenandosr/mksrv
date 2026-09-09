@@ -114,12 +114,13 @@ func TestGlobalRBACRolesSQL(t *testing.T) {
 
 func TestTenantDatabaseSQL(t *testing.T) {
 	t.Parallel()
-	sql := tenantDatabaseSQL("bitabit", "s3cr3t'value", "auth'pw")
+	sql := tenantDatabaseSQL("bitabit", "s3cr3t'value", "auth'pw", model.Tenant{ID: "bitabit"})
 	for _, want := range []string{
 		// two per-tenant login roles only
 		`CREATE ROLE %I LOGIN PASSWORD %L`,
 		`'bitabit_login'`,
 		`'s3cr3t''value'`, // single quote doubled
+		`ALTER ROLE "bitabit_login" WITH LOGIN PASSWORD 's3cr3t''value' CONNECTION LIMIT -1;`,
 		`CREATE ROLE %I LOGIN NOINHERIT PASSWORD %L`,
 		`'bitabit_auth'`,
 		`'auth''pw'`, // authenticator password quoted
@@ -131,25 +132,53 @@ func TestTenantDatabaseSQL(t *testing.T) {
 		`'db_bitabit'`,
 		`REVOKE ALL ON DATABASE "db_bitabit" FROM PUBLIC;`,
 		`GRANT CONNECT, CREATE ON DATABASE "db_bitabit" TO "bitabit_login";`,
-		`GRANT CONNECT ON DATABASE "db_bitabit" TO "bitabit_auth";`,
 		`\connect "db_bitabit"`,
-		`CREATE SCHEMA IF NOT EXISTS app AUTHORIZATION mksrv_owner;`,
-		`ALTER SCHEMA app OWNER TO mksrv_owner;`,
-		`GRANT USAGE ON SCHEMA app TO mksrv_app, mksrv_anon, mksrv_web;`,
-		`ALTER DEFAULT PRIVILEGES FOR ROLE mksrv_owner IN SCHEMA app GRANT SELECT ON TABLES TO mksrv_app, mksrv_anon;`,
-		// constant pre-request function
+		`CREATE SCHEMA IF NOT EXISTS "app" AUTHORIZATION mksrv_owner;`,
+		`ALTER DATABASE "db_bitabit" SET search_path TO "app", public;`,
+		`GRANT USAGE ON SCHEMA "app" TO mksrv_app, mksrv_anon, mksrv_web;`,
+		// ADR 0029: anon gets NO blanket SELECT; the old grant is revoked to heal.
+		`ALTER DEFAULT PRIVILEGES FOR ROLE mksrv_owner IN SCHEMA "app" GRANT SELECT ON TABLES TO mksrv_app;`,
+		`ALTER DEFAULT PRIVILEGES FOR ROLE mksrv_owner IN SCHEMA "app" REVOKE SELECT ON TABLES FROM mksrv_anon;`,
+		`REVOKE SELECT ON ALL TABLES IN SCHEMA "app" FROM mksrv_anon;`,
 		`IF grps ? 'admin' OR grps ? 'dev' THEN SET LOCAL ROLE mksrv_owner;`,
-		`ELSIF grps ? 'apps' THEN SET LOCAL ROLE mksrv_app;`,
-		`GRANT EXECUTE ON FUNCTION app.pgrst_pre_request() TO mksrv_web, mksrv_anon;`,
+		`GRANT EXECUTE ON FUNCTION "app".pgrst_pre_request() TO mksrv_web, mksrv_anon;`,
 	} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("SQL missing %q:\n%s", want, sql)
 		}
 	}
-	// no per-tenant privilege buckets any more
-	for _, absent := range []string{`'bitabit_app'`, `'bitabit_web'`, `'bitabit_anon'`} {
-		if strings.Contains(sql, absent) {
-			t.Fatalf("SQL should not create per-tenant bucket %s:\n%s", absent, sql)
+	// anon must not get a blanket grant
+	if strings.Contains(sql, `GRANT SELECT ON TABLES TO mksrv_app, mksrv_anon`) ||
+		strings.Contains(sql, `GRANT SELECT ON ALL TABLES IN SCHEMA "app" TO mksrv_app, mksrv_anon`) {
+		t.Fatalf("SQL still blanket-grants SELECT to mksrv_anon:\n%s", sql)
+	}
+}
+
+func TestTenantDatabaseSQLWithOverrides(t *testing.T) {
+	t.Parallel()
+	pt := true
+	sql := tenantDatabaseSQL("hg", "pw", "apw", model.Tenant{
+		ID: "hg",
+		Database: &model.TenantDatabase{
+			PostgREST:       &pt,
+			Schema:          "appdata",
+			Extensions:      []string{"pgcrypto", "uuid-ossp"},
+			ConnectionLimit: 40,
+		},
+	})
+	for _, want := range []string{
+		`CONNECTION LIMIT 40;`,
+		`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`,
+		`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`,
+		`CREATE SCHEMA IF NOT EXISTS "appdata" AUTHORIZATION mksrv_owner;`,
+		`ALTER DATABASE "db_hg" SET search_path TO "appdata", public;`,
+		`CREATE OR REPLACE FUNCTION "appdata".pgrst_pre_request()`,
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("SQL missing %q:\n%s", want, sql)
 		}
+	}
+	if strings.Contains(sql, `SCHEMA "app" `) || strings.Contains(sql, `"app".pgrst_pre_request`) {
+		t.Fatalf("SQL still references the default `app` schema:\n%s", sql)
 	}
 }
