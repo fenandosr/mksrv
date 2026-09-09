@@ -29,20 +29,32 @@ locals {
 
   # Records mksrv writes into each tenant's own hosted zone (never the operator
   # zone). allow_overwrite is false downstream, so a name that already exists in
-  # the tenant zone fails the apply instead of being clobbered.
+  # the tenant zone fails the apply instead of being clobbered. `web:` endpoints
+  # (ADR 0028) add an A record pointing at the edge, which reverse-proxies them.
   tenant_dns = {
     for id, t in var.tenants : id => {
       zone_id = try(t.dns_override.zone_id, "")
-      records = [
-        for r in try(t.dns, []) : {
-          fqdn  = r.name == "@" ? t.base_domain : "${r.name}.${t.base_domain}"
-          type  = r.type
-          value = r.value
-          ttl   = try(r.ttl, 300)
-        }
-      ]
+      records = concat(
+        [
+          for r in try(t.dns, []) : {
+            fqdn  = r.name == "@" ? t.base_domain : "${r.name}.${t.base_domain}"
+            type  = r.type
+            value = r.value
+            ttl   = try(r.ttl, 300)
+          }
+        ],
+        [
+          for w in try(t.web, []) : {
+            fqdn  = w.hostname
+            type  = "A"
+            value = local.edge_ip
+            ttl   = 300
+          }
+          if try(w.provider, "edge") == "edge"
+        ],
+      )
     }
-    if try(t.dns_override.provider, "") == "route53" && length(try(t.dns, [])) > 0
+    if try(t.dns_override.provider, "") == "route53" && (length(try(t.dns, [])) > 0 || length(try(t.web, [])) > 0)
   }
 
   # Shared operator endpoints, all fronted by the edge.

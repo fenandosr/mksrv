@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Feature (M28, ADR 0028): a `web:` block in `tenants/<id>.yaml` —
+  `[{hostname, target, provider?, cdn?}]`. With `provider: edge` (the default)
+  `mksrv tenant apply` renders an edge Caddy vhost fragment (HTTP-01 cert on
+  stock `caddy:2.8`), opens `fleet@ → <id>@:<origin ports>` in the Headscale
+  ACL, and `mksrv apply --infra-only` writes an A record `hostname → edge EIP`
+  into the tenant's Route53 zone (`allow_overwrite = false`). The edge now
+  terminates TLS and reverse-proxies to a tenant node over the mesh — Model A,
+  opt-in per hostname, superseding the "Model A out of scope" line in ADR 0011.
+  `hostname` must be within `base_domain`, must not clash with a `dns:` record,
+  and needs a `route53` `dns_override`. `cdn: true` (CloudFront + WAF) is
+  reserved and fails validation for now. Removing a `web:` entry deletes its
+  fragment on the next `tenant apply`.
+
 - Change (M27, ADR 0027): only the `base` host (edge) is public now. On a
   multi-host fleet every other host moves to a private subnet with **no
   Elastic IP** (~$3.65/mo each — the distributed profile drops ~$14.6/mo);

@@ -48,13 +48,14 @@ func TestPolicyIsolatesTenantsAndAddsRoutes(t *testing.T) {
 	t.Parallel()
 	got := Policy([]PolicyTenant{
 		{ID: "bitabit"},
-		{ID: "mcps", Routes: []string{"10.1.0.0/24"}},
+		{ID: "mcps", Routes: []string{"10.1.0.0/24"}, WebPorts: []string{"80", "8000"}},
 	})
 	for _, want := range []string{
 		`"src": ["mksrv-fleet@"], "dst": ["mksrv-fleet@:*"]`,
 		`"src": ["bitabit@"], "dst": ["bitabit@:*"]`,
 		`"src": ["mcps@"], "dst": ["mksrv-fleet@:22,80,443,3000,3010-3019,5050,5432,6379,8090,8200,9090"]`,
 		`"src": ["mcps@"], "dst": ["10.1.0.0/24:*"]`,
+		`"src": ["mksrv-fleet@"], "dst": ["mcps@:80,8000"]`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("policy missing %q:\n%s", want, got)

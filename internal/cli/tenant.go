@@ -201,6 +201,10 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 		return &ExitError{Code: 1, Err: err}
 	}
 
+	if err := f.provisionTenantWeb(ctx, printer, edgeClient, selected); err != nil {
+		return &ExitError{Code: 1, Err: err}
+	}
+
 	if err := f.provisionRedis(ctx, printer, selected); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
@@ -551,9 +555,30 @@ func sortedTenantIDs(tenants map[string]model.Tenant) []string {
 func policyTenants(tenants map[string]model.Tenant) []headscale.PolicyTenant {
 	out := make([]headscale.PolicyTenant, 0, len(tenants))
 	for _, id := range sortedTenantIDs(tenants) {
-		out = append(out, headscale.PolicyTenant{ID: id, Routes: tenants[id].MeshRoutes})
+		out = append(out, headscale.PolicyTenant{
+			ID:       id,
+			Routes:   tenants[id].MeshRoutes,
+			WebPorts: webOriginPorts(tenants[id].Web),
+		})
 	}
 	return out
+}
+
+// webOriginPorts is the sorted, de-duplicated set of origin ports across a
+// tenant's `web:` targets — what the edge must reach to reverse-proxy them.
+func webOriginPorts(web []model.TenantWebEndpoint) []string {
+	set := map[string]bool{}
+	for _, w := range web {
+		if _, port, err := net.SplitHostPort(w.Target); err == nil && port != "" {
+			set[port] = true
+		}
+	}
+	ports := make([]string, 0, len(set))
+	for p := range set {
+		ports = append(ports, p)
+	}
+	sort.Strings(ports)
+	return ports
 }
 
 func tenantRealm(t model.Tenant) string {

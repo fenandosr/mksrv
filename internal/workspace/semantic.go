@@ -162,6 +162,7 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 		checkTenantForwards(report, tenantFile, tenant)
 		checkTenantDNS(report, tenantFile, tenant)
 		checkTenantMeshRoutes(report, tenantFile, tenant)
+		checkTenantWeb(report, tenantFile, tenant)
 	}
 
 	for tenantID, users := range data.Users {
@@ -276,6 +277,53 @@ func checkTenantMeshRoutes(report *Report, file string, tenant model.Tenant) {
 	for i, route := range tenant.MeshRoutes {
 		if _, _, err := net.ParseCIDR(route); err != nil {
 			semanticError(report, file, fmt.Sprintf("$.mesh_routes[%d]", i), "tenant.mesh_route", fmt.Sprintf("%q is not a valid CIDR", route))
+		}
+	}
+}
+
+// checkTenantWeb validates the `web:` block (ADR 0028): each hostname must be in
+// the tenant's own apex, needs a route53 dns_override, must not clash with a
+// `dns:` record, and `cdn: true` is not implemented yet.
+func checkTenantWeb(report *Report, file string, tenant model.Tenant) {
+	if len(tenant.Web) == 0 {
+		return
+	}
+	if tenant.DNSOverride == nil || tenant.DNSOverride.Provider != "route53" || strings.TrimSpace(tenant.DNSOverride.ZoneID) == "" {
+		semanticError(report, file, "$.web", "tenant.web.no_zone", "web endpoints require dns_override with provider route53 and a zone_id")
+		return
+	}
+	dnsNames := make(map[string]bool, len(tenant.DNS))
+	for _, r := range tenant.DNS {
+		if r.Name == "@" {
+			dnsNames[strings.ToLower(tenant.BaseDomain)] = true
+		} else {
+			dnsNames[strings.ToLower(r.Name+"."+tenant.BaseDomain)] = true
+		}
+	}
+	seen := make(map[string]int, len(tenant.Web))
+	for i, w := range tenant.Web {
+		path := fmt.Sprintf("$.web[%d]", i)
+		host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(w.Hostname)), ".")
+		root := strings.TrimSuffix(strings.ToLower(tenant.BaseDomain), ".")
+		if host != root && !strings.HasSuffix(host, "."+root) {
+			semanticError(report, file, path+".hostname", "tenant.web.outside_apex", fmt.Sprintf("%q must equal or be a subdomain of the tenant's base_domain %q", w.Hostname, tenant.BaseDomain))
+		}
+		if first, dup := seen[host]; dup {
+			semanticError(report, file, path+".hostname", "tenant.web.duplicate", fmt.Sprintf("hostname %q duplicates web[%d]", w.Hostname, first))
+		} else {
+			seen[host] = i
+		}
+		if dnsNames[host] {
+			semanticError(report, file, path+".hostname", "tenant.web.dns_clash", fmt.Sprintf("hostname %q is also declared as a dns record", w.Hostname))
+		}
+		if _, _, err := net.SplitHostPort(w.Target); err != nil {
+			semanticError(report, file, path+".target", "tenant.web.target", fmt.Sprintf("target %q must be host:port", w.Target))
+		}
+		if w.Provider != "" && w.Provider != "edge" {
+			semanticError(report, file, path+".provider", "tenant.web.provider", fmt.Sprintf("provider %q is not supported (only \"edge\")", w.Provider))
+		}
+		if w.CDN {
+			semanticError(report, file, path+".cdn", "tenant.web.cdn_unimplemented", "cdn is not implemented yet — omit it or set false")
 		}
 	}
 }

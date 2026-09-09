@@ -26,6 +26,9 @@ dns:
   - name: notebook
     type: A
     value: "203.0.113.20"
+web:
+  - hostname: files.acme.example.com
+    target: acme-nextcloud.prod.mksrv:80
 mesh_routes:
   - 10.90.0.0/24
 device_limit: 60

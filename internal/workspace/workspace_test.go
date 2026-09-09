@@ -150,6 +150,28 @@ func TestValidateRejectsDNSWithoutZone(t *testing.T) {
 	assertIssueCode(t, report, "tenant.dns.no_zone")
 }
 
+func TestValidateRejectsWebOutsideApex(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	patchTenant(t, root, "hostname: files.acme.example.com", "hostname: files.evil.example.net")
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid report")
+	}
+	assertIssueCode(t, report, "tenant.web.outside_apex")
+}
+
+func TestValidateRejectsWebCDN(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	patchTenant(t, root, "target: acme-nextcloud.prod.mksrv:80", "target: acme-nextcloud.prod.mksrv:80\n    cdn: true")
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid report")
+	}
+	assertIssueCode(t, report, "tenant.web.cdn_unimplemented")
+}
+
 func TestValidateRejectsUndersizedCluster(t *testing.T) {
 	t.Parallel()
 	root := copyExample(t)

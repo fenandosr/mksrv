@@ -65,7 +65,8 @@ services. The VPN tunnel carries only SSH and other private-protocol access.
 - The tenant's Route53 zone now holds mksrv-managed records alongside the
   tenant's own; `allow_overwrite = false` keeps mksrv from touching anything it
   did not create, including mail records.
-- Automatic subnet-route approval, Model A (edge terminates TLS for tenant web
-  endpoints), Keycloak↔cluster identity federation, and non-route53 tenant DNS
-  providers are out of scope.
+- Automatic subnet-route approval, Keycloak↔cluster identity federation, and
+  non-route53 tenant DNS providers are out of scope. **Model A** (the edge
+  terminates TLS for a tenant web endpoint) was out of scope here too — it is
+  now the opt-in `web:` block in ADR 0028 (M28).
 - The `domain.outside_root` validation message no longer references "M6".
