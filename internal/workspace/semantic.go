@@ -326,6 +326,17 @@ func checkTenantWeb(report *Report, file string, tenant model.Tenant) {
 		if w.CDN {
 			semanticError(report, file, path+".cdn", "tenant.web.cdn_unimplemented", "cdn is not implemented yet — omit it or set false")
 		}
+		if w.SSO && w.CDN {
+			semanticError(report, file, path+".sso", "tenant.web.sso_cdn", "sso and cdn cannot be combined yet")
+		}
+		if len(w.SSOGroups) > 0 && !w.SSO {
+			semanticError(report, file, path+".sso_groups", "tenant.web.sso_groups", "sso_groups requires sso: true")
+		}
+		for _, g := range w.SSOGroups {
+			if g != "admin" && g != "dev" && g != "apps" && g != "vpn" {
+				semanticError(report, file, path+".sso_groups", "tenant.web.sso_groups", fmt.Sprintf("unknown realm group %q (admin|dev|apps|vpn)", g))
+			}
+		}
 	}
 }
 

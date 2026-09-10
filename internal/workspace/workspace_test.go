@@ -172,6 +172,27 @@ func TestValidateRejectsWebCDN(t *testing.T) {
 	assertIssueCode(t, report, "tenant.web.cdn_unimplemented")
 }
 
+func TestValidateRejectsSSOGroupsWithoutSSO(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	patchTenant(t, root, "target: acme-nextcloud.prod.mksrv:80", "target: acme-nextcloud.prod.mksrv:80\n    sso_groups: [dev]")
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid report")
+	}
+	assertIssueCode(t, report, "tenant.web.sso_groups")
+}
+
+func TestValidateAcceptsWebSSO(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	patchTenant(t, root, "target: acme-nextcloud.prod.mksrv:80", "target: acme-nextcloud.prod.mksrv:80\n    sso: true\n    sso_groups: [dev, admin]")
+	report := revalidate(t, root)
+	if !report.Valid {
+		t.Fatalf("web sso should validate: %#v", report.Issues)
+	}
+}
+
 func TestValidateRejectsUndersizedCluster(t *testing.T) {
 	t.Parallel()
 	root := copyExample(t)

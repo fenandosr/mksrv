@@ -82,7 +82,9 @@
           "hostname": {"type": "string", "maxLength": 253, "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"},
           "target": {"type": "string", "maxLength": 320, "pattern": "^[A-Za-z0-9.-]+:[0-9]{1,5}$"},
           "provider": {"type": "string", "enum": ["edge"], "default": "edge"},
-          "cdn": {"type": "boolean", "default": false}
+          "cdn": {"type": "boolean", "default": false},
+          "sso": {"type": "boolean", "default": false},
+          "sso_groups": {"type": "array", "uniqueItems": true, "maxItems": 8, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$"}}
         }
       }
     },

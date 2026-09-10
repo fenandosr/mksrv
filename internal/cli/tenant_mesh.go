@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/fenandosr/mksrv/internal/headscale"
@@ -14,6 +15,20 @@ import (
 )
 
 var meshNodeNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+
+// tailscaleUpCommand builds the `tailscale up` line an operator runs on a
+// tenant-owned node. A tenant node stays a leaf: it serves its own services and
+// (optionally) advertises its declared subnets, but does not pull the fleet's
+// routes or let Headscale rewrite its resolver — either would break a box that
+// already has its own LAN, DNS, and (for an HPC login node) an interconnect.
+func tailscaleUpCommand(loginServer, authKey, hostname string, routes []string) string {
+	cmd := fmt.Sprintf("sudo tailscale up --login-server %s --authkey %s --hostname %s --accept-routes=false --accept-dns=false",
+		loginServer, authKey, hostname)
+	if len(routes) > 0 {
+		cmd += " --advertise-routes=" + strings.Join(routes, ",")
+	}
+	return cmd
+}
 
 // runTenantMesh mints a Headscale pre-auth key under the tenant's own Headscale
 // user so a tenant-owned node (e.g. an HPC login node) can join the mesh. The
@@ -61,7 +76,8 @@ func (a *App) runTenantMesh(ctx context.Context, printer ui.Printer, globals *gl
 	dep := f.data.Deployment
 	loginServer := "https://" + dep.Identity.HeadscaleDomain
 	magicDNS := fmt.Sprintf("%s.%s.mksrv", hostname, dep.Env)
-	upCmd := fmt.Sprintf("sudo tailscale up --login-server %s --authkey %s --hostname %s", loginServer, key, hostname)
+	routes := f.data.Tenants[id].MeshRoutes
+	upCmd := tailscaleUpCommand(loginServer, key, hostname, routes)
 
 	if printer.JSON {
 		return printer.Encode(map[string]any{
@@ -71,6 +87,7 @@ func (a *App) runTenantMesh(ctx context.Context, printer ui.Printer, globals *gl
 			"preauthKey":   key,
 			"reusable":     reusable,
 			"ttl":          ttl.String(),
+			"advertise":    routes,
 			"tailscale_up": upCmd,
 		})
 	}
@@ -80,8 +97,9 @@ func (a *App) runTenantMesh(ctx context.Context, printer ui.Printer, globals *gl
 	printer.Info("")
 	printer.Info("after it joins, the node is reachable at %s", magicDNS)
 	printer.Info("add a forwards: entry targeting %s:<port> to tenants/%s.yaml and re-run `mksrv tenant apply`", magicDNS, id)
-	if len(f.data.Tenants[id].MeshRoutes) > 0 {
-		printer.Info("for the declared mesh_routes, also run on the edge: headscale nodes approve-routes --identifier <node-id> --routes %v", f.data.Tenants[id].MeshRoutes)
+	if len(routes) > 0 {
+		printer.Info("subnet routes need forwarding on the node:  sudo sysctl -w net.ipv4.ip_forward=1  (persist in /etc/sysctl.d)")
+		printer.Info("then approve them on the edge:  headscale nodes approve-routes --identifier <node-id> --routes %s", strings.Join(routes, ","))
 	}
 	return nil
 }

@@ -367,3 +367,18 @@ reference.
   `reservedSchemas` — codes `tenant.database.no_stack` / `.schema` /
   `.extension` and warning `.schema_unused`. Template `PGRST_DB_SCHEMAS` /
   `PGRST_DB_PRE_REQUEST` come from `.Tenant.DBSchema`.
+
+## M30 — implemented
+
+- `web[].sso` — Keycloak SSO gate at the edge (ADR 0030). `model.TenantWebEndpoint`
+  gains `SSO` / `SSOGroups`; `Tenant.WebSSO()`. `mksrv tenant apply`: the realm
+  loop adds a confidential `<id>-websso` client (`webSSORedirectURIs`, groups
+  claim) when `WebSSO()`; `provisionTenantWeb` (now passed the `*keycloak.Client`)
+  fetches its secret, `EnsureRandom`s a cookie secret, pushes both as `podman`
+  secrets to the edge, renders `webSSOContainer` (one `quay.io/oauth2-proxy`
+  Quadlet per SSO tenant, loopback port `4180 + sorted-id index`, `Network=host`,
+  auth-only `static://202`), and writes an SSO Caddy fragment (`handle /oauth2/*`
+  + `forward_auth … /oauth2/auth` + `redir … /oauth2/start`). Non-SSO entries
+  keep the plain fragment (now also `header_up Host` / `X-Forwarded-Proto` /
+  `flush_interval -1`). Teardown removes the unit + secrets when the last `sso`
+  entry goes. `checkTenantWeb` codes `tenant.web.sso_cdn` / `tenant.web.sso_groups`.

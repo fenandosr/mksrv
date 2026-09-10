@@ -21,6 +21,8 @@ web:
 | `target` | `host:port` — a MagicDNS name of a tenant mesh node (`mcps-nextcloud.prod.mksrv:80`) or a private IP the edge routes to over the mesh. |
 | `provider` | `edge` (default and only value today). |
 | `cdn` | `false` (default). `true` is reserved for CloudFront + WAF and is not implemented yet — it fails validation. |
+| `sso` | `false` (default). `true` gates the hostname behind a Keycloak session at the edge (ADR 0030) — see below. |
+| `sso_groups` | optional list of realm groups (`admin`/`dev`/`apps`/`vpn`); only members of one of them pass the gate. Requires `sso: true`. |
 
 ## What `mksrv` does
 
@@ -57,10 +59,44 @@ attempts HTTP-01 (it retries with backoff either way).
 - Edge → origin adds one mesh (WireGuard) hop. Fine for file storage or a
   portal; a latency-critical app would feel it.
 
+## `sso: true` — a Keycloak gate at the edge
+
+```yaml
+web:
+  - hostname: jupyter.mcps-epcm.org
+    target: mcps-hpc-01.prod.mksrv:8000
+    sso: true
+    sso_groups: [dev, admin]      # optional
+```
+
+The hostname is public, but the edge refuses to proxy until the client has a
+valid Keycloak session for the tenant realm. `mksrv tenant apply`:
+
+- creates a confidential client `<id>-websso` in the realm (callbacks for every
+  `sso` hostname, `groups` claim);
+- runs one **oauth2-proxy** container on the edge per SSO tenant, on a loopback
+  port, covering every `sso` hostname in the apex (shared `.<base_domain>`
+  cookie);
+- the Caddy fragment `forward_auth`s to it: an unauthenticated request is bounced
+  to `/oauth2/start`, an authenticated one is proxied with `X-Auth-Request-User`
+  / `-Email` / `-Groups`.
+
+The origin can trust those headers for true SSO (JupyterHub
+`RemoteUserAuthenticator`, Grafana `auth.proxy`, Gitea `REVERSE_PROXY`) or ignore
+them and just benefit from being unreachable without a realm session.
+
+Dropping the last `sso` entry tears the container down. `sso` + `cdn` is rejected.
+
 ## VPN-only web services
 
-This block is for **public** hostnames. For a service only VPN users should
-reach, don't use `web:` — point the A record straight at the node's tailnet IP
-(`100.64.x.y`) and run TLS on the node (Caddy `acme_dns route53`, or plain HTTP
-since the mesh is already WireGuard-encrypted). It resolves for everyone but
-only routes with the mesh up.
+For a service **only VPN users** should reach, the options are:
+
+- **`web: sso: true`** (above) — the hostname is public but gated on identity.
+  This is the recommended path; it works for every user regardless of VPN client.
+- **`forwards:`** — a Cloud-IT VPN forward opens `127.0.0.1:<port>` locally.
+  Works, but a hostname-pinned app (JupyterHub, Gitea with a fixed `ROOT_URL`)
+  breaks when served from `127.0.0.1`.
+- **`dns:` A → the node's tailnet IP (`100.64.x.y`)** — only works for users
+  running **real Tailscale** joined to the tenant's Headscale user, *not* the
+  Cloud-IT VPN app, which is forward-only and cannot route to a `100.64/10`
+  address or an advertised `mesh_routes` subnet.
