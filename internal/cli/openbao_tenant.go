@@ -159,6 +159,9 @@ path "transit/decrypt/%[1]s" {
 path "transit/rewrap/%[1]s" {
   capabilities = ["update"]
 }
+path "transit/hmac/%[1]s" {
+  capabilities = ["update"]
+}
 path "transit/datakey/plaintext/%[1]s" {
   capabilities = ["update"]
 }
@@ -175,9 +178,12 @@ path "transit/keys/%[1]s/config" {
 }
 
 // tenantDevPolicyHCL is the `dev` group's policy (also the AppRole's, for
-// services): read-only on the tenant KV subtree, read/write on the
-// `dev/` sub-path, and Transit encrypt/decrypt. A more specific path wins, so
-// the dev/* grant overrides the read-only base.
+// services): read-only on the tenant KV subtree, read/write on the `dev/`
+// sub-path, and, on the tenant's own Transit key, encrypt/decrypt, HMAC
+// (blind-index columns for equality search over encrypted data), and
+// datakey/plaintext (envelope encryption for bulk PII). Not rewrap, rotate, or
+// key config — those stay `admin`. A more specific path wins, so the dev/* grant
+// overrides the read-only base.
 func tenantDevPolicyHCL(id string) string {
 	return fmt.Sprintf(`path "kv/data/tenants/%[1]s/*" {
   capabilities = ["read", "list"]
@@ -195,6 +201,12 @@ path "transit/encrypt/%[1]s" {
   capabilities = ["update"]
 }
 path "transit/decrypt/%[1]s" {
+  capabilities = ["update"]
+}
+path "transit/hmac/%[1]s" {
+  capabilities = ["update"]
+}
+path "transit/datakey/plaintext/%[1]s" {
   capabilities = ["update"]
 }
 path "transit/keys/%[1]s" {

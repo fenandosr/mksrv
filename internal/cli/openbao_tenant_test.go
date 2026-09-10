@@ -16,6 +16,8 @@ func TestTenantPolicies(t *testing.T) {
 		`capabilities = ["create", "read", "update", "delete", "list"]`,
 		`path "kv/destroy/tenants/acme/*" {`,
 		`path "transit/keys/acme/rotate" {`,
+		`path "transit/hmac/acme" {`,
+		`path "transit/datakey/plaintext/acme" {`,
 	} {
 		if !strings.Contains(admin, want) {
 			t.Fatalf("admin policy missing %q:\n%s", want, admin)
@@ -23,12 +25,20 @@ func TestTenantPolicies(t *testing.T) {
 	}
 
 	dev := tenantDevPolicyHCL("acme")
-	if !strings.Contains(dev, `path "kv/data/tenants/acme/dev/*" {`) ||
-		!strings.Contains(dev, `path "transit/encrypt/acme" {`) {
-		t.Fatalf("dev policy wrong:\n%s", dev)
+	for _, want := range []string{
+		`path "kv/data/tenants/acme/dev/*" {`,
+		`path "transit/encrypt/acme" {`,
+		`path "transit/decrypt/acme" {`,
+		`path "transit/hmac/acme" {`,              // blind-index columns
+		`path "transit/datakey/plaintext/acme" {`, // envelope encryption
+	} {
+		if !strings.Contains(dev, want) {
+			t.Fatalf("dev policy missing %q:\n%s", want, dev)
+		}
 	}
-	// dev must not be able to destroy versions or rotate the key.
-	if strings.Contains(dev, "kv/destroy") || strings.Contains(dev, "keys/acme/rotate") {
+	// dev must not be able to destroy versions, rotate, or rewrap the key.
+	if strings.Contains(dev, "kv/destroy") || strings.Contains(dev, "keys/acme/rotate") ||
+		strings.Contains(dev, "transit/rewrap") {
 		t.Fatalf("dev policy is too permissive:\n%s", dev)
 	}
 	// the base KV grant is read-only for dev.

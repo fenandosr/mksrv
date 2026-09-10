@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add (M29, ADR 0015 update): the `tenant-<id>-dev` OpenBao policy (and the
+  tenant AppRole) gains `transit/hmac/<id>` and `transit/datakey/plaintext/<id>`.
+  `hmac` backs blind-index columns for equality search over encrypted data
+  (pin `key_version=1`; per-tenant key, so no cross-tenant correlation);
+  `datakey` backs envelope encryption for bulk PII (one wrapped key per row,
+  batch-unwrapped on read). `rewrap` / `rotate` stay `admin`-only. Apply with
+  `mksrv tenant apply`. `docs/secrets.md` documents both patterns.
+
 - Security (M29, ADR 0029): `mksrv_anon` — the role PostgREST uses for
   token-less requests — **no longer gets a blanket `SELECT`** on the tenant's
   application schema. The PostgREST URL is public, so anonymous read access is

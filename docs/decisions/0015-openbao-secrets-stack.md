@@ -121,3 +121,13 @@ encrypt/decrypt). The `oidc-<id>/` mount gets a role per group with
 `bound_claims` on `groups`: `tenant-<id>-dev` (dev **or** admin, the
 `default_role`) and `tenant-<id>-admin` (admin, `-role=`-selected). The AppRole
 is repointed to `tenant-<id>-dev`. `apps`/`vpn`-only members cannot log in.
+
+## M29 update
+
+`tenant-<id>-dev` (and so the AppRole) also gets `transit/hmac/<id>` and
+`transit/datakey/plaintext/<id>` (update). `hmac` backs blind-index columns for
+equality search over encrypted data — pin `key_version=1` so the 90-day rotation
+doesn't break the index; the tenant's own key is used, so a blind index never
+correlates across tenants. `datakey` backs envelope encryption: one wrapped key
+per row, batch-unwrapped in a single `transit/decrypt` on read. `rewrap` and
+`rotate` stay `admin`-only. `docs/secrets.md` documents both patterns.
