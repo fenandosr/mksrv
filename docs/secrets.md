@@ -98,8 +98,28 @@ stacks: [database, monitor, cache, openbao]
 
 | Path | Content |
 |---|---|
-| `/mksrv/<env>/openbao/approle_<id>_role_id` | AppRole RoleID (stable) |
-| `/mksrv/<env>/openbao/approle_<id>_secret_id` | AppRole SecretID (written once; re-running `tenant apply` never rotates it) |
+| `/mksrv/<env>/openbao/approle_<id>_role_id` | AppRole RoleID (stable, not secret) |
+| `/mksrv/<env>/openbao/approle_<id>_secret_id` | a bootstrap SecretID (written once; `tenant apply` never rotates it) — for mksrv's own reconcilers, not for handing to a team |
+
+### Handing a SecretID to a service
+
+Don't copy the bootstrap SecretID out of SSM. Mint a named, wrapped one:
+
+```
+mksrv tenant secret-id acme --name celery-prod --wrap-ttl 24h
+# → role_id + a single-use wrapping token
+```
+
+Send the wrapping token on a side channel; the recipient unwraps it once
+(`BAO_TOKEN=<token> bao unwrap`) into the service's secret store. The SecretID
+does not expire (`--ttl` / `--num-uses` override that); `--cidr 100.64.0.0/10`
+binds it to the mesh. `--list` shows the named accessors, `--revoke <accessor>`
+kills one without touching the others.
+
+The command runs under a least-privilege `mksrv-operator` AppRole (mint / list /
+revoke SecretIDs for `tenant-*` roles, nothing else), created with the root token
+on first use and self-contained after that — the human operator never handles
+the root token for this.
 
 A tenant service authenticates and reads its own secrets:
 
