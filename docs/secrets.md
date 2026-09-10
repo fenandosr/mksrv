@@ -83,7 +83,8 @@ stacks: [database, monitor, cache, openbao]
   - **`tenant-<id>-admin`** — full control of `kv/tenants/<id>/*` (incl. version
     destroy) and the Transit key (incl. rotate);
   - **`tenant-<id>-dev`** — read-only on `kv/tenants/<id>/*`, read/write on
-    `kv/tenants/<id>/dev/*`, Transit encrypt/decrypt;
+    `kv/tenants/<id>/dev/*`, Transit encrypt/decrypt, HMAC (blind-index
+    columns), and datakey (envelope encryption); not rewrap or rotate;
 - an **AppRole `tenant-<id>`** bound to `tenant-<id>-dev` (`token_ttl 1h`) — for
   services; its RoleID and SecretID land in SSM;
 - a **Transit key `transit/keys/<id>`** (`aes256-gcm96`, non-exportable,
@@ -135,8 +136,30 @@ BAO_TOKEN=<token> bao write transit/decrypt/acme ciphertext='vault:v1:xxxx'
 For high-volume columns use envelope encryption: `bao write
 transit/datakey/plaintext/acme` returns a one-off data key (plaintext + wrapped);
 encrypt rows locally with the plaintext key, store the wrapped key, discard the
-plaintext. Key rotation (`transit/keys/acme/rotate`, or the 90-day auto-rotate)
-re-keys new writes; `transit/rewrap/acme` upgrades old ciphertexts.
+plaintext. To read a list of N rows, batch-decrypt the N wrapped keys in one
+`transit/decrypt` call (`batch_input`), then decrypt the columns locally — one
+round trip regardless of N. Key rotation (`transit/keys/acme/rotate`, or the
+90-day auto-rotate) re-keys new writes; `transit/rewrap/acme` upgrades old
+ciphertexts (admin only — normal operation never needs it, old versions keep
+decrypting).
+
+### Searching an encrypted column
+
+You can't `WHERE` or index a `transit/encrypt` ciphertext — it's
+non-deterministic. For equality search (a CURP, a phone), store a **blind
+index**: `transit/hmac/acme` of the value in a second, indexed column, and query
+by the HMAC of the search term. Two rules:
+
+- **Pin `key_version=1`.** `transit/hmac` uses the latest key version by default;
+  after the 90-day rotation the same input hashes differently and the index
+  breaks. Pass `key_version=1` on every call (the key is created without a
+  dedicated blind key on purpose — the tenant's own key, pinned, is enough).
+- **It leaks equality.** Same value → same index, within this tenant only (the
+  key is per-tenant, so `hmac(x)` never matches across tenants). Fine for
+  high-cardinality identifiers; think twice for low-cardinality fields.
+
+Partial match (`LIKE '%García%'` on an encrypted name) has no shortcut: narrow by
+other columns, then batch-decrypt the candidate set and filter in the app.
 
 ## Human login (OIDC)
 
@@ -152,7 +175,7 @@ listens on:
 ```
 export BAO_ADDR=http://127.0.0.1:<openbao-forward-port>   # or http://<node-tailnet-ip>:8200 on the tailnet directly
 
-# dev or admin -> read secrets, write kv/tenants/<id>/dev/*, transit enc/dec
+# dev or admin -> read secrets, write kv/tenants/<id>/dev/*, transit enc/dec/hmac/datakey
 bao login -method=oidc -path=oidc-<id>
 
 # admin only -> full control incl. version destroy and key rotation

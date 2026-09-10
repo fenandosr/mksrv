@@ -27,7 +27,7 @@ users:
 | Reach tenant mesh nodes (SSH/mosh to login nodes, internal APIs) | ✅ | ✅ | — | ✅¹ |
 | Postgres `db_<id>` — DDL + read/write | ✅ | ✅ | — | — |
 | Postgres `db_<id>` — read + granted writes | ✅ | ✅ | ✅² | — |
-| OpenBao — read `kv/tenants/<id>/*`, write `kv/…/dev/*`, transit enc/dec | ✅ | ✅ | — | — |
+| OpenBao — read `kv/tenants/<id>/*`, write `kv/…/dev/*`, transit enc/dec/hmac/datakey | ✅ | ✅ | — | — |
 | OpenBao — write all, version destroy, key rotate | ✅ | — | — | — |
 | Manage the tenant's Keycloak users | ✅ | — | — | — |
 | Change what's published (`forwards`, `dns`, mesh nodes, `stacks`) | ✅³ | — | — | — |
