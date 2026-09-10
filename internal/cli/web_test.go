@@ -17,8 +17,16 @@ func TestWebFragment(t *testing.T) {
 		t.Fatalf("fragment path = %q", got)
 	}
 	frag := webFragment(w)
-	if !strings.Contains(frag, "files.mcps-epcm.org {") || !strings.Contains(frag, "reverse_proxy mcps-nextcloud.prod.mksrv:80") {
-		t.Fatalf("fragment wrong:\n%s", frag)
+	for _, want := range []string{
+		"files.mcps-epcm.org {",
+		"reverse_proxy mcps-nextcloud.prod.mksrv:80 {",
+		"header_up Host {host}",
+		"header_up X-Forwarded-Proto {scheme}",
+		"flush_interval -1",
+	} {
+		if !strings.Contains(frag, want) {
+			t.Fatalf("fragment missing %q:\n%s", want, frag)
+		}
 	}
 }
 

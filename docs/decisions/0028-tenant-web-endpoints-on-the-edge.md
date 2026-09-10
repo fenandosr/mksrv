@@ -62,11 +62,19 @@ Requires `dns_override: { provider: route53, zone_id: … }` (same as `dns:`).
    `/var/lib/mksrv/caddy.d/25-web-<id>-<slug>.caddy`:
    ```
    files.mcps-epcm.org {
-     reverse_proxy mcps-nextcloud.prod.mksrv:80
+     reverse_proxy mcps-nextcloud.prod.mksrv:80 {
+       header_up Host {host}
+       header_up X-Forwarded-Proto {scheme}
+       flush_interval -1
+     }
    }
    ```
    Caddy obtains the certificate over **HTTP-01** (the edge's `:80` is already
-   public), so stock `caddy:2.8` is enough — no `caddy-dns/route53` build.
+   public), so stock `caddy:2.8` is enough — no `caddy-dns/route53` build. The
+   proxy block is tuned for interactive apps: the original `Host` survives a
+   chained proxy at the origin, `X-Forwarded-Proto` tells the app the client link
+   is HTTPS (OIDC redirects, OnlyOffice), and `flush_interval -1` streams SSE /
+   long-poll / chunked responses through instead of buffering.
 2. Adds a Headscale ACL rule `fleet@ → <id>@:<ports>` for the ports named in
    that tenant's `web` targets. The fleet has no path to tenant nodes today;
    this is the minimum opening for the edge to reach the origin.

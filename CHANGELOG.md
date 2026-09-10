@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Change (M28, ADR 0028): the edge `web:` Caddy fragment now proxies with
+  `header_up Host {host}` (survives a chained proxy at the origin),
+  `header_up X-Forwarded-Proto {scheme}` (OIDC redirects, OnlyOffice), and
+  `flush_interval -1` (SSE / long-poll / chunked UIs stream through instead of
+  buffering; WebSockets already did). Re-run `mksrv tenant apply <id>`.
+
+- Change (M7, ADR 0011): `mksrv tenant mesh <id>` now prints a `tailscale up`
+  that joins the tenant node as a leaf — `--accept-routes=false
+  --accept-dns=false` (never override a box with its own LAN/resolver) — and
+  appends `--advertise-routes=<cidrs>` from the tenant's `mesh_routes`, with a
+  reminder to enable `net.ipv4.ip_forward` and run `headscale nodes
+  approve-routes` on the edge.
+
 - Add (M29, ADR 0015 update): the `tenant-<id>-dev` OpenBao policy (and the
   tenant AppRole) gains `transit/hmac/<id>` and `transit/datakey/plaintext/<id>`.
   `hmac` backs blind-index columns for equality search over encrypted data

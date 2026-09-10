@@ -24,8 +24,24 @@ func webFragmentPath(id, hostname string) string {
 
 // webFragment renders the vhost: the edge terminates TLS (HTTP-01, its :80 is
 // public) and reverse-proxies to the tenant's origin over the mesh (ADR 0028).
+//
+// The proxy block is tuned for interactive tenant apps (Jupyter, RStudio, Gitea,
+// dashboards), which is what `web:` is for:
+//   - `header_up Host {host}` — keep the original host so a chained proxy at the
+//     origin (a tenant's own Caddy/nginx routing several vhosts) sees the real name;
+//   - `header_up X-Forwarded-Proto {scheme}` — the client link is HTTPS at the
+//     edge; apps that build absolute URLs (OIDC redirects, OnlyOffice) need this;
+//   - `flush_interval -1` — stream responses through instead of buffering, so
+//     SSE / long-poll / chunked UIs stay responsive. WebSockets already stream.
 func webFragment(w model.TenantWebEndpoint) string {
-	return fmt.Sprintf("%s {\n\treverse_proxy %s\n}\n", w.Hostname, w.Target)
+	return fmt.Sprintf(`%s {
+	reverse_proxy %s {
+		header_up Host {host}
+		header_up X-Forwarded-Proto {scheme}
+		flush_interval -1
+	}
+}
+`, w.Hostname, w.Target)
 }
 
 // provisionTenantWeb writes an edge Caddy vhost fragment for every `web:` entry
