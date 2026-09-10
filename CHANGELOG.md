@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Add (M30, ADR 0030): `web[].sso: true` (+ optional `sso_groups`) gates a
+  tenant web hostname behind a Keycloak session at the edge. `mksrv tenant
+  apply` creates a confidential `<id>-websso` realm client and runs one
+  oauth2-proxy container on the edge per SSO tenant; the Caddy fragment
+  `forward_auth`s to it and passes `X-Auth-Request-User` / `-Email` / `-Groups`
+  to the origin. Dropping the last `sso` entry tears the gate down. `sso` + `cdn`
+  is rejected (`tenant.web.sso_cdn`).
+
+- Change (M28/M30, ADR 0028): every `web:` Caddy fragment now proxies with
+  `header_up Host {host}` (survives a chained proxy at the origin),
+  `header_up X-Forwarded-Proto {scheme}` (OIDC redirects, OnlyOffice), and
+  `flush_interval -1` (SSE / long-poll / chunked UIs stream instead of buffering;
+  WebSockets already did).
+
+- Change (M7, ADR 0011): `mksrv tenant mesh <id>` prints a `tailscale up` that
+  joins the tenant node as a leaf — `--accept-routes=false --accept-dns=false`
+  (never override a box with its own LAN/resolver) — and appends
+  `--advertise-routes=<cidrs>` from the tenant's `mesh_routes`, with a reminder
+  to enable `net.ipv4.ip_forward` and run `headscale nodes approve-routes` on
+  the edge.
+
 - Add (M29, ADR 0015 update): the `tenant-<id>-dev` OpenBao policy (and the
   tenant AppRole) gains `transit/hmac/<id>` and `transit/datakey/plaintext/<id>`.
   `hmac` backs blind-index columns for equality search over encrypted data

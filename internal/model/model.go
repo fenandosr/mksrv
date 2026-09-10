@@ -148,6 +148,22 @@ type TenantWebEndpoint struct {
 	Target   string `json:"target"`             // host:port — a MagicDNS name or private IP the edge routes to
 	Provider string `json:"provider,omitempty"` // "edge" (default)
 	CDN      bool   `json:"cdn,omitempty"`
+	// SSO gates the hostname behind a Keycloak session at the edge (ADR 0030):
+	// an oauth2-proxy for the tenant realm sits in front, and the origin sees
+	// X-Auth-Request-User / -Email / -Groups.
+	SSO bool `json:"sso,omitempty"`
+	// SSOGroups, when set, restricts the gate to members of these realm groups.
+	SSOGroups []string `json:"sso_groups,omitempty"`
+}
+
+// WebSSO reports whether any web endpoint gates on Keycloak (ADR 0030).
+func (t Tenant) WebSSO() bool {
+	for _, w := range t.Web {
+		if w.SSO {
+			return true
+		}
+	}
+	return false
 }
 
 // TenantDatabase is the optional `database:` block: per-tenant knobs for the

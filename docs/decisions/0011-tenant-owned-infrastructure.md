@@ -48,6 +48,13 @@ appears as `<hostname>.<env>.mksrv` and can be named in `forwards[].target`. The
 existing ACL rule `<id>@ -> <id>@:*` already lets the tenant's VPN devices reach
 it; no ACL change for the direct case.
 
+The printed command joins the node as a **leaf**: `--accept-routes=false`
+`--accept-dns=false` so Tailscale never overrides a box that already has its own
+LAN, resolver and (for an HPC login node) an interconnect. When the tenant
+declares `mesh_routes`, `--advertise-routes=<cidrs>` is appended and the command
+output reminds the operator to enable `net.ipv4.ip_forward` on the node and run
+`headscale nodes approve-routes` on the edge.
+
 ### Web endpoints: tenant terminates TLS (Model B)
 
 For `jupyter.mcps-epcm.org` and similar, the tenant's cluster runs its own

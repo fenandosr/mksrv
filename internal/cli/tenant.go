@@ -162,6 +162,12 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 				GroupsClaim: true,
 			})
 		}
+		if tenant.WebSSO() {
+			clients = append(clients, keycloak.ClientSpec{
+				ClientID: webSSOClientID(id), Public: false,
+				RedirectURIs: webSSORedirectURIs(tenant), GroupsClaim: true,
+			})
+		}
 		res, err := kc.EnsureRealm(ctx, keycloak.RealmSpec{
 			Realm:       realm,
 			DisplayName: tenant.DisplayName,
@@ -201,7 +207,7 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 		return &ExitError{Code: 1, Err: err}
 	}
 
-	if err := f.provisionTenantWeb(ctx, printer, edgeClient, selected); err != nil {
+	if err := f.provisionTenantWeb(ctx, printer, edgeClient, kc, selected); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
 
