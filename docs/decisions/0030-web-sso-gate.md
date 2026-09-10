@@ -67,21 +67,22 @@ For each tenant with **any** `sso` web entry:
      proxy covers every sso hostname in the tenant apex, with a shared session
      cookie;
    - `upstreams=static://202` — auth-only, Caddy does the proxying;
-   - `allowed-groups=<sso_groups>` when set;
    - client secret + a generated `cookie-secret` are `podman` secrets
      (`mksrv-websso-<id>-oidc`, `-cookie`), env-injected.
+   - `sso_groups` is **not** set on the container — one proxy serves every sso
+     hostname in the apex; group rules are enforced per hostname (below).
 3. **Caddy fragment** — for each sso hostname
    (`25-web-<id>-<slug>.caddy`):
    ```
-   jupyter.mcps-epcm.org {
+   git.mcps-epcm.org {
      handle /oauth2/* {
        reverse_proxy 127.0.0.1:4180
      }
      handle {
        forward_auth 127.0.0.1:4180 {
-         uri /oauth2/auth
+         uri /oauth2/auth?allowed_groups=dev,admin   # from sso_groups; omitted when unset
          copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Groups
-         @err status 401
+         @err status 401 403
          handle_response @err {
            redir * /oauth2/start?rd={scheme}://{host}{uri}
          }
@@ -94,7 +95,9 @@ For each tenant with **any** `sso` web entry:
      }
    }
    ```
-   A non-sso entry keeps the plain fragment from ADR 0028.
+   `sso_groups` becomes oauth2-proxy's per-request `allowed_groups` query param,
+   so one proxy enforces different group rules per vhost. A non-sso entry keeps
+   the plain fragment from ADR 0028.
 4. Reloads the edge Caddy; `daemon-reload` + restart the `websso` unit when its
    config changed.
 

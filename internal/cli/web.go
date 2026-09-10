@@ -82,15 +82,21 @@ func webFragment(w model.TenantWebEndpoint, ssoPort int) string {
 
 	// Gate on a Keycloak session (ADR 0030): oauth2-proxy on the edge answers
 	// /oauth2/*; an unauthenticated request is bounced to /oauth2/start.
+	// `sso_groups` is enforced per hostname via oauth2-proxy's `allowed_groups`
+	// query param — one proxy, different rules per vhost.
+	authURI := "/oauth2/auth"
+	if len(w.SSOGroups) > 0 {
+		authURI += "?allowed_groups=" + strings.Join(w.SSOGroups, ",")
+	}
 	return fmt.Sprintf(`%s {
 	handle /oauth2/* {
 		reverse_proxy 127.0.0.1:%d
 	}
 	handle {
 		forward_auth 127.0.0.1:%d {
-			uri /oauth2/auth
+			uri %s
 			copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Groups
-			@err status 401
+			@err status 401 403
 			handle_response @err {
 				redir * /oauth2/start?rd={scheme}://{host}{uri}
 			}
@@ -98,7 +104,7 @@ func webFragment(w model.TenantWebEndpoint, ssoPort int) string {
 		%s
 	}
 }
-`, w.Hostname, ssoPort, ssoPort, proxy)
+`, w.Hostname, ssoPort, ssoPort, authURI, proxy)
 }
 
 // webSSOContainer renders the per-tenant oauth2-proxy Quadlet for the edge.
@@ -106,26 +112,6 @@ func webSSOContainer(t model.Tenant, id, keycloakDomain, realm string, port int)
 	redirect := ""
 	if h := webSSOHostnames(t); len(h) > 0 {
 		redirect = "https://" + h[0] + "/oauth2/callback"
-	}
-	// The strictest sso_groups across the tenant's SSO entries would be
-	// per-hostname; oauth2-proxy is one process, so we take the union and let
-	// Caddy/RLS refine. Empty = any realm member.
-	groups := map[string]bool{}
-	for _, w := range t.Web {
-		if w.SSO {
-			for _, g := range w.SSOGroups {
-				groups[g] = true
-			}
-		}
-	}
-	allowed := ""
-	if len(groups) > 0 {
-		var gs []string
-		for g := range groups {
-			gs = append(gs, "/"+g)
-		}
-		slices.Sort(gs)
-		allowed = "Environment=OAUTH2_PROXY_ALLOWED_GROUPS=" + strings.Join(gs, ",") + "\n"
 	}
 
 	return fmt.Sprintf(`[Unit]
@@ -152,7 +138,7 @@ Environment=OAUTH2_PROXY_SET_XAUTHREQUEST=true
 Environment=OAUTH2_PROXY_PASS_ACCESS_TOKEN=true
 Environment=OAUTH2_PROXY_SKIP_PROVIDER_BUTTON=true
 Environment=OAUTH2_PROXY_UPSTREAMS=static://202
-%[8]sSecret=mksrv-websso-%[1]s-oidc,type=env,target=OAUTH2_PROXY_CLIENT_SECRET
+Secret=mksrv-websso-%[1]s-oidc,type=env,target=OAUTH2_PROXY_CLIENT_SECRET
 Secret=mksrv-websso-%[1]s-cookie,type=env,target=OAUTH2_PROXY_COOKIE_SECRET
 
 [Service]
@@ -161,7 +147,7 @@ TimeoutStartSec=60
 
 [Install]
 WantedBy=multi-user.target
-`, id, oauth2ProxyImage, port, keycloakDomain, realm, redirect, t.BaseDomain, allowed)
+`, id, oauth2ProxyImage, port, keycloakDomain, realm, redirect, t.BaseDomain)
 }
 
 // provisionTenantWeb reconciles every tenant's `web:` block on the edge (ADR

@@ -42,8 +42,9 @@ func TestWebFragmentSSO(t *testing.T) {
 		"handle /oauth2/* {",
 		"reverse_proxy 127.0.0.1:4182",
 		"forward_auth 127.0.0.1:4182 {",
-		"uri /oauth2/auth",
+		"uri /oauth2/auth\n",
 		"copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Groups",
+		"@err status 401 403",
 		"redir * /oauth2/start?rd={scheme}://{host}{uri}",
 		"reverse_proxy mcps-hpc-01.prod.mksrv:8000 {",
 		"flush_interval -1",
@@ -51,6 +52,12 @@ func TestWebFragmentSSO(t *testing.T) {
 		if !strings.Contains(frag, want) {
 			t.Fatalf("SSO fragment missing %q:\n%s", want, frag)
 		}
+	}
+
+	// sso_groups -> per-hostname allowed_groups query param.
+	gated := webFragment(model.TenantWebEndpoint{Hostname: "git.mcps-epcm.org", Target: "n:3000", SSO: true, SSOGroups: []string{"dev", "admin"}}, 4182)
+	if !strings.Contains(gated, "uri /oauth2/auth?allowed_groups=dev,admin") {
+		t.Fatalf("gated fragment missing allowed_groups:\n%s", gated)
 	}
 }
 
@@ -87,7 +94,6 @@ func TestWebSSOContainer(t *testing.T) {
 		"OAUTH2_PROXY_CLIENT_ID=mcps-websso",
 		"OAUTH2_PROXY_REDIRECT_URL=https://git.mcps-epcm.org/oauth2/callback", // sorted-first hostname
 		"OAUTH2_PROXY_COOKIE_DOMAINS=.mcps-epcm.org",
-		"OAUTH2_PROXY_ALLOWED_GROUPS=/admin,/dev",
 		"Secret=mksrv-websso-mcps-oidc,type=env,target=OAUTH2_PROXY_CLIENT_SECRET",
 		"Secret=mksrv-websso-mcps-cookie,type=env,target=OAUTH2_PROXY_COOKIE_SECRET",
 	} {
@@ -95,12 +101,9 @@ func TestWebSSOContainer(t *testing.T) {
 			t.Fatalf("websso unit missing %q:\n%s", want, unit)
 		}
 	}
-
-	// No sso_groups -> no ALLOWED_GROUPS line.
-	plain := webSSOContainer(model.Tenant{ID: "acme", BaseDomain: "acme.example.com",
-		Web: []model.TenantWebEndpoint{{Hostname: "a.acme.example.com", Target: "n:80", SSO: true}}}, "acme", "auth.x", "acme", 4180)
-	if strings.Contains(plain, "ALLOWED_GROUPS") {
-		t.Fatalf("no sso_groups should omit ALLOWED_GROUPS:\n%s", plain)
+	// Groups are enforced per hostname in the fragment, not tenant-wide here.
+	if strings.Contains(unit, "ALLOWED_GROUPS") {
+		t.Fatalf("group enforcement belongs in the fragment, not the container:\n%s", unit)
 	}
 }
 
