@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add (M31, ADR 0015 update): `mksrv tenant secret-id <id>` mints a named,
+  response-wrapped OpenBao AppRole SecretID for a tenant's service — the operator
+  stops copying the write-once bootstrap SecretID out of SSM by hand with the
+  root token. `--name` (audit metadata), `--cidr` (bind to source networks),
+  `--ttl` / `--num-uses`, `--list`, `--revoke <accessor>`. Runs under a
+  least-privilege `mksrv-operator` AppRole (SecretID ops on `tenant-*` roles
+  only), created once with root and self-contained after.
+
 - Add (M30, ADR 0030): `web[].sso: true` (+ optional `sso_groups`) gates a
   tenant web hostname behind a Keycloak session at the edge. `mksrv tenant
   apply` creates a confidential `<id>-websso` realm client and runs one

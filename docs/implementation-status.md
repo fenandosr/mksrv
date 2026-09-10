@@ -382,3 +382,18 @@ reference.
   keep the plain fragment (now also `header_up Host` / `X-Forwarded-Proto` /
   `flush_interval -1`). Teardown removes the unit + secrets when the last `sso`
   entry goes. `checkTenantWeb` codes `tenant.web.sso_cdn` / `tenant.web.sso_groups`.
+
+## M31 — implemented
+
+- `mksrv tenant secret-id <id>` (ADR 0015 update). `internal/cli/tenant_secretid.go`:
+  `operatorBaoToken` ensures a `mksrv-operator` policy + AppRole
+  (`operatorAppRolePolicyHCL` — SecretID ops on `auth/approle/role/tenant-+`,
+  `read` on role-id, nothing else), created once with the SSM root token and its
+  RoleID/SecretID then in SSM (`operator_role_id` / `operator_secret_id`);
+  `baoAppRoleLogin` (SecretID over stdin). The command dials the OpenBao leader,
+  gets an operator token, and either `--list` (accessor + metadata),
+  `--revoke <accessor>` (destroy), or mints one wrapped SecretID
+  (`secretIDMintArgs` — `-wrap-ttl`, `metadata` with `--name`, optional
+  `cidr_list` / `token_bound_cidrs` / `ttl` / `num_uses`) and prints the
+  wrapping token + RoleID. The write-once `approle_<id>_secret_id` in SSM stays
+  as mksrv's reconciler credential.

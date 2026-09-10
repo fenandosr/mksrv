@@ -85,6 +85,31 @@ func (a *App) newTenantCommand(opts *globalOptions) *cobra.Command {
 	mesh.Flags().Bool("reusable", false, "mint a reusable key (register several nodes)")
 	mesh.Flags().Duration("ttl", 2*time.Hour, "pre-auth key lifetime")
 	cmd.AddCommand(mesh)
+
+	secretID := &cobra.Command{
+		Use:   "secret-id ID",
+		Short: "Mint a wrapped OpenBao AppRole SecretID for a tenant's service (Django, Celery, …)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			o := tenantSecretIDOptions{}
+			o.Name, _ = cmd.Flags().GetString("name")
+			o.WrapTTL, _ = cmd.Flags().GetDuration("wrap-ttl")
+			o.TTL, _ = cmd.Flags().GetDuration("ttl")
+			o.NumUses, _ = cmd.Flags().GetInt("num-uses")
+			o.CIDRs, _ = cmd.Flags().GetStringSlice("cidr")
+			o.List, _ = cmd.Flags().GetBool("list")
+			o.Revoke, _ = cmd.Flags().GetString("revoke")
+			return a.runTenantSecretID(cmd.Context(), a.printer(opts), opts, args[0], o)
+		},
+	}
+	secretID.Flags().String("name", "", "label recorded in SecretID metadata (audit)")
+	secretID.Flags().Duration("wrap-ttl", time.Hour, "wrapping token lifetime")
+	secretID.Flags().Duration("ttl", 0, "SecretID lifetime (0 = never expires)")
+	secretID.Flags().Int("num-uses", 0, "SecretID use limit (0 = unlimited)")
+	secretID.Flags().StringSlice("cidr", nil, "bind the SecretID and its tokens to these source CIDRs")
+	secretID.Flags().Bool("list", false, "list issued SecretID accessors instead of minting")
+	secretID.Flags().String("revoke", "", "destroy a SecretID by accessor")
+	cmd.AddCommand(secretID)
 	return cmd
 }
 

@@ -122,6 +122,20 @@ encrypt/decrypt). The `oidc-<id>/` mount gets a role per group with
 `default_role`) and `tenant-<id>-admin` (admin, `-role=`-selected). The AppRole
 is repointed to `tenant-<id>-dev`. `apps`/`vpn`-only members cannot log in.
 
+## M31 update
+
+`mksrv tenant secret-id <id>` mints a **named, response-wrapped** AppRole
+SecretID for a tenant's service (Django, a Celery worker), so the operator stops
+copying the write-once bootstrap SecretID out of SSM by hand with the root token.
+`--name` lands in the SecretID metadata (audit), `--cidr` binds it to source
+networks, `--list` / `--revoke <accessor>` manage the set. The command runs under
+a least-privilege `mksrv-operator` AppRole — `create`/`list`/`update` on
+`auth/approle/role/tenant-+/secret-id{,-accessor/*}` and `read` on `role-id`,
+nothing else. It is created once with the root token (self-heal on first use) and
+its RoleID/SecretID then live in SSM; the root token is no longer touched by a
+human for this path. The write-once `approle_<id>_secret_id` in SSM stays as
+mksrv's own reconciler credential.
+
 ## M29 update
 
 `tenant-<id>-dev` (and so the AppRole) also gets `transit/hmac/<id>` and
