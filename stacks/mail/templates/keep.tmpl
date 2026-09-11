@@ -1,0 +1,6 @@
+# mksrv-managed placeholder. Its only job is to make DeployStack's
+# write-time `mkdir -p` create this directory before the mail server's
+# Quadlet unit bind-mounts it — Podman does not create a missing bind-mount
+# source itself, so without this the container fails to start on a fresh
+# host with "statfs ...: no such file or directory". Safe to ignore/delete;
+# mksrv recreates it (and the directory) on the next deploy.

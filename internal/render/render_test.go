@@ -76,6 +76,55 @@ func TestStackRendersBase(t *testing.T) {
 	}
 }
 
+// TestStackRendersMail guards a real deploy failure: the mail server's
+// Quadlet unit bind-mounts five host directories, and Podman does not create
+// a missing bind-mount source — it fails the container start with
+// "statfs ...: no such file or directory" instead. Nothing else in the stack
+// (or in DeployStack's generic write-time `mkdir -p`) touches those
+// directories unless a template is destined into each one, so the stack
+// carries five `.keep` placeholders purely to trigger that. Also guards the
+// Quadlet key itself: `Hostname=` isn't recognized by Podman's Quadlet
+// generator (the real key is `HostName=`, capital N) — it's silently dropped
+// rather than erroring the unit file, so `mksrv deploy` reports success while
+// systemd never gets a service to restart.
+func TestStackRendersMail(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	mail := catalog["mail"]
+	ctx := baseContext()
+	ctx.Host.Stacks = []string{"base", "identity", "mail"}
+	files, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), mail, ctx)
+	if err != nil {
+		t.Fatalf("Stack() error = %v", err)
+	}
+
+	for _, dst := range []string{
+		"/var/lib/mksrv/stacks/mail/config/.keep",
+		"/var/lib/mksrv/stacks/mail/tls/.keep",
+		"/var/lib/mksrv/vol/maildata/mail-data/.keep",
+		"/var/lib/mksrv/vol/maildata/mail-state/.keep",
+		"/var/lib/mksrv/vol/maildata/mail-logs/.keep",
+	} {
+		if _, ok := files[dst]; !ok {
+			t.Errorf("no placeholder rendered for %s; got %v", dst, SortedPaths(files))
+		}
+	}
+
+	unit, ok := files["/etc/containers/systemd/mksrv-mailserver.container"]
+	if !ok {
+		t.Fatal("no mailserver .container rendered")
+	}
+	if strings.Contains(string(unit), "\nHostname=") {
+		t.Fatalf("mailserver unit uses the unrecognized Quadlet key 'Hostname=' (want 'HostName='):\n%s", unit)
+	}
+	if !strings.Contains(string(unit), "\nHostName=mail.example.com") {
+		t.Fatalf("mailserver unit missing HostName=:\n%s", unit)
+	}
+}
+
 func TestStackRendersIdentity(t *testing.T) {
 	t.Parallel()
 	catalog, err := engine.Catalog(schema.New())
