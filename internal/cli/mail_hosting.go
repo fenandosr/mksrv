@@ -38,16 +38,25 @@ func (f *fleet) mailHost() *hostTarget {
 	return nil
 }
 
-// mailTenants returns every tenant opted into the shared mail stack
-// (`mail.hosted: true`, with at least one domain), sorted by id — the full
-// set, not just this run's `--tenant` selection, so a partial
-// `tenant apply <id>` never drops another tenant's mailboxes from the shared
-// accounts file. `hosted: false` (or unset) means the `mail:` block is just
-// documentation — e.g. forward-looking SPF/DMARC intent — not live yet.
+// tenantMailHosted is the one gate for "is this tenant live on the shared
+// mail stack" — `mail.hosted: true` with at least one domain. `hosted: false`
+// (or unset) means the `mail:` block is just documentation — e.g.
+// forward-looking SPF/DMARC intent — not live yet. Every mail-provisioning
+// path (the shared mailbox file, DKIM generation, …) must gate on this, not
+// just `t.Mail != nil`, or a tenant with a documentation-only `mail:` block
+// gets provisioned anyway.
+func tenantMailHosted(t model.Tenant) bool {
+	return t.Mail != nil && t.Mail.Hosted && len(t.Mail.Domains) > 0
+}
+
+// mailTenants returns every tenant opted into the shared mail stack, sorted
+// by id — the full set, not just this run's `--tenant` selection, so a
+// partial `tenant apply <id>` never drops another tenant's mailboxes from the
+// shared accounts file.
 func mailTenants(tenants map[string]model.Tenant) []string {
 	var ids []string
 	for id, t := range tenants {
-		if t.Mail != nil && t.Mail.Hosted && len(t.Mail.Domains) > 0 {
+		if tenantMailHosted(t) {
 			ids = append(ids, id)
 		}
 	}
@@ -84,7 +93,7 @@ func (f *fleet) provisionMail(ctx context.Context, printer ui.Printer, selected 
 	}
 	for _, id := range selected {
 		t, ok := f.data.Tenants[id]
-		if !ok || t.Mail == nil {
+		if !ok || !tenantMailHosted(t) {
 			continue
 		}
 		if err := f.reconcileDKIM(ctx, printer, client, id, t); err != nil {
