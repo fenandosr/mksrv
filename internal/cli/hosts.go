@@ -45,6 +45,7 @@ type fleet struct {
 	byName     map[string]hostTarget
 	outputs    infra.Outputs
 	resolver   *secretsx.Resolver
+	awsClients *awsclient.Clients
 	meshIPs    map[string]string
 	postgres   postgresCluster
 	openbao    openbaoCluster
@@ -64,6 +65,7 @@ func (f *fleet) ensureSecrets(ctx context.Context) error {
 		return &ExitError{Code: 2, Err: err}
 	}
 	f.resolver = secretsx.NewResolver(clients.SSM(), f.data.Deployment.Env)
+	f.awsClients = clients
 	return nil
 }
 

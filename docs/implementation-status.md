@@ -397,3 +397,26 @@ reference.
   `cidr_list` / `token_bound_cidrs` / `ttl` / `num_uses`) and prints the
   wrapping token + RoleID. The write-once `approle_<id>_secret_id` in SSM stays
   as mksrv's reconciler credential.
+
+## M32 — implemented
+
+- `mail` stack, for real (ADR 0032). `stacks/mail/stack.yaml` gains a
+  `storage:` volume (`maildata`) and real `templates:` (`mksrv-mail.network`,
+  `mailserver.container` — `docker-mailserver`, ports 25/465/587/993 public,
+  `SSL_TYPE=manual` against a cert mksrv copies in, `mail.caddy` — an empty
+  fragment so Caddy holds a cert for the shared `mail.<root_domain>` hostname).
+  `internal/model.TenantMail` gains `Mailboxes []TenantMailbox`;
+  `internal/workspace/semantic.go` gains `checkTenantMail` (codes
+  `tenant.mail.no_domain` / `.no_zone` / `.no_stack` / `.address` / `.domain` /
+  `.duplicate`). New `internal/cli/mail_hosting.go`: `provisionMail` (wired
+  into `runTenantApply`) reconciles the shared `postfix-accounts.cf` (every
+  mail-consuming tenant, hash-compare-then-restart), copies the edge Caddy's
+  cert for the shared hostname into the mailserver's TLS mount, and generates +
+  publishes DKIM per domain for the tenants selected this run. `internal/aws`
+  gains a `route53` client and `UpsertTXT` (the one DNS write mksrv makes
+  directly via the AWS SDK instead of Terraform — DKIM's value only exists
+  after the server generates it). `infra/modules/aws-host` gains a
+  `local.has_mail`-gated public ingress rule (25/465/587/993, edge only);
+  `infra/root/main.tf`'s `tenant_dns` local gains MX/SPF/DMARC per tenant mail
+  domain (computed, no live dependency) and `operator_fqdns` gains
+  `mail.<root_domain>` when any host carries `mail`. `docs/tenant-mail.md`.

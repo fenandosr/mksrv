@@ -11,6 +11,9 @@ mail:
   domains: [acme.example.com]
   inbound: false
   dmarc_rua: dmarc@acme.example.com
+  mailboxes:
+    - address: admin@acme.example.com
+      name: "Team Lead"
 stacks: [database, files, analytics, monitor]
 database:
   postgrest: false
