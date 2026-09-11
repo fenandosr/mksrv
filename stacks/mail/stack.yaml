@@ -49,7 +49,16 @@ templates:
 resources:
   min_ram_mb: 1024
   disk_gb: 20
+# Not a `tcp`/993 check: docker-mailserver refuses to start Dovecot (so
+# nothing ever binds :993) until at least one mailbox exists in
+# postfix-accounts.cf — which `mksrv tenant apply` writes, *after* this
+# deploy. A `tcp` check here would retry for its full ~5 minutes and then
+# hard-fail every first deploy on a host with no mailboxes provisioned yet
+# (confirmed live). `command` is the existing no-op escape hatch
+# (runHealthCheck's `case "command": return nil`) for a stack whose health
+# genuinely can't be checked at deploy time; the container's own Quadlet
+# HealthCmd (`ss ... :993`) still tracks real health continuously —
+# `podman ps` / `systemctl status mksrv-mailserver.service` show it.
 health:
   - app: mailserver
-    type: tcp
-    port: 993
+    type: command
