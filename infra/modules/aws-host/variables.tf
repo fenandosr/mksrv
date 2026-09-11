@@ -113,6 +113,16 @@ variable "backup_enabled" {
   default     = false
 }
 
+variable "extra_ports" {
+  description = "Ad-hoc public ingress rules for services mksrv's own stack catalog doesn't provision (e.g. a legacy service being migrated onto this host)."
+  type = list(object({
+    port        = number
+    protocol    = string
+    description = optional(string, "")
+  }))
+  default = []
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

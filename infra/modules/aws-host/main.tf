@@ -86,6 +86,18 @@ resource "aws_vpc_security_group_ingress_rule" "web" {
   ip_protocol       = "tcp"
 }
 
+# Ad-hoc ports for services outside the stack catalog (e.g. a legacy service
+# migrated onto this host — see `deployment.yaml`'s `hosts.<name>.extra_ports`).
+resource "aws_vpc_security_group_ingress_rule" "extra" {
+  for_each          = { for p in var.extra_ports : "${p.protocol}/${p.port}" => p }
+  security_group_id = aws_security_group.host.id
+  description       = each.value.description != "" ? each.value.description : "extra port (${each.key})"
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = each.value.port
+  to_port           = each.value.port
+  ip_protocol       = each.value.protocol
+}
+
 # Fleet hosts trust each other inside the VPC; the VPC boundary (no public
 # ingress to non-edge hosts) is the perimeter for data-plane ports.
 resource "aws_vpc_security_group_ingress_rule" "intra_vpc" {

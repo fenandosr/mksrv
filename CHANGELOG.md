@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add (infra): `hosts.<name>.extra_ports` in `deployment.yaml` — ad-hoc public
+  ingress rules (`port`, `protocol`, optional `description`) on a host's
+  security group for services outside mksrv's own stack catalog, e.g. a
+  legacy service being migrated onto the edge. Formalizes what would
+  otherwise be a manual `aws ec2 authorize-security-group-ingress` that
+  `terraform apply` doesn't know about and can't reconcile.
+
 - Add (M31, ADR 0015 update): `mksrv tenant secret-id <id>` mints a named,
   response-wrapped OpenBao AppRole SecretID for a tenant's service — the operator
   stops copying the write-once bootstrap SecretID out of SSM by hand with the

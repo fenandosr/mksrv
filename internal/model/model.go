@@ -105,15 +105,25 @@ type MailConfig struct {
 }
 
 type Host struct {
-	Provider          string   `json:"provider"`
-	InstanceType      string   `json:"instance_type,omitempty"`
-	RootGB            int      `json:"root_gb,omitempty"`
-	DataGB            int      `json:"data_gb,omitempty"`
-	Address           string   `json:"address,omitempty"`
-	SSHUser           string   `json:"ssh_user,omitempty"`
-	SSHPort           int      `json:"ssh_port,omitempty"`
-	AdvertiseExitNode bool     `json:"advertise_exitnode,omitempty"`
-	Stacks            []string `json:"stacks"`
+	Provider          string          `json:"provider"`
+	InstanceType      string          `json:"instance_type,omitempty"`
+	RootGB            int             `json:"root_gb,omitempty"`
+	DataGB            int             `json:"data_gb,omitempty"`
+	Address           string          `json:"address,omitempty"`
+	SSHUser           string          `json:"ssh_user,omitempty"`
+	SSHPort           int             `json:"ssh_port,omitempty"`
+	AdvertiseExitNode bool            `json:"advertise_exitnode,omitempty"`
+	Stacks            []string        `json:"stacks"`
+	ExtraPorts        []HostExtraPort `json:"extra_ports,omitempty"`
+}
+
+// HostExtraPort is an ad-hoc public ingress rule for a host, for services
+// mksrv's stack catalog doesn't itself provision (e.g. a legacy service being
+// migrated onto the edge). See ADR-less follow-up to ADR 0027/0032.
+type HostExtraPort struct {
+	Port        int    `json:"port"`
+	Protocol    string `json:"protocol"`
+	Description string `json:"description,omitempty"`
 }
 
 type TelemetryConfig struct {

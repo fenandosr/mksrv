@@ -217,6 +217,7 @@ module "aws_host" {
 
   advertise_exitnode = try(each.value.advertise_exitnode, false)
   is_nat             = local.nat_via_edge && each.key == local.base_host
+  extra_ports        = try(each.value.extra_ports, [])
 }
 
 # ADR 0027: the private subnets default-route through the edge's ENI, which runs
