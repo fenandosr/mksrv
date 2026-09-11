@@ -38,14 +38,16 @@ func (f *fleet) mailHost() *hostTarget {
 	return nil
 }
 
-// mailTenants returns every tenant declaring a `mail:` block with at least one
-// domain, sorted by id — the full set, not just this run's `--tenant`
-// selection, so a partial `tenant apply <id>` never drops another tenant's
-// mailboxes from the shared accounts file.
+// mailTenants returns every tenant opted into the shared mail stack
+// (`mail.hosted: true`, with at least one domain), sorted by id — the full
+// set, not just this run's `--tenant` selection, so a partial
+// `tenant apply <id>` never drops another tenant's mailboxes from the shared
+// accounts file. `hosted: false` (or unset) means the `mail:` block is just
+// documentation — e.g. forward-looking SPF/DMARC intent — not live yet.
 func mailTenants(tenants map[string]model.Tenant) []string {
 	var ids []string
 	for id, t := range tenants {
-		if t.Mail != nil && len(t.Mail.Domains) > 0 {
+		if t.Mail != nil && t.Mail.Hosted && len(t.Mail.Domains) > 0 {
 			ids = append(ids, id)
 		}
 	}

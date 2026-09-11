@@ -66,6 +66,14 @@ locals {
         # DKIM, which `mksrv tenant apply` publishes separately once the
         # server has generated the key). One triple per declared domain.
         #
+        # Gated on `mail.hosted` — not just `mail.domains`/`dmarc_rua` being
+        # set. `mail` is a shared, non-per_tenant stack (schema rejects it in
+        # a tenant's own `stacks:` list — "not tenant-consumable"), so it
+        # can't gate on stack membership the way `database`/postgrest does
+        # above; a tenant can otherwise carry a `mail:` block (e.g. as
+        # forward-looking SPF/DMARC documentation) without that alone
+        # starting DNS writes — only `hosted: true` does.
+        #
         # try(coalesce(...), default) everywhere `t.mail.X` is read: `t.mail`
         # itself can be null (no `mail:` block at all — attribute access on it
         # errors, caught by the outer try()); when `t.mail` is a real object
@@ -73,7 +81,7 @@ locals {
         # error, which try() alone would pass through unchanged — coalesce()
         # is what actually substitutes the default in that case.
         flatten([
-          for d in try(coalesce(t.mail.domains, []), []) : concat(
+          for d in(try(coalesce(t.mail.hosted, false), false) ? try(coalesce(t.mail.domains, []), []) : []) : concat(
             try(coalesce(t.mail.inbound, false), false) ? [{
               fqdn  = d
               type  = "MX"
@@ -105,7 +113,7 @@ locals {
     if try(t.dns_override.provider, "") == "route53" && (
       length(coalesce(t.dns, [])) > 0 ||
       length(coalesce(t.web, [])) > 0 ||
-      length(try(coalesce(t.mail.domains, []), [])) > 0
+      (try(coalesce(t.mail.hosted, false), false) && length(try(coalesce(t.mail.domains, []), [])) > 0)
     )
   }
 

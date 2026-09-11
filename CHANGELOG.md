@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Add (M32 follow-up, ADR 0032): `mail.hosted` — the real opt-in switch for
+  the shared mail stack. Without it, `mail.domains`/`dmarc_rua` alone is just
+  documentation (e.g. a tenant recording SPF/DMARC intent ahead of an actual
+  migration): `mksrv apply --infra-only` writes no DNS and
+  `mksrv tenant apply` provisions no mailboxes/DKIM for that tenant.
+  Surfaced live: two tenants already carried a `mail:` block from earlier,
+  unrelated work, and once M32 merged, `mksrv apply --infra-only` started
+  computing SPF/DMARC for both — outside what had actually been authorized.
+  `mail` is a shared, non-`per_tenant` stack (the schema rejects listing
+  `mail` in a tenant's own `stacks:` — "not tenant-consumable"), so unlike
+  `database` this can't gate on stack membership; `hosted` is the dedicated
+  flag instead.
+
 - Fix (infra): `terraform plan`/`apply` failed with "all map elements must
   have the same type" for `var.tenants` as soon as one tenant's `web:` or
   `forwards:` used a shape another tenant (or another entry in its own list)
