@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Fix (infra): the mail server's Quadlet unit bind-mounts five host
+  directories (its config/TLS bind mounts, plus the `maildata` volume's
+  three subdirectories); Podman doesn't create a missing bind-mount source
+  itself, so on a fresh host (or a volume newly bootstrapped) the container
+  failed to start: `statfs /var/lib/mksrv/stacks/mail/config: no such file
+  or directory`. Nothing in the stack wrote into those directories via
+  `templates:` (they're populated later, by `mksrv tenant apply`'s direct
+  SSH writes, or by docker-mailserver itself) — `stacks/mail/stack.yaml`
+  now carries five trivial `.keep` placeholders whose only job is to make
+  `DeployStack`'s write-time `mkdir -p` create the directory ahead of the
+  container's first start. New regression test
+  (`TestStackRendersMail`) also guards the `Hostname=`/`HostName=` Quadlet
+  key fix from the previous PR.
+
 - Fix (infra): `mksrv deploy --stack mail` wrote the mail server's Quadlet
   unit but `mksrv-mailserver.service` never existed for systemd to start —
   `stacks/mail/templates/mailserver.container.tmpl` used `Hostname=`

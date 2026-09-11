@@ -22,6 +22,30 @@ templates:
   - src: templates/mail.caddy.tmpl
     dst: /var/lib/mksrv/caddy.d/15-mail.caddy
     scope: shared
+  # The Quadlet unit above bind-mounts these five directories; Podman doesn't
+  # create a missing bind-mount source itself (fails the container start with
+  # "statfs ...: no such file or directory" on a fresh host/volume), so they
+  # need to exist before the deploy loop restarts the unit. DeployStack's
+  # write path `mkdir -p`s the parent of whatever it writes — these are here
+  # purely so that happens for directories no other template ever writes into
+  # (mail's own config/TLS are populated later, by `mksrv tenant apply`'s SSH
+  # writes, not by this stack's own templates; docker-mailserver owns the
+  # maildata subdirectories' actual content).
+  - src: templates/keep.tmpl
+    dst: /var/lib/mksrv/stacks/mail/config/.keep
+    scope: shared
+  - src: templates/keep.tmpl
+    dst: /var/lib/mksrv/stacks/mail/tls/.keep
+    scope: shared
+  - src: templates/keep.tmpl
+    dst: /var/lib/mksrv/vol/maildata/mail-data/.keep
+    scope: shared
+  - src: templates/keep.tmpl
+    dst: /var/lib/mksrv/vol/maildata/mail-state/.keep
+    scope: shared
+  - src: templates/keep.tmpl
+    dst: /var/lib/mksrv/vol/maildata/mail-logs/.keep
+    scope: shared
 resources:
   min_ram_mb: 1024
   disk_gb: 20
