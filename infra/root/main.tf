@@ -90,20 +90,24 @@ locals {
             }] : [],
             [
               {
-                fqdn  = d
-                type  = "TXT"
-                value = "\"v=spf1 mx ~all\""
+                fqdn = d
+                type = "TXT"
+                # spf_includes: extra senders already authorized for this
+                # domain (e.g. a pre-existing SES identity) beyond the shared
+                # mail server's own `mx`. Rendered before `mx`, matching how
+                # such records are conventionally hand-written.
+                value = "\"v=spf1${join("", [for i in try(coalesce(t.mail.spf_includes, []), []) : " include:${i}"])} mx ~all\""
                 ttl   = 300
               },
               {
                 fqdn = "_dmarc.${d}"
                 type = "TXT"
-                value = try(coalesce(t.mail.dmarc_rua, ""), "") != "" ? (
-                  "\"v=DMARC1; p=quarantine; rua=mailto:${t.mail.dmarc_rua}\""
-                  ) : (
-                  "\"v=DMARC1; p=quarantine\""
-                )
-                ttl = 300
+                # dmarc_policy (default "quarantine") + dmarc_strict (adds
+                # strict DKIM/SPF alignment) let a tenant with its own prior
+                # DMARC posture (e.g. p=reject, aligned) keep it instead of
+                # being downgraded to mksrv's defaults.
+                value = "\"v=DMARC1; p=${try(coalesce(t.mail.dmarc_policy, "quarantine"), "quarantine")}; pct=100${try(coalesce(t.mail.dmarc_rua, ""), "") != "" ? "; rua=mailto:${t.mail.dmarc_rua}" : ""}${try(coalesce(t.mail.dmarc_strict, false), false) ? "; adkim=s; aspf=s" : ""}\""
+                ttl   = 300
               },
             ],
           )

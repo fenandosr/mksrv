@@ -29,6 +29,12 @@
         "inbound": {"type": "boolean", "default": false},
         "dmarc_rua": {"type": "string", "format": "email"},
         "hosted": {"type": "boolean", "default": false},
+        "spf_includes": {
+          "type": "array", "maxItems": 10, "uniqueItems": true,
+          "items": {"type": "string", "format": "hostname"}
+        },
+        "dmarc_policy": {"type": "string", "enum": ["none", "quarantine", "reject"], "default": "quarantine"},
+        "dmarc_strict": {"type": "boolean", "default": false},
         "mailboxes": {
           "type": "array", "maxItems": 200,
           "items": {
