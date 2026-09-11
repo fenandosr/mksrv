@@ -36,6 +36,7 @@ data "aws_ami" "rocky9" {
 locals {
   ami_id       = var.ami_id != "" ? var.ami_id : data.aws_ami.rocky9[0].id
   is_edge      = contains(var.stacks, "base")
+  has_mail     = contains(var.stacks, "mail")
   name         = "mksrv-${var.env}-${var.name}"
   mgmt_is_ipv6 = strcontains(var.mgmt_cidr, ":")
   data_device  = "/dev/sdf"
@@ -80,6 +81,20 @@ resource "aws_vpc_security_group_ingress_rule" "web" {
   for_each          = local.is_edge ? toset(["80", "443"]) : toset([])
   security_group_id = aws_security_group.host.id
   description       = "public web"
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = tonumber(each.value)
+  to_port           = tonumber(each.value)
+  ip_protocol       = "tcp"
+}
+
+# Inbound SMTP has no VPN key to present, so the mail stack (edge-only, ADR
+# 0027) is public like web — but only the TLS-capable ports: no :143/:110
+# (unencrypted IMAP/POP3), which the mailserver template never offers either
+# (ADR 0032).
+resource "aws_vpc_security_group_ingress_rule" "mail" {
+  for_each          = local.is_edge && local.has_mail ? toset(["25", "465", "587", "993"]) : toset([])
+  security_group_id = aws_security_group.host.id
+  description       = "public mail"
   cidr_ipv4         = "0.0.0.0/0"
   from_port         = tonumber(each.value)
   to_port           = tonumber(each.value)

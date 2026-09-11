@@ -61,19 +61,70 @@ locals {
           }
           if coalesce(w.provider, "edge") == "edge"
         ],
+        # ADR 0032: MX/SPF/DMARC are fully computable from the tenant's own
+        # `mail:` block — no dependency on the mail server's live state (unlike
+        # DKIM, which `mksrv tenant apply` publishes separately once the
+        # server has generated the key). One triple per declared domain.
+        #
+        # try(coalesce(...), default) everywhere `t.mail.X` is read: `t.mail`
+        # itself can be null (no `mail:` block at all — attribute access on it
+        # errors, caught by the outer try()); when `t.mail` is a real object
+        # but `X` is an unset optional attribute, it's a real `null`, not an
+        # error, which try() alone would pass through unchanged — coalesce()
+        # is what actually substitutes the default in that case.
+        flatten([
+          for d in try(coalesce(t.mail.domains, []), []) : concat(
+            try(coalesce(t.mail.inbound, false), false) ? [{
+              fqdn  = d
+              type  = "MX"
+              value = "10 mail.${local.root_domain}"
+              ttl   = 300
+            }] : [],
+            [
+              {
+                fqdn  = d
+                type  = "TXT"
+                value = "\"v=spf1 mx ~all\""
+                ttl   = 300
+              },
+              {
+                fqdn = "_dmarc.${d}"
+                type = "TXT"
+                value = try(coalesce(t.mail.dmarc_rua, ""), "") != "" ? (
+                  "\"v=DMARC1; p=quarantine; rua=mailto:${t.mail.dmarc_rua}\""
+                  ) : (
+                  "\"v=DMARC1; p=quarantine\""
+                )
+                ttl = 300
+              },
+            ],
+          )
+        ]),
       )
     }
-    if try(t.dns_override.provider, "") == "route53" && (length(coalesce(t.dns, [])) > 0 || length(coalesce(t.web, [])) > 0)
+    if try(t.dns_override.provider, "") == "route53" && (
+      length(coalesce(t.dns, [])) > 0 ||
+      length(coalesce(t.web, [])) > 0 ||
+      length(try(coalesce(t.mail.domains, []), [])) > 0
+    )
   }
 
+  # ADR 0032: the shared mail server's own hostname lives on the operator
+  # domain, never a tenant's — its TLS cert and DNS never touch a tenant zone.
+  mail_hosts = { for name, h in local.aws_hosts : name => h if contains(h.stacks, "mail") }
+
   # Shared operator endpoints, all fronted by the edge.
-  operator_fqdns = distinct(concat([
-    local.d.identity.keycloak_domain,
-    local.d.identity.headscale_domain,
-    "cfg.${local.root_domain}",
-    "grafana.${local.root_domain}",
-    "pgadmin.${local.root_domain}",
-  ], local.tenant_rest_fqdns))
+  operator_fqdns = distinct(concat(
+    [
+      local.d.identity.keycloak_domain,
+      local.d.identity.headscale_domain,
+      "cfg.${local.root_domain}",
+      "grafana.${local.root_domain}",
+      "pgadmin.${local.root_domain}",
+    ],
+    local.tenant_rest_fqdns,
+    length(local.mail_hosts) > 0 ? ["mail.${local.root_domain}"] : [],
+  ))
   operator_records = concat(
     [
       for fqdn in local.operator_fqdns : {

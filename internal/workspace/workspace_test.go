@@ -153,7 +153,7 @@ func TestValidateRejectsDNSWithoutZone(t *testing.T) {
 func TestValidateRejectsWebOutsideApex(t *testing.T) {
 	t.Parallel()
 	root := copyExample(t)
-	patchTenant(t, root, "hostname: files.acme.example.com", "hostname: files.evil.example.net")
+	patchTenant(t, root, "hostname: files.acme.example.com", "hostname: files.notacme.example.com")
 	report := revalidate(t, root)
 	if report.Valid {
 		t.Fatal("expected invalid report")
@@ -247,6 +247,39 @@ func TestValidateRejectsBadDatabaseExtension(t *testing.T) {
 		t.Fatal("expected invalid report")
 	}
 	assertIssueCode(t, report, "tenant.database.extension")
+}
+
+func TestValidateRejectsMailboxOutsideDomain(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	patchTenant(t, root, "address: admin@acme.example.com", "address: admin@notacme.example.com")
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid report")
+	}
+	assertIssueCode(t, report, "tenant.mail.domain")
+}
+
+func TestValidateRejectsMailboxesWithoutDomain(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	patchTenant(t, root, "domains: [acme.example.com]", "domains: []")
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid report")
+	}
+	assertIssueCode(t, report, "tenant.mail.no_domain")
+}
+
+func TestValidateRejectsMailWithoutZone(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	patchTenant(t, root, "dns_override:\n  provider: route53\n  zone_id: ZEXAMPLEACMEZONEID\n", "")
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid report")
+	}
+	assertIssueCode(t, report, "tenant.mail.no_zone")
 }
 
 func TestValidateRejectsDatabaseBlockWithoutStack(t *testing.T) {

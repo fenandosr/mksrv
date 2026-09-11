@@ -3,6 +3,8 @@
 // Package model defines the public workspace and stack data contracts.
 package model
 
+import "strings"
+
 // Deployment is the decoded deployment.yaml document.
 type Deployment struct {
 	Version   int              `json:"version"`
@@ -245,12 +247,32 @@ type TenantDNSRecord struct {
 	TTL   int    `json:"ttl,omitempty"`
 }
 
-// TenantMail declares the mail identities and policy for a tenant. It drives
-// per-domain SES identity, DKIM, and MAIL FROM creation in the mail stack.
+// TenantMail declares the mail identities and policy for a tenant (ADR 0032).
+// A tenant with this block gets mailboxes on the fleet's shared mail server:
+// MX/SPF/DMARC are computed and written from this block directly; DKIM is
+// generated on the mail server and published once known.
 type TenantMail struct {
 	Domains  []string `json:"domains,omitempty"`
 	Inbound  bool     `json:"inbound,omitempty"`
 	DMARCRUA string   `json:"dmarc_rua,omitempty"`
+	// Mailboxes are add/remove-only; mksrv generates each password.
+	Mailboxes []TenantMailbox `json:"mailboxes,omitempty"`
+}
+
+// TenantMailbox is one mailbox `mksrv tenant apply` provisions on the shared
+// mail server. Address must be under one of the tenant's Mail.Domains.
+type TenantMailbox struct {
+	Address string `json:"address"`
+	Name    string `json:"name,omitempty"`
+}
+
+// MailLocalPart returns the part of the mailbox address before '@', used to
+// build SSM/OpenBao paths and postfix-accounts.cf entries.
+func (m TenantMailbox) MailLocalPart() string {
+	if i := strings.IndexByte(m.Address, '@'); i > 0 {
+		return m.Address[:i]
+	}
+	return m.Address
 }
 
 type DNSOverride struct {

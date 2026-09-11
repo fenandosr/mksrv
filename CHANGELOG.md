@@ -17,6 +17,21 @@
   `null`). `TenantForward` / `TenantWebEndpoint`'s optional fields dropped
   their `omitempty` tags so every list entry carries the same key set.
 
+- Add (M32, ADR 0032): the `mail` stack is implemented — a shared
+  `docker-mailserver` instance on the edge, real inbound + outbound mailboxes
+  for tenants that opt in with a `mail:` block (`domains`, `inbound`,
+  `dmarc_rua`, `mailboxes: [{address, name?}]`). `mksrv tenant apply`
+  generates each mailbox's password, writes the shared `postfix-accounts.cf`
+  (restarting only on change, aggregated across every mail tenant), copies in
+  a TLS cert Caddy already holds for the shared hostname, and generates +
+  publishes each domain's DKIM key — the one DNS write mksrv makes directly via
+  the AWS SDK (`internal/aws.UpsertTXT`) instead of Terraform, since the key
+  only exists after the server creates it. `mksrv apply --infra-only` writes
+  MX/SPF/DMARC, fully computed from the tenant's own block. New SG ports
+  (`25`/`465`/`587`/`993`, edge-only) and a dedicated `maildata` storage
+  volume. **Writes to a tenant's own DNS zone** (MX/SPF/DMARC/DKIM) — scoped to
+  tenants that explicitly opt in with `mail:`, same boundary as `dns:`/`web:`.
+
 - Add (M31, ADR 0015 update): `mksrv tenant secret-id <id>` mints a named,
   response-wrapped OpenBao AppRole SecretID for a tenant's service — the operator
   stops copying the write-once bootstrap SecretID out of SSM by hand with the

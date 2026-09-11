@@ -1,0 +1,48 @@
+[Unit]
+Description=mksrv mail server (docker-mailserver)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=mksrv-mailserver
+Image={{ .Image "mailserver" | default "docker.io/mailserver/docker-mailserver:14.0" }}
+Network=mksrv-mail.network
+Hostname=mail.{{ .Endpoints.RootDomain }}
+Environment=OVERRIDE_HOSTNAME=mail.{{ .Endpoints.RootDomain }}
+Environment=POSTMASTER_ADDRESS=postmaster@{{ .Endpoints.RootDomain }}
+Environment=SSL_TYPE=manual
+Environment=SSL_CERT_PATH=/tls/fullchain.pem
+Environment=SSL_KEY_PATH=/tls/privkey.pem
+Environment=ONE_DIR=1
+Environment=ENABLE_SPAMASSASSIN=0
+Environment=ENABLE_CLAMAV=0
+Environment=ENABLE_FAIL2BAN=0
+Environment=PERMIT_DOCKER=none
+Environment=TZ={{ .Timezone }}
+# Public, unlike every other mksrv service — the sending MTA on the other end
+# has no VPN key to present (ADR 0032). SG opens exactly these four ports on
+# the edge; :143/:110 (unencrypted IMAP/POP3) are never offered.
+PublishPort=25:25
+PublishPort=465:465
+PublishPort=587:587
+PublishPort=993:993
+# mksrv writes postfix-accounts.cf (and any future docker-mailserver config)
+# directly into this bind mount — the container's own canonical config path.
+Volume=/var/lib/mksrv/stacks/mail/config:/tmp/docker-mailserver:Z
+# The cert Caddy obtained for mail.<root_domain>, copied in by the reconciler.
+Volume=/var/lib/mksrv/stacks/mail/tls:/tls:Z,ro
+Volume={{ .Volume "maildata" }}/mail-data:/var/mail:Z,U
+Volume={{ .Volume "maildata" }}/mail-state:/var/mail-state:Z,U
+Volume={{ .Volume "maildata" }}/mail-logs:/var/log/mail:Z,U
+HealthCmd=ss --listening --tcp | grep -q :993
+HealthInterval=30s
+HealthRetries=10
+HealthStartPeriod=60s
+
+[Service]
+Restart=always
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+

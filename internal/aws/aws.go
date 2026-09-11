@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/service/route53"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
@@ -44,10 +45,15 @@ type Clients struct {
 	s3       *s3.Client
 	dynamodb *dynamodb.Client
 	ssm      *ssm.Client
+	route53  *route53.Client
 }
 
 // SSM returns the Systems Manager client.
 func (c *Clients) SSM() *ssm.Client { return c.ssm }
+
+// Route53 returns the Route53 client (ADR 0032: writing a live-generated DKIM
+// value into a tenant zone — the one DNS write mksrv makes outside Terraform).
+func (c *Clients) Route53() *route53.Client { return c.route53 }
 
 // Load resolves AWS configuration from the environment and shared files and
 // constructs the client set. It performs no network calls.
@@ -73,6 +79,7 @@ func Load(ctx context.Context, opts Options) (*Clients, error) {
 		s3:       s3.NewFromConfig(cfg),
 		dynamodb: dynamodb.NewFromConfig(cfg),
 		ssm:      ssm.NewFromConfig(cfg),
+		route53:  route53.NewFromConfig(cfg),
 	}, nil
 }
 

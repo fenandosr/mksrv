@@ -27,6 +27,10 @@ variable "tenants" {
       domains   = optional(list(string))
       inbound   = optional(bool)
       dmarc_rua = optional(string)
+      mailboxes = optional(list(object({
+        address = string
+        name    = optional(string)
+      })))
     }))
     database = optional(object({
       postgrest        = optional(bool)
