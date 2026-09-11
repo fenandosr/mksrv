@@ -30,9 +30,9 @@ variable "tenants" {
     }))
     database = optional(object({
       postgrest        = optional(bool)
-      schema            = optional(string)
-      extensions        = optional(list(string))
-      connection_limit  = optional(number)
+      schema           = optional(string)
+      extensions       = optional(list(string))
+      connection_limit = optional(number)
     }))
     stacks = list(string)
     forwards = optional(list(object({

@@ -130,8 +130,7 @@ func TestMaterializeTenantsHomogeneousKeys(t *testing.T) {
 		return keys
 	}
 
-	var listKeys func(t *testing.T, raw json.RawMessage, label string)
-	listKeys = func(t *testing.T, raw json.RawMessage, label string) {
+	listKeys := func(t *testing.T, raw json.RawMessage, label string) {
 		t.Helper()
 		var entries []map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &entries); err != nil {
