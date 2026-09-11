@@ -19,6 +19,22 @@ func TestMailPasswordRef(t *testing.T) {
 	}
 }
 
+// TestMailPasswordHashRef guards the migrated-mailbox path: an operator
+// seeds this ref directly with a pre-computed `{SHA512-CRYPT}$6$...` hash
+// (from another mail server's own postfix-accounts.cf) so the user's
+// existing password keeps working. Same local-part sanitizing as
+// mailPasswordRef, distinct suffix, and distinct from it — reconcileMailboxes
+// checks this one first and never writes to it.
+func TestMailPasswordHashRef(t *testing.T) {
+	t.Parallel()
+	if got := mailPasswordHashRef("mcps", "alberto.zarza@acme.example.com"); got != "/mksrv/{env}/mail/tenant_mcps_alberto_zarza_password_hash" {
+		t.Fatalf("ref = %q", got)
+	}
+	if mailPasswordHashRef("mcps", "gen@acme.example.com") == mailPasswordRef("mcps", "gen@acme.example.com") {
+		t.Fatal("password and password-hash refs must not collide")
+	}
+}
+
 func TestMailTenants(t *testing.T) {
 	t.Parallel()
 	tenants := map[string]model.Tenant{

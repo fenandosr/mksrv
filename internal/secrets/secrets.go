@@ -94,6 +94,16 @@ func (r *Resolver) EnsureString(ctx context.Context, ref, value string) (string,
 	return value, nil
 }
 
+// IsNotFound reports whether err (as returned by Get) means the parameter
+// simply doesn't exist yet — as opposed to a real failure (auth, throttling,
+// …) a caller should propagate. Callers that want to treat "not there" as a
+// legitimate, expected outcome (e.g. an optional pre-seeded override) check
+// this instead of ignoring every Get error.
+func IsNotFound(err error) bool {
+	var notFound *ssmtypes.ParameterNotFound
+	return errors.As(err, &notFound)
+}
+
 // EnsureRandom returns the value of ref, generating and storing a random
 // alphanumeric string of at least nbytes of entropy when the parameter is
 // absent.
@@ -102,8 +112,7 @@ func (r *Resolver) EnsureRandom(ctx context.Context, ref string, nbytes int) (st
 	if err == nil {
 		return value, nil
 	}
-	var notFound *ssmtypes.ParameterNotFound
-	if !errors.As(err, &notFound) {
+	if !IsNotFound(err) {
 		return "", err
 	}
 	if nbytes < 16 {
