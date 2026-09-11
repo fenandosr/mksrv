@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Fix (infra): `mksrv deploy --stack mail` wrote the mail server's Quadlet
+  unit but `mksrv-mailserver.service` never existed for systemd to start —
+  `stacks/mail/templates/mailserver.container.tmpl` used `Hostname=`
+  (lowercase `n`); the real Quadlet key is `HostName=`. Podman's Quadlet
+  generator drops a `[Container]` key it doesn't recognize and logs to the
+  journal instead of failing the unit file outright — `mksrv deploy` itself
+  reported success (the file was written), and the failure only surfaced
+  one step later, restarting a unit that was never generated:
+  `Unit mksrv-mailserver.service not found`.
+
 - Fix (infra): `mksrv tenant apply` tried to generate DKIM for tenants that
   only had a documentation-only `mail:` block (`hosted` unset/false) —
   `provisionMail`'s DKIM loop gated on `t.Mail != nil` alone, not the

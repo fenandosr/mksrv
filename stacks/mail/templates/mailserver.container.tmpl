@@ -7,7 +7,7 @@ Wants=network-online.target
 ContainerName=mksrv-mailserver
 Image={{ .Image "mailserver" | default "docker.io/mailserver/docker-mailserver:14.0" }}
 Network=mksrv-mail.network
-Hostname=mail.{{ .Endpoints.RootDomain }}
+HostName=mail.{{ .Endpoints.RootDomain }}
 Environment=OVERRIDE_HOSTNAME=mail.{{ .Endpoints.RootDomain }}
 Environment=POSTMASTER_ADDRESS=postmaster@{{ .Endpoints.RootDomain }}
 Environment=SSL_TYPE=manual
