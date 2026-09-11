@@ -43,6 +43,7 @@ func Materialize(data workspace.Data, extra map[string]any) (string, error) {
 	if tenants == nil {
 		tenants = map[string]model.Tenant{}
 	}
+	tenants = normalizeTenantsForTerraform(tenants)
 	document := map[string]any{
 		"deployment": data.Deployment,
 		"tenants":    tenants,
@@ -55,6 +56,31 @@ func Materialize(data workspace.Data, extra map[string]any) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// normalizeTenantsForTerraform returns a copy of tenants with every
+// web/forward list entry's slice fields set to a non-nil (possibly empty)
+// slice. `var.tenants` in Terraform is `map(any)`, which requires every
+// element of a list(any)/map(any) to unify to one common type; a nil slice
+// marshals as JSON `null`, which is safest normalized away here rather than
+// relied upon to unify against a populated `list(string)` sibling. Struct
+// field `omitempty` tags were already dropped so every key is present — this
+// only guards the one remaining nil-vs-empty-list wrinkle (TenantWebEndpoint's
+// SSOGroups today; extend here if a future optional slice field joins it).
+func normalizeTenantsForTerraform(tenants map[string]model.Tenant) map[string]model.Tenant {
+	out := make(map[string]model.Tenant, len(tenants))
+	for id, t := range tenants {
+		web := make([]model.TenantWebEndpoint, len(t.Web))
+		for i, w := range t.Web {
+			if w.SSOGroups == nil {
+				w.SSOGroups = []string{}
+			}
+			web[i] = w
+		}
+		t.Web = web
+		out[id] = t
+	}
+	return out
 }
 
 // OutputsFile is the filename apply writes the Terraform outputs to.

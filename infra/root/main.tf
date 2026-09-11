@@ -23,9 +23,17 @@ locals {
 
   # Per-tenant PostgREST data API: <id>.rest.<root_domain>, fronted by the edge.
   # Skipped when the tenant sets database.postgrest = false (ADR 0029).
+  #
+  # NOTE on try()+coalesce() below: var.tenants is now an explicit object() type
+  # (optional() attributes), so an unset optional attribute is a real `null`
+  # value, not a missing-attribute error — try() alone no longer falls through
+  # to its default for those (it only catches evaluation errors). `t.database`
+  # itself can still be null (whole block absent), which DOES error on
+  # attribute access, so the outer try() stays to catch that; coalesce() inside
+  # catches the "block present, attribute unset" null.
   tenant_rest_fqdns = [
     for id, t in var.tenants : "${id}.rest.${local.root_domain}"
-    if contains(try(t.stacks, []), "database") && try(t.database.postgrest, true)
+    if contains(try(t.stacks, []), "database") && try(coalesce(t.database.postgrest, true), true)
   ]
 
   # Records mksrv writes into each tenant's own hosted zone (never the operator
@@ -34,28 +42,28 @@ locals {
   # (ADR 0028) add an A record pointing at the edge, which reverse-proxies them.
   tenant_dns = {
     for id, t in var.tenants : id => {
-      zone_id = try(t.dns_override.zone_id, "")
+      zone_id = try(coalesce(t.dns_override.zone_id, ""), "")
       records = concat(
         [
-          for r in try(t.dns, []) : {
+          for r in coalesce(t.dns, []) : {
             fqdn  = r.name == "@" ? t.base_domain : "${r.name}.${t.base_domain}"
             type  = r.type
             value = r.value
-            ttl   = try(r.ttl, 300)
+            ttl   = coalesce(r.ttl, 300)
           }
         ],
         [
-          for w in try(t.web, []) : {
+          for w in coalesce(t.web, []) : {
             fqdn  = w.hostname
             type  = "A"
             value = local.edge_ip
             ttl   = 300
           }
-          if try(w.provider, "edge") == "edge"
+          if coalesce(w.provider, "edge") == "edge"
         ],
       )
     }
-    if try(t.dns_override.provider, "") == "route53" && (length(try(t.dns, [])) > 0 || length(try(t.web, [])) > 0)
+    if try(t.dns_override.provider, "") == "route53" && (length(coalesce(t.dns, [])) > 0 || length(coalesce(t.web, [])) > 0)
   }
 
   # Shared operator endpoints, all fronted by the edge.

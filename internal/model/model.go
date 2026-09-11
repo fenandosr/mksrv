@@ -143,17 +143,23 @@ type Tenant struct {
 // edge terminates TLS for and reverse-proxies to a tenant node over the mesh
 // (ADR 0028). Provider "edge" (the default) uses the edge Caddy; "cdn" fronts it
 // with CloudFront + WAF.
+// TenantWebEndpoint fields below are intentionally NOT `omitempty` (beyond the
+// two required ones). `var.tenants` in Terraform is `map(any)`: HCL unifies
+// every element of a map(any)/list(any) into one common type, which requires
+// identical key sets across every web/forward entry of every tenant — a
+// present-but-empty key unifies fine, a missing key does not
+// ("all map elements must have the same type"). Materialize() relies on this.
 type TenantWebEndpoint struct {
-	Hostname string `json:"hostname"`           // FQDN under base_domain
-	Target   string `json:"target"`             // host:port — a MagicDNS name or private IP the edge routes to
-	Provider string `json:"provider,omitempty"` // "edge" (default)
-	CDN      bool   `json:"cdn,omitempty"`
+	Hostname string `json:"hostname"` // FQDN under base_domain
+	Target   string `json:"target"`   // host:port — a MagicDNS name or private IP the edge routes to
+	Provider string `json:"provider"` // "edge" (default)
+	CDN      bool   `json:"cdn"`
 	// SSO gates the hostname behind a Keycloak session at the edge (ADR 0030):
 	// an oauth2-proxy for the tenant realm sits in front, and the origin sees
 	// X-Auth-Request-User / -Email / -Groups.
-	SSO bool `json:"sso,omitempty"`
+	SSO bool `json:"sso"`
 	// SSOGroups, when set, restricts the gate to members of these realm groups.
-	SSOGroups []string `json:"sso_groups,omitempty"`
+	SSOGroups []string `json:"sso_groups"`
 }
 
 // WebSSO reports whether any web endpoint gates on Keycloak (ADR 0030).
@@ -214,14 +220,20 @@ func (t Tenant) DBConnectionLimit() int {
 
 // TenantForward is one Cloud-IT VPN forward a tenant exposes to its members. It
 // is translated to configd.Forward and appended to the broker roster.
+//
+// Fields below the required four are intentionally NOT `omitempty` — see the
+// comment on TenantWebEndpoint: `var.tenants` is Terraform's `map(any)`, which
+// requires every forward (and every web endpoint) across every tenant to carry
+// the same key set, or `terraform plan` fails with "all map elements must have
+// the same type".
 type TenantForward struct {
 	ID       string `json:"id"`
 	Label    string `json:"label"`
-	Type     string `json:"type"`           // http | tcp | ssh
-	Target   string `json:"target"`         // host:port, a MagicDNS name of a tenant mesh node
-	Open     string `json:"open,omitempty"` // browser | none | ssh-terminal | copy
-	Path     string `json:"path,omitempty"`
-	SSHAlias string `json:"ssh_alias,omitempty"`
+	Type     string `json:"type"`   // http | tcp | ssh
+	Target   string `json:"target"` // host:port, a MagicDNS name of a tenant mesh node
+	Open     string `json:"open"`   // browser | none | ssh-terminal | copy
+	Path     string `json:"path"`
+	SSHAlias string `json:"ssh_alias"`
 }
 
 // TenantDNSRecord is one record mksrv writes into the tenant's own hosted zone
