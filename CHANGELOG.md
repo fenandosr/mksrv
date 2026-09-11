@@ -12,6 +12,16 @@
   config bind mount, `/tmp/docker-mailserver/opendkim/keys/<domain>/`.
   Both fixed against a real, running container.
 
+- Fix (infra): `mksrv deploy --stack mail` hard-failed on every first deploy
+  to a host with no mailboxes provisioned yet — its `tcp`/993 health check
+  retried for its full ~5 minutes and then failed, because
+  docker-mailserver refuses to start Dovecot (so nothing ever binds :993)
+  until at least one mailbox exists in `postfix-accounts.cf`, which
+  `mksrv tenant apply` writes *after* this deploy. Switched to `type:
+  command` (the existing no-op health-check escape hatch) — the
+  container's own Quadlet `HealthCmd` still tracks real health
+  continuously (`podman ps` / `systemctl status`). New regression test
+  guards against a `tcp`/993 check on this stack specifically.
 - Fix (infra): the mail server's Quadlet unit bind-mounts five host
   directories (its config/TLS bind mounts, plus the `maildata` volume's
   three subdirectories); Podman doesn't create a missing bind-mount source
