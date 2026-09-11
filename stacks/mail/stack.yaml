@@ -1,6 +1,6 @@
 name: mail
 title: Mail
-description: "SES send-only by default, with optional docker-mailserver inbound service"
+description: "Shared inbound+outbound mail server (docker-mailserver) for tenants that opt in via a mail: block (ADR 0032)"
 targets: [cloud]
 per_tenant: false
 depends_on: [base]
@@ -8,11 +8,24 @@ apps:
   - name: mailserver
     image: docker.io/mailserver/docker-mailserver:14.0
 networks: [mksrv-mail]
-secrets:
-  - /mksrv/{env}/mail/admin_password
-tailnet_ports: [25, 143, 465, 587, 993]
+secrets: []
+storage:
+  - name: maildata
+    gb: 20
+templates:
+  - src: templates/mksrv-mail.network.tmpl
+    dst: /etc/containers/systemd/mksrv-mail.network
+    scope: shared
+  - src: templates/mailserver.container.tmpl
+    dst: /etc/containers/systemd/mksrv-mailserver.container
+    scope: shared
+  - src: templates/mail.caddy.tmpl
+    dst: /var/lib/mksrv/caddy.d/15-mail.caddy
+    scope: shared
 resources:
   min_ram_mb: 1024
   disk_gb: 20
-templates: []
-health: []
+health:
+  - app: mailserver
+    type: tcp
+    port: 993

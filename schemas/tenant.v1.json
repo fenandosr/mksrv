@@ -27,7 +27,18 @@
       "properties": {
         "domains": {"type": "array", "uniqueItems": true, "items": {"type": "string", "format": "hostname"}},
         "inbound": {"type": "boolean", "default": false},
-        "dmarc_rua": {"type": "string", "format": "email"}
+        "dmarc_rua": {"type": "string", "format": "email"},
+        "mailboxes": {
+          "type": "array", "maxItems": 200,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["address"],
+            "properties": {
+              "address": {"type": "string", "format": "email"},
+              "name": {"type": "string", "maxLength": 128}
+            }
+          }
+        }
       }
     },
     "stacks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"}},

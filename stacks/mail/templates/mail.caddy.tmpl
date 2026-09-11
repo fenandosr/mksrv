@@ -1,0 +1,7 @@
+{{/* Nothing is actually served here — this fragment exists only so Caddy
+     obtains and renews a cert for the shared mail server's own hostname
+     (HTTP-01, same as every other operator FQDN). mksrv copies the resulting
+     cert + key into docker-mailserver's TLS mount (ADR 0032). */}}
+mail.{{ .Endpoints.RootDomain }} {
+	respond "mksrv mail server" 200
+}

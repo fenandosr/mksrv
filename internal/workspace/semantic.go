@@ -164,6 +164,7 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 		checkTenantMeshRoutes(report, tenantFile, tenant)
 		checkTenantWeb(report, tenantFile, tenant)
 		checkTenantDatabase(report, tenantFile, tenant)
+		checkTenantMail(report, tenantFile, tenant, len(assigned["mail"]) > 0)
 	}
 
 	for tenantID, users := range data.Users {
@@ -336,6 +337,49 @@ func checkTenantWeb(report *Report, file string, tenant model.Tenant) {
 			if g != "admin" && g != "dev" && g != "apps" && g != "vpn" {
 				semanticError(report, file, path+".sso_groups", "tenant.web.sso_groups", fmt.Sprintf("unknown realm group %q (admin|dev|apps|vpn)", g))
 			}
+		}
+	}
+}
+
+// checkTenantMail validates the `mail:` block (ADR 0032): domains require a
+// route53 dns_override (mksrv writes MX/SPF/DMARC/DKIM there), every mailbox
+// address must be under a declared domain, and some host in the fleet must
+// actually carry the `mail` stack or there's nowhere to reconcile against.
+func checkTenantMail(report *Report, file string, tenant model.Tenant, mailStackAssigned bool) {
+	if tenant.Mail == nil || (len(tenant.Mail.Domains) == 0 && len(tenant.Mail.Mailboxes) == 0) {
+		return
+	}
+	if len(tenant.Mail.Domains) == 0 {
+		semanticError(report, file, "$.mail.mailboxes", "tenant.mail.no_domain", "mailboxes require at least one domain in mail.domains")
+		return
+	}
+	if tenant.DNSOverride == nil || tenant.DNSOverride.Provider != "route53" || strings.TrimSpace(tenant.DNSOverride.ZoneID) == "" {
+		semanticError(report, file, "$.mail", "tenant.mail.no_zone", "mail requires dns_override with provider route53 and a zone_id")
+		return
+	}
+	if !mailStackAssigned {
+		semanticError(report, file, "$.mail", "tenant.mail.no_stack", "tenant declares mail but no host in the fleet carries the `mail` stack")
+	}
+	domains := make(map[string]bool, len(tenant.Mail.Domains))
+	for _, d := range tenant.Mail.Domains {
+		domains[strings.ToLower(strings.TrimSuffix(d, "."))] = true
+	}
+	seen := make(map[string]int, len(tenant.Mail.Mailboxes))
+	for i, mb := range tenant.Mail.Mailboxes {
+		path := fmt.Sprintf("$.mail.mailboxes[%d]", i)
+		addr := strings.ToLower(strings.TrimSpace(mb.Address))
+		at := strings.LastIndexByte(addr, '@')
+		if at <= 0 || at == len(addr)-1 {
+			semanticError(report, file, path+".address", "tenant.mail.address", fmt.Sprintf("%q is not a valid mailbox address", mb.Address))
+			continue
+		}
+		if !domains[addr[at+1:]] {
+			semanticError(report, file, path+".address", "tenant.mail.domain", fmt.Sprintf("mailbox domain %q is not in mail.domains", addr[at+1:]))
+		}
+		if first, dup := seen[addr]; dup {
+			semanticError(report, file, path+".address", "tenant.mail.duplicate", fmt.Sprintf("address %q duplicates mailboxes[%d]", mb.Address, first))
+		} else {
+			seen[addr] = i
 		}
 	}
 }
