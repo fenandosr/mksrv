@@ -263,6 +263,15 @@ type TenantMail struct {
 	// non-per_tenant stack, so unlike `database` this can't be expressed by
 	// listing "mail" in the tenant's own `stacks:` (schema rejects that).
 	Hosted bool `json:"hosted,omitempty"`
+	// SPFIncludes are extra `include:` mechanisms folded into the computed
+	// SPF record, before `mx` — for senders other than the shared mail
+	// server that are already authorized to send as this domain (e.g.
+	// `amazonses.com`, for a pre-existing SES sending identity).
+	SPFIncludes []string `json:"spf_includes,omitempty"`
+	// DMARCPolicy is the computed record's `p=` tag. Default "quarantine".
+	DMARCPolicy string `json:"dmarc_policy,omitempty"`
+	// DMARCStrict adds `adkim=s; aspf=s` (strict DKIM/SPF alignment).
+	DMARCStrict bool `json:"dmarc_strict,omitempty"`
 	// Mailboxes are add/remove-only; mksrv generates each password.
 	Mailboxes []TenantMailbox `json:"mailboxes,omitempty"`
 }

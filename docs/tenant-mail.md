@@ -12,6 +12,9 @@ mail:
   inbound: true
   dmarc_rua: dmarc@acme.example.com
   hosted: true
+  spf_includes: [amazonses.com]
+  dmarc_policy: reject
+  dmarc_strict: true
   mailboxes:
     - address: admin@acme.example.com
       name: "Team Lead"
@@ -23,7 +26,24 @@ mail:
 | `inbound` | `true` publishes an MX record. `false` keeps the domain send-only — SPF/DMARC still go out (so mail *from* this domain authenticates), nothing can deliver *to* it. |
 | `dmarc_rua` | aggregate-report address in the published DMARC record. |
 | `hosted` | the actual opt-in switch (default `false`). Without it, `domains`/`dmarc_rua` are just documentation — e.g. recording SPF/DMARC intent ahead of an actual migration — and mksrv writes nothing and provisions nothing. Only `hosted: true` makes `mksrv apply --infra-only` write DNS and `mksrv tenant apply` provision mailboxes/DKIM. (`mail` is a shared, non-per-tenant stack, so unlike `database` this can't be expressed by listing `mail` in the tenant's own `stacks:` — the schema rejects that.) |
+| `spf_includes` | extra `include:` mechanisms folded into the computed SPF record, ahead of `mx` — for senders other than the shared mail server already authorized to send as this domain (e.g. a pre-existing SES sending identity). |
+| `dmarc_policy` | the computed record's `p=` tag: `none` \| `quarantine` (default) \| `reject`. |
+| `dmarc_strict` | `true` adds `adkim=s; aspf=s` (strict DKIM/SPF alignment) to the computed DMARC record. |
 | `mailboxes` | declarative list, `{address, name?}`. `address`'s domain must be one of `domains`. No password field — mksrv generates one per mailbox. |
+
+If a domain already has its own SPF/DMARC (e.g. from a prior, non-mksrv mail
+setup) and `hosted` is turned on, `mksrv apply --infra-only` will try to
+**create** those two records and fail (`already exists`) since Terraform
+doesn't know about them yet — `spf_includes`/`dmarc_policy`/`dmarc_strict` let
+the computed value match (or deliberately improve on) what's already live.
+One-time per record, the operator then tells Terraform it already exists —
+doesn't touch the live DNS:
+
+```bash
+terraform import \
+  'module.dns_tenant["<id>"].aws_route53_record.this["TXT <domain>"]' \
+  <ZONE_ID>_<domain>_TXT
+```
 
 Requires a host in `deployment.yaml` carrying the `mail` stack (the edge, in
 practice — it's the only public host, ADR 0027).

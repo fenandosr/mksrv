@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Add (M32 follow-up, ADR 0032): `mail.spf_includes` / `mail.dmarc_policy` /
+  `mail.dmarc_strict` — let the computed SPF/DMARC match a domain's real
+  requirements instead of mksrv's plain defaults (`v=spf1 mx ~all`,
+  `p=quarantine`). Needed live: a tenant already had a working SES sending
+  identity for its domain (`v=spf1 include:amazonses.com mx ~all`) and a
+  stricter, aligned DMARC (`p=reject; adkim=s; aspf=s`) predating the mail
+  stack migration — mksrv's defaults would have silently dropped the SES
+  authorization and loosened the policy. `spf_includes` adds extra
+  `include:` mechanisms ahead of `mx`; `dmarc_policy` (`none` \|
+  `quarantine` default \| `reject`) and `dmarc_strict` (adds `adkim=s;
+  aspf=s`) shape the DMARC record. A domain with pre-existing SPF/DMARC
+  still needs one `terraform import` per record before the first
+  `hosted: true` apply — Terraform won't overwrite a record it doesn't know
+  about, it fails the create instead (documented in `docs/tenant-mail.md`).
+
 - Add (M32 follow-up, ADR 0032): `mail.hosted` — the real opt-in switch for
   the shared mail stack. Without it, `mail.domains`/`dmarc_rua` alone is just
   documentation (e.g. a tenant recording SPF/DMARC intent ahead of an actual
