@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Fix (infra): the mail stack's computed SPF/DMARC values were manually
+  wrapped in quotes (`"\"v=spf1 ... ~all\""`) — `aws_route53_record` adds
+  the enclosing quotes to a TXT value itself, so this sent Route53 a
+  doubly-quoted string and failed apply with `InvalidCharacterString
+  (Value should be enclosed in quotation marks)`. The exact bug class
+  `ses_dns_records` (a few lines down in the same file) already hit and
+  documented a fix for in M25 — reintroduced here by not having read that
+  comment before adding the mail stack's own SPF/DMARC computation.
+  Removed the manual quoting; values are plain text now, matching
+  `ses_dns_records`'s established convention.
+
 - Add (M32 follow-up, ADR 0032): `mail.spf_includes` / `mail.dmarc_policy` /
   `mail.dmarc_strict` — let the computed SPF/DMARC match a domain's real
   requirements instead of mksrv's plain defaults (`v=spf1 mx ~all`,
