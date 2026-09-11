@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Fix (infra): `mksrv tenant apply` tried to generate DKIM for tenants that
+  only had a documentation-only `mail:` block (`hosted` unset/false) —
+  `provisionMail`'s DKIM loop gated on `t.Mail != nil` alone, not the
+  `hosted` flag added two PRs ago, so it ran against a mail server those
+  tenants never opted into and errored (`no container with name or ID
+  "mksrv-mailserver" found`, since only the actually-hosted tenant's realm
+  of concerns applies there). Both this loop and `mailTenants()` (the
+  shared mailbox file) now share one `tenantMailHosted()` predicate, so
+  they can't drift apart like this again.
+
 - Fix (infra): the mail stack's computed SPF/DMARC values were manually
   wrapped in quotes (`"\"v=spf1 ... ~all\""`) — `aws_route53_record` adds
   the enclosing quotes to a TXT value itself, so this sent Route53 a
