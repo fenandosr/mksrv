@@ -86,7 +86,11 @@ func TestStackRendersBase(t *testing.T) {
 // Quadlet key itself: `Hostname=` isn't recognized by Podman's Quadlet
 // generator (the real key is `HostName=`, capital N) — it's silently dropped
 // rather than erroring the unit file, so `mksrv deploy` reports success while
-// systemd never gets a service to restart.
+// systemd never gets a service to restart. And guards a deploy-time
+// deadlock: docker-mailserver never binds :993 (Dovecot) until a mailbox
+// exists in postfix-accounts.cf — which `mksrv tenant apply` writes, *after*
+// this deploy — so a `tcp`/993 health check here would retry for its full
+// ~5 minutes and hard-fail every first deploy on a fresh host.
 func TestStackRendersMail(t *testing.T) {
 	t.Parallel()
 	catalog, err := engine.Catalog(schema.New())
@@ -94,6 +98,11 @@ func TestStackRendersMail(t *testing.T) {
 		t.Fatalf("Catalog() error = %v", err)
 	}
 	mail := catalog["mail"]
+	for _, h := range mail.Health {
+		if h.Type == "tcp" && h.Port == 993 {
+			t.Fatalf("health check %q is tcp/993 — docker-mailserver never binds it until a mailbox exists, deadlocking the first deploy on a fresh host", h.App)
+		}
+	}
 	ctx := baseContext()
 	ctx.Host.Stacks = []string{"base", "identity", "mail"}
 	files, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), mail, ctx)
