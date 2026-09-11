@@ -92,7 +92,11 @@ a natural follow-up, not required for this milestone).
   `aws_ses_domain_dkim`, a native AWS provider resource; there is no Route53-native
   equivalent for a self-hosted OpenDKIM key). `mksrv tenant apply`: execs
   `setup.sh config dkim domain '<domain>'` on the container if the key doesn't
-  exist yet, reads the generated `.../mail.txt`, and **writes the TXT record
+  exist yet (`setup`, not `setup.sh` — dropped in this image's version), reads
+  the generated `.../mail.txt` (under the config bind mount,
+  `/tmp/docker-mailserver/opendkim/keys/<domain>/` — `ONE_DIR=1` consolidates
+  the server's own *state* under `/var/mail-state`, not operator-provided
+  config like this), and **writes the TXT record
   directly via the AWS SDK** (`internal/aws` gains a small Route53
   `UpsertTXT`) into the tenant's own zone — the one genuinely new "mksrv
   writes tenant DNS from live infrastructure state, not from Terraform" path in
