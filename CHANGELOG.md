@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Fix (infra): `mksrv tenant apply`'s DKIM generation used the wrong CLI
+  name and the wrong path for docker-mailserver 14.0:
+  `exec mksrv-mailserver setup.sh config dkim domain '<domain>'` failed
+  with `executable file 'setup.sh' not found in $PATH` (the CLI is `setup`,
+  no `.sh`, in this image version) and the key-existence check/read
+  assumed `/var/mail-state/opendkim/keys/<domain>/mail.txt` — confirmed
+  live that `ONE_DIR=1` doesn't put DKIM keys there; they land under the
+  config bind mount, `/tmp/docker-mailserver/opendkim/keys/<domain>/`.
+  Both fixed against a real, running container.
+
 - Fix (infra): `mksrv deploy --stack mail` hard-failed on every first deploy
   to a host with no mailboxes provisioned yet — its `tcp`/993 health check
   retried for its full ~5 minutes and then failed, because
@@ -12,7 +22,6 @@
   container's own Quadlet `HealthCmd` still tracks real health
   continuously (`podman ps` / `systemctl status`). New regression test
   guards against a `tcp`/993 check on this stack specifically.
-
 - Fix (infra): the mail server's Quadlet unit bind-mounts five host
   directories (its config/TLS bind mounts, plus the `maildata` volume's
   three subdirectories); Podman doesn't create a missing bind-mount source

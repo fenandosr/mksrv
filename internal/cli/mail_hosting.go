@@ -199,11 +199,20 @@ func (f *fleet) reconcileDKIM(ctx context.Context, printer ui.Printer, client *s
 		return nil // caught by checkTenantMail; defensive no-op here
 	}
 	for _, domain := range t.Mail.Domains {
-		keyPath := fmt.Sprintf("/var/mail-state/opendkim/keys/%s/mail.txt", domain)
+		// The key lands under the config bind mount (/tmp/docker-mailserver,
+		// -> host /var/lib/mksrv/stacks/mail/config), not /var/mail-state:
+		// ONE_DIR=1 consolidates the server's own *state* there, but DKIM
+		// keys are operator-provided config, generated once by `setup` (see
+		// below) and left under the same tree the operator's other config
+		// files live in. Confirmed live against docker-mailserver 14.0.
+		keyPath := fmt.Sprintf("/tmp/docker-mailserver/opendkim/keys/%s/mail.txt", domain)
 		exists, _ := client.Run(ctx, fmt.Sprintf(
 			"sudo podman exec mksrv-mailserver sh -c 'test -f %s && echo yes' || true", quoteArg(keyPath)))
 		if strings.TrimSpace(exists.Stdout) != "yes" {
-			if _, err := client.Run(ctx, "sudo podman exec mksrv-mailserver setup.sh config dkim domain "+quoteArg(domain)); err != nil {
+			// The CLI is `setup`, not `setup.sh` — docker-mailserver dropped
+			// the .sh suffix at some point; confirmed live (`setup.sh` isn't
+			// even on $PATH in 14.0, "executable file not found").
+			if _, err := client.Run(ctx, "sudo podman exec mksrv-mailserver setup config dkim domain "+quoteArg(domain)); err != nil {
 				return fmt.Errorf("mail %s: generate DKIM for %s: %w", id, domain, err)
 			}
 		}
