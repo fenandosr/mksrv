@@ -96,7 +96,15 @@ locals {
                 # domain (e.g. a pre-existing SES identity) beyond the shared
                 # mail server's own `mx`. Rendered before `mx`, matching how
                 # such records are conventionally hand-written.
-                value = "\"v=spf1${join("", [for i in try(coalesce(t.mail.spf_includes, []), []) : " include:${i}"])} mx ~all\""
+                #
+                # Not manually quoted — see the comment on `ses_dns_records`
+                # below: aws_route53_record wraps TXT values in quotes itself;
+                # doing it here too sends Route53 a doubly-quoted string and
+                # fails apply with "InvalidCharacterString (Value should be
+                # enclosed in quotation marks)". Same class of bug M25 already
+                # hit and fixed for `ses_dns_records` — reintroduced here by
+                # not having read that comment first.
+                value = "v=spf1${join("", [for i in try(coalesce(t.mail.spf_includes, []), []) : " include:${i}"])} mx ~all"
                 ttl   = 300
               },
               {
@@ -105,8 +113,9 @@ locals {
                 # dmarc_policy (default "quarantine") + dmarc_strict (adds
                 # strict DKIM/SPF alignment) let a tenant with its own prior
                 # DMARC posture (e.g. p=reject, aligned) keep it instead of
-                # being downgraded to mksrv's defaults.
-                value = "\"v=DMARC1; p=${try(coalesce(t.mail.dmarc_policy, "quarantine"), "quarantine")}; pct=100${try(coalesce(t.mail.dmarc_rua, ""), "") != "" ? "; rua=mailto:${t.mail.dmarc_rua}" : ""}${try(coalesce(t.mail.dmarc_strict, false), false) ? "; adkim=s; aspf=s" : ""}\""
+                # being downgraded to mksrv's defaults. Not manually quoted —
+                # same reason as the SPF record above.
+                value = "v=DMARC1; p=${try(coalesce(t.mail.dmarc_policy, "quarantine"), "quarantine")}; pct=100${try(coalesce(t.mail.dmarc_rua, ""), "") != "" ? "; rua=mailto:${t.mail.dmarc_rua}" : ""}${try(coalesce(t.mail.dmarc_strict, false), false) ? "; adkim=s; aspf=s" : ""}"
                 ttl   = 300
               },
             ],
