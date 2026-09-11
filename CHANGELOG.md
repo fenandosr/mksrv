@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Fix (infra): publishing a DKIM record failed for any real key —
+  `internal/aws.UpsertTXT` wrapped the whole value in one quoted string,
+  but RFC 1035 caps a single TXT character-string at 255 bytes and a DKIM
+  RSA public key routinely runs 350+ bytes once base64-encoded:
+  `InvalidChangeBatch: CharacterStringTooLong (Value is too long)`.
+  `quoteTXT` now splits into 255-byte chunks, each quoted, concatenated
+  with a space — the same multi-string shape `docker-mailserver`'s own
+  `mail.txt` already uses (`parseDKIMRecord` flattens it back to one
+  logical string; `quoteTXT` re-chunks it for the wire). Short values
+  (SPF/DMARC) are unaffected — one chunk, same as before. Verified live:
+  published mcps-epcm.org's real DKIM key to Route53 with the corrected
+  chunking.
+
 - Fix (infra): `mksrv tenant apply`'s DKIM generation used the wrong CLI
   name and the wrong path for docker-mailserver 14.0:
   `exec mksrv-mailserver setup.sh config dkim domain '<domain>'` failed
