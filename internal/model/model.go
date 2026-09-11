@@ -255,6 +255,14 @@ type TenantMail struct {
 	Domains  []string `json:"domains,omitempty"`
 	Inbound  bool     `json:"inbound,omitempty"`
 	DMARCRUA string   `json:"dmarc_rua,omitempty"`
+	// Hosted opts this tenant into the shared `mail` stack (ADR 0032): only
+	// once true does `mksrv apply --infra-only` write MX/SPF/DMARC and
+	// `mksrv tenant apply` provision mailboxes/DKIM. `domains`/`dmarc_rua`
+	// alone (hosted unset) is just documentation — e.g. a tenant recording
+	// its SPF/DMARC intent ahead of actually migrating. `mail` is a shared,
+	// non-per_tenant stack, so unlike `database` this can't be expressed by
+	// listing "mail" in the tenant's own `stacks:` (schema rejects that).
+	Hosted bool `json:"hosted,omitempty"`
 	// Mailboxes are add/remove-only; mksrv generates each password.
 	Mailboxes []TenantMailbox `json:"mailboxes,omitempty"`
 }

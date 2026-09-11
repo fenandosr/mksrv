@@ -11,6 +11,7 @@ mail:
   domains: [acme.example.com]
   inbound: true
   dmarc_rua: dmarc@acme.example.com
+  hosted: true
   mailboxes:
     - address: admin@acme.example.com
       name: "Team Lead"
@@ -21,12 +22,15 @@ mail:
 | `domains` | every domain this tenant wants mailboxes/MX for. Requires `dns_override: {provider: route53, zone_id: …}`, same rule as `dns:`/`web:`. |
 | `inbound` | `true` publishes an MX record. `false` keeps the domain send-only — SPF/DMARC still go out (so mail *from* this domain authenticates), nothing can deliver *to* it. |
 | `dmarc_rua` | aggregate-report address in the published DMARC record. |
+| `hosted` | the actual opt-in switch (default `false`). Without it, `domains`/`dmarc_rua` are just documentation — e.g. recording SPF/DMARC intent ahead of an actual migration — and mksrv writes nothing and provisions nothing. Only `hosted: true` makes `mksrv apply --infra-only` write DNS and `mksrv tenant apply` provision mailboxes/DKIM. (`mail` is a shared, non-per-tenant stack, so unlike `database` this can't be expressed by listing `mail` in the tenant's own `stacks:` — the schema rejects that.) |
 | `mailboxes` | declarative list, `{address, name?}`. `address`'s domain must be one of `domains`. No password field — mksrv generates one per mailbox. |
 
 Requires a host in `deployment.yaml` carrying the `mail` stack (the edge, in
 practice — it's the only public host, ADR 0027).
 
 ## What `mksrv tenant apply` does
+
+For every tenant with `hosted: true` (skipped otherwise):
 
 1. Generates each mailbox's password (`EnsureRandom`, SSM
    `/mksrv/<env>/mail/tenant_<id>_<local>_password`) and writes the shared
@@ -42,8 +46,9 @@ practice — it's the only public host, ADR 0027).
 
 ## What `mksrv apply --infra-only` does
 
-Writes MX (if `inbound: true`), SPF, and DMARC into your zone — fully computed
-from the block above, no dependency on the server's state.
+If `hosted: true`: writes MX (if `inbound: true`), SPF, and DMARC into your
+zone — fully computed from the block above, no dependency on the server's
+state. Otherwise, nothing.
 
 ## Client settings
 

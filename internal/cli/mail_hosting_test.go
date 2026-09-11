@@ -22,9 +22,10 @@ func TestMailPasswordRef(t *testing.T) {
 func TestMailTenants(t *testing.T) {
 	t.Parallel()
 	tenants := map[string]model.Tenant{
-		"mcps": {Mail: &model.TenantMail{Domains: []string{"acme.example.com"}}},
-		"hg":   {Mail: &model.TenantMail{}}, // no domains -> not a mail consumer
-		"acme": {},
+		"mcps":   {Mail: &model.TenantMail{Domains: []string{"acme.example.com"}, Hosted: true}},
+		"hg":     {Mail: &model.TenantMail{}}, // no domains -> not a mail consumer
+		"acme":   {},
+		"future": {Mail: &model.TenantMail{Domains: []string{"future.example.com"}}}, // hosted:false -> not live yet
 	}
 	got := mailTenants(tenants)
 	if strings.Join(got, ",") != "mcps" {
