@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Fix (infra): `terraform plan`/`apply` failed with "all map elements must
+  have the same type" for `var.tenants` as soon as one tenant's `web:` or
+  `forwards:` used a shape another tenant (or another entry in its own list)
+  didn't — e.g. the first tenant to declare `web:` at all, or a `forwards:`
+  list mixing an `ssh` entry (with `ssh_alias`/`open`) and a `tcp` entry
+  (without). `var.tenants` is now an explicit `map(object({...optional(...)}))`
+  instead of `map(any)`, matching `internal/model.Tenant`'s JSON shape, so
+  each tenant's optional blocks can genuinely vary. Fallout from that: an
+  unset optional attribute is now a real `null`, not a missing-key error, so
+  `try(t.web, [])`-style expressions in `infra/root/main.tf` that relied on
+  the old "missing key errors, try() catches it" behavior needed
+  `coalesce()` too (`try()` alone doesn't fall through on a legitimate
+  `null`). `TenantForward` / `TenantWebEndpoint`'s optional fields dropped
+  their `omitempty` tags so every list entry carries the same key set.
+
 - Add (M32, ADR 0032): the `mail` stack is implemented — a shared
   `docker-mailserver` instance on the edge, real inbound + outbound mailboxes
   for tenants that opt in with a `mail:` block (`domains`, `inbound`,
