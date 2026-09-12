@@ -19,6 +19,28 @@
   --accept-routes` podman argument, so `--accept-routes` never actually
   reached `tailscaled`.
 
+- Fix (infra): a tenant's web SSO gate (`mksrv-websso-<id>.service`,
+  oauth2-proxy) could land in `failed` and stay there needing a manual
+  `systemctl reset-failed` + restart, purely because Keycloak was still
+  booting. `After=mksrv-keycloak.service` only waits for Keycloak's *unit*
+  to start, not for its HTTP endpoint to actually answer; oauth2-proxy's
+  own OIDC discovery at startup doesn't retry internally, so it exhausted
+  systemd's default 5-attempts-per-10s restart budget before a
+  still-booting Keycloak was ready. Confirmed live, twice (both after a
+  `tenant apply` restarted Keycloak while the gate happened to be
+  restarting too). `StartLimitIntervalSec=0` + `RestartSec=5s` — no rate
+  limit; `Restart=always` is supposed to be self-healing once Keycloak is
+  actually up, however long that takes.
+
+- Fix (infra): the mail server reported `unhealthy` indefinitely
+  (`health_failing_streak` in the hundreds) despite IMAPS working
+  correctly — confirmed live via the process list, `/proc/net/tcp`, and a
+  raw self-connect, all showing :993 genuinely listening. The `HealthCmd`
+  (`ss --listening --tcp | grep -q :993`) never matched because `ss`
+  without `--numeric` resolves well-known ports to their `/etc/services`
+  name (`imaps`, not `993`) — a plain string-match bug in the check
+  itself, not a real health problem. Added `--numeric`.
+
 - Add (M32 follow-up, ADR 0032): migrating a mailbox from another mail
   server no longer forces a password reset. docker-mailserver's
   `postfix-accounts.cf` hash format (`{SHA512-CRYPT}$6$...`) is portable —
