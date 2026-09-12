@@ -118,6 +118,17 @@ func webSSOContainer(t model.Tenant, id, keycloakDomain, realm string, port int)
 Description=mksrv web SSO gate (%[1]s)
 Requires=mksrv-keycloak.service
 After=mksrv-keycloak.service
+# After= only waits for Keycloak's unit to start, not for its HTTP endpoint
+# to actually answer -- Keycloak (a JVM app) can take well past systemd's
+# default 5-attempts-per-10s restart budget to finish booting, so
+# oauth2-proxy's own OIDC discovery at startup (it does not retry
+# internally) exhausts that budget and lands in "failed", needing a manual
+# reset-failed + restart, purely because Keycloak was not ready yet.
+# Confirmed live, twice. No rate limit here: Restart=always is meant to be
+# self-healing once Keycloak is actually up, however long that takes;
+# RestartSec spaces out attempts so it does not hammer Keycloak with a
+# discovery request every default 100ms while it is still booting.
+StartLimitIntervalSec=0
 
 [Container]
 ContainerName=mksrv-websso-%[1]s
@@ -143,6 +154,7 @@ Secret=mksrv-websso-%[1]s-cookie,type=env,target=OAUTH2_PROXY_COOKIE_SECRET
 
 [Service]
 Restart=always
+RestartSec=5s
 TimeoutStartSec=60
 
 [Install]

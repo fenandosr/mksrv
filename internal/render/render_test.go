@@ -132,6 +132,15 @@ func TestStackRendersMail(t *testing.T) {
 	if !strings.Contains(string(unit), "\nHostName=mail.example.com") {
 		t.Fatalf("mailserver unit missing HostName=:\n%s", unit)
 	}
+	// `ss --listening --tcp` (no --numeric) resolves 993 to its /etc/services
+	// name ("imaps") instead of printing it numerically, so a literal ":993"
+	// grep never matches even when the port is genuinely listening — the
+	// container reported "unhealthy" indefinitely despite IMAPS working fine
+	// (confirmed live: process running, /proc/net/tcp showed it LISTENing, a
+	// raw self-connect succeeded — only `ss`'s own name resolution was wrong).
+	if !strings.Contains(string(unit), "HealthCmd=ss --listening --tcp --numeric | grep -q :993") {
+		t.Fatalf("mailserver unit's HealthCmd is missing --numeric (ss resolves 993 to \"imaps\" without it, so the :993 grep never matches):\n%s", unit)
+	}
 }
 
 func TestStackRendersIdentity(t *testing.T) {
