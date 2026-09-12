@@ -96,6 +96,14 @@ func TestWebSSOContainer(t *testing.T) {
 		"OAUTH2_PROXY_COOKIE_DOMAINS=.mcps-epcm.org",
 		"Secret=mksrv-websso-mcps-oidc,type=env,target=OAUTH2_PROXY_CLIENT_SECRET",
 		"Secret=mksrv-websso-mcps-cookie,type=env,target=OAUTH2_PROXY_COOKIE_SECRET",
+		// After=mksrv-keycloak.service only waits for the unit to start, not
+		// for Keycloak's HTTP endpoint to actually answer -- oauth2-proxy's
+		// OIDC discovery at startup doesn't retry internally, so without an
+		// unlimited restart budget it can exhaust systemd's default 5-in-10s
+		// limit and land in 'failed' before a still-booting Keycloak is
+		// ready (confirmed live, twice).
+		"StartLimitIntervalSec=0",
+		"RestartSec=5s",
 	} {
 		if !strings.Contains(unit, want) {
 			t.Fatalf("websso unit missing %q:\n%s", want, unit)
