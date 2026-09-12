@@ -5,6 +5,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/route53"
@@ -46,12 +47,30 @@ func (c *Clients) UpsertTXT(ctx context.Context, zoneID, fqdn, value string) err
 	return nil
 }
 
-// quoteTXT wraps a TXT record value in the quotes Route53 requires, unless the
-// caller already supplied them (docker-mailserver's DKIM output is often
-// pre-quoted).
+// txtSegmentMax is the longest a single DNS TXT character-string may be
+// (RFC 1035: length-prefixed by one octet, so 255 is the hard ceiling — not
+// an AWS-specific limit). A DKIM RSA public key comfortably exceeds this.
+const txtSegmentMax = 255
+
+// quoteTXT renders a TXT record value the way Route53 requires: one or more
+// quoted character-strings, none longer than txtSegmentMax, concatenated
+// with a space. A short value (most TXT records) round-trips as a single
+// quoted string, same as before; a long one (a DKIM public key) gets split
+// into 255-byte chunks — Route53 rejects a single over-long quoted string
+// with "CharacterStringTooLong (Value is too long)". Splits on bytes, not
+// runes: DKIM/base64 content is pure ASCII, so this never divides a
+// multi-byte rune, but byte length is what the 255-octet limit is actually
+// counting.
 func quoteTXT(value string) string {
-	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
-		return value
+	if value == "" {
+		return `""`
 	}
-	return `"` + value + `"`
+	b := []byte(value)
+	var segments []string
+	for len(b) > 0 {
+		n := min(len(b), txtSegmentMax)
+		segments = append(segments, `"`+string(b[:n])+`"`)
+		b = b[n:]
+	}
+	return strings.Join(segments, " ")
 }

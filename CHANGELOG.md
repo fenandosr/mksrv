@@ -16,6 +16,28 @@
   can treat "no pre-seeded hash" as an expected outcome instead of an
   error.
 
+- Fix (infra): publishing a DKIM record failed for any real key —
+  `internal/aws.UpsertTXT` wrapped the whole value in one quoted string,
+  but RFC 1035 caps a single TXT character-string at 255 bytes and a DKIM
+  RSA public key routinely runs 350+ bytes once base64-encoded:
+  `InvalidChangeBatch: CharacterStringTooLong (Value is too long)`.
+  `quoteTXT` now splits into 255-byte chunks, each quoted, concatenated
+  with a space — the same multi-string shape `docker-mailserver`'s own
+  `mail.txt` already uses (`parseDKIMRecord` flattens it back to one
+  logical string; `quoteTXT` re-chunks it for the wire). Short values
+  (SPF/DMARC) are unaffected — one chunk, same as before. Verified live:
+  published mcps-epcm.org's real DKIM key to Route53 with the corrected
+  chunking.
+
+- Fix (infra): `mksrv tenant apply`'s DKIM generation used the wrong CLI
+  name and the wrong path for docker-mailserver 14.0:
+  `exec mksrv-mailserver setup.sh config dkim domain '<domain>'` failed
+  with `executable file 'setup.sh' not found in $PATH` (the CLI is `setup`,
+  no `.sh`, in this image version) and the key-existence check/read
+  assumed `/var/mail-state/opendkim/keys/<domain>/mail.txt` — confirmed
+  live that `ONE_DIR=1` doesn't put DKIM keys there; they land under the
+  config bind mount, `/tmp/docker-mailserver/opendkim/keys/<domain>/`.
+  Both fixed against a real, running container.
 - Fix (infra): `mksrv deploy --stack mail` hard-failed on every first deploy
   to a host with no mailboxes provisioned yet — its `tcp`/993 health check
   retried for its full ~5 minutes and then failed, because
@@ -26,7 +48,6 @@
   container's own Quadlet `HealthCmd` still tracks real health
   continuously (`podman ps` / `systemctl status`). New regression test
   guards against a `tcp`/993 check on this stack specifically.
-
 - Fix (infra): the mail server's Quadlet unit bind-mounts five host
   directories (its config/TLS bind mounts, plus the `maildata` volume's
   three subdirectories); Podman doesn't create a missing bind-mount source
