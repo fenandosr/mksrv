@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Add (mail, ADR 0032 opt-out): `mail.branded_hostname` lets a tenant's mail
+  users configure `mail.<their-own-domain>` in Outlook/Thunderbird/etc.
+  instead of the shared operator hostname (`mail.<root_domain>`) every other
+  hosted tenant uses. Per-tenant opt-in, default `false` — it grows the
+  shared mail server's TLS cert SAN list, so it's not automatic for every
+  `mail.hosted: true` tenant. Implementation: `mksrv apply --infra-only`
+  publishes `mail.<domain>` (A, → the edge) in the tenant's own zone for
+  every domain of an opted-in tenant; the shared mail stack's Caddy TLS
+  fragment (`15-mail.caddy`) now folds every opted-in tenant's `mail.<domain>`
+  into the same site's address list as an extra SAN, so Caddy's automatic
+  HTTPS gets one multi-SAN cert covering all of them — `mail.<root_domain>`
+  stays first in that list, since `reconcileMailTLS` looks the resulting
+  cert up by that exact name, and docker-mailserver itself is untouched
+  (still one manual cert file, no SNI/per-domain cert plumbing needed there).
+  Enabled for `mcps` (`mail.mcps-epcm.org`).
+
 - Fix (mesh): the `mksrv-tailscale` Quadlet unit could not create its
   `tailscale0` TUN device on RHEL/Rocky hosts — `tstun.New("tailscale0"):
   permission denied` on every start, so the node never joined the tailnet.

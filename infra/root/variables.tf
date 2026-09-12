@@ -24,13 +24,14 @@ variable "tenants" {
       realm = optional(string)
     })
     mail = optional(object({
-      domains      = optional(list(string))
-      inbound      = optional(bool)
-      dmarc_rua    = optional(string)
-      hosted       = optional(bool)
-      spf_includes = optional(list(string))
-      dmarc_policy = optional(string)
-      dmarc_strict = optional(bool)
+      domains          = optional(list(string))
+      inbound          = optional(bool)
+      dmarc_rua        = optional(string)
+      hosted           = optional(bool)
+      spf_includes     = optional(list(string))
+      dmarc_policy     = optional(string)
+      dmarc_strict     = optional(bool)
+      branded_hostname = optional(bool)
       mailboxes = optional(list(object({
         address = string
         name    = optional(string)

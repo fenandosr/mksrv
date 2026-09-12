@@ -1,7 +1,19 @@
 {{/* Nothing is actually served here — this fragment exists only so Caddy
      obtains and renews a cert for the shared mail server's own hostname
      (HTTP-01, same as every other operator FQDN). mksrv copies the resulting
-     cert + key into docker-mailserver's TLS mount (ADR 0032). */}}
-mail.{{ .Endpoints.RootDomain }} {
+     cert + key into docker-mailserver's TLS mount (ADR 0032).
+
+     The root-domain hostname stays first in the address list below: Caddy's
+     certmagic cache names the cert directory after a site's first configured
+     host, and reconcileMailTLS (mail_hosting.go) looks the cert up by that
+     exact name — reordering these would break that lookup even though the
+     resulting cert (one cert, multiple SANs) still covers every name in the
+     list either way.
+
+     .MailBrandedHostnames appends "mail.<domain>" for every tenant that
+     opted into mail.branded_hostname (ADR 0032 opt-out) — one shared,
+     multi-SAN cert, no per-tenant cert/SNI plumbing needed in
+     docker-mailserver itself, which still just gets ONE manual cert file. */}}
+mail.{{ .Endpoints.RootDomain }}{{ range .MailBrandedHostnames }}, {{ . }}{{ end }} {
 	respond "mksrv mail server" 200
 }

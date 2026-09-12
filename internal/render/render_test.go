@@ -141,6 +141,41 @@ func TestStackRendersMail(t *testing.T) {
 	if !strings.Contains(string(unit), "HealthCmd=ss --listening --tcp --numeric | grep -q :993") {
 		t.Fatalf("mailserver unit's HealthCmd is missing --numeric (ss resolves 993 to \"imaps\" without it, so the :993 grep never matches):\n%s", unit)
 	}
+
+	frag, ok := files["/var/lib/mksrv/caddy.d/15-mail.caddy"]
+	if !ok {
+		t.Fatal("no mail Caddy fragment rendered")
+	}
+	if !strings.HasPrefix(strings.TrimSpace(string(frag)), "mail.example.com {") {
+		t.Fatalf("mail Caddy fragment with no branded tenants should be just the root-domain hostname:\n%s", frag)
+	}
+}
+
+// TestStackRendersMailBrandedHostnames guards ADR 0032's opt-out
+// (mail.branded_hostname): the root-domain hostname must stay first in the
+// Caddy site's address list, since reconcileMailTLS looks the resulting
+// cert up by that exact name — a per-tenant SAN is additive, not a
+// replacement.
+func TestStackRendersMailBrandedHostnames(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	ctx := baseContext()
+	ctx.Host.Stacks = []string{"base", "identity", "mail"}
+	ctx.MailBrandedHostnames = []string{"mail.acme.example.com", "mail.mcps-epcm.org"}
+	files, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), catalog["mail"], ctx)
+	if err != nil {
+		t.Fatalf("Stack() error = %v", err)
+	}
+	frag, ok := files["/var/lib/mksrv/caddy.d/15-mail.caddy"]
+	if !ok {
+		t.Fatal("no mail Caddy fragment rendered")
+	}
+	if !strings.HasPrefix(strings.TrimSpace(string(frag)), "mail.example.com, mail.acme.example.com, mail.mcps-epcm.org {") {
+		t.Fatalf("mail Caddy fragment address list wrong (root domain must stay first):\n%s", frag)
+	}
 }
 
 func TestStackRendersIdentity(t *testing.T) {
