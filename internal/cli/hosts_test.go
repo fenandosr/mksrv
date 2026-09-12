@@ -85,6 +85,39 @@ func TestRenderContextPopulatesOperatorFQDNs(t *testing.T) {
 	}
 }
 
+// TestRenderContextPopulatesMailBrandedHostnames checks the ADR 0032 opt-out
+// (mail.branded_hostname): only tenants with hosted:true AND
+// branded_hostname:true contribute a "mail.<domain>" SAN, sorted, and a
+// hosted-but-not-branded tenant (the default) contributes nothing.
+func TestRenderContextPopulatesMailBrandedHostnames(t *testing.T) {
+	t.Parallel()
+	f := &fleet{
+		data: workspace.Data{
+			Deployment: model.Deployment{
+				DNS:      model.DNSConfig{RootDomain: "example.com"},
+				Identity: model.IdentityConfig{KeycloakDomain: "auth.example.com", HeadscaleDomain: "vpn.example.com"},
+				Hosts:    map[string]model.Host{"edge": {Provider: "aws", Stacks: []string{"base"}}},
+			},
+			Tenants: map[string]model.Tenant{
+				"mcps": {ID: "mcps", Mail: &model.TenantMail{
+					Hosted: true, Domains: []string{"mcps-epcm.org"}, BrandedHostname: true,
+				}},
+				"bitabit": {ID: "bitabit", Mail: &model.TenantMail{
+					Hosted: true, Domains: []string{"bitabit.example.org"}, // not branded — default stays shared
+				}},
+				"hg": {ID: "hg"}, // no mail: block at all
+			},
+		},
+		targets: []hostTarget{{Name: "edge", Host: model.Host{Stacks: []string{"base"}}}},
+		outputs: infra.Outputs{Hosts: map[string]infra.HostOutput{"edge": {PrivateIP: "10.20.0.10"}}},
+	}
+	ctx := f.renderContext(f.targets[0])
+	want := []string{"mail.mcps-epcm.org"}
+	if len(ctx.MailBrandedHostnames) != len(want) || ctx.MailBrandedHostnames[0] != want[0] {
+		t.Fatalf("MailBrandedHostnames = %v, want %v", ctx.MailBrandedHostnames, want)
+	}
+}
+
 func TestWireBastion(t *testing.T) {
 	t.Parallel()
 	mk := func(hosts ...struct {

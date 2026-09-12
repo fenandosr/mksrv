@@ -272,6 +272,17 @@ type TenantMail struct {
 	DMARCPolicy string `json:"dmarc_policy,omitempty"`
 	// DMARCStrict adds `adkim=s; aspf=s` (strict DKIM/SPF alignment).
 	DMARCStrict bool `json:"dmarc_strict,omitempty"`
+	// BrandedHostname opts this tenant out of ADR 0032's shared client
+	// hostname (mail.<root_domain>, the default: every hosted tenant points
+	// its mail client at the same server hostname, like any multi-domain
+	// mail provider). When true, mksrv additionally publishes
+	// mail.<domain> (one of Domains) in the tenant's own zone, pointing at
+	// the same shared server, and folds it into the shared mail server's
+	// TLS cert as an extra SAN — so this tenant's users can configure
+	// mail.<their-own-domain> in Outlook/Thunderbird/etc. instead of the
+	// operator's hostname. Opt-in: per-tenant, since it grows the shared
+	// cert's SAN list and adds a DNS record per opted-in tenant.
+	BrandedHostname bool `json:"branded_hostname,omitempty"`
 	// Mailboxes are add/remove-only; mksrv generates each password.
 	Mailboxes []TenantMailbox `json:"mailboxes,omitempty"`
 }

@@ -484,6 +484,18 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 		}
 	}
 
+	var mailBrandedHostnames []string
+	for _, id := range sortedTenantIDs(f.data.Tenants) {
+		t := f.data.Tenants[id]
+		if !tenantMailHosted(t) || !t.Mail.BrandedHostname {
+			continue
+		}
+		for _, d := range t.Mail.Domains {
+			mailBrandedHostnames = append(mailBrandedHostnames, "mail."+d)
+		}
+	}
+	sort.Strings(mailBrandedHostnames)
+
 	return render.Context{
 		Env:             dep.Env,
 		Region:          dep.AWS.Region,
@@ -505,14 +517,15 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 			ConfigD:    "cfg." + dep.DNS.RootDomain,
 			RootDomain: dep.DNS.RootDomain,
 		},
-		Images:        images,
-		Peers:         peers,
-		StackHosts:    stackHosts,
-		StackMembers:  stackMembers,
-		Fleet:         fleet,
-		OperatorFQDNs: operatorFQDNs,
-		TenantIDs:     sortedTenantIDs(f.data.Tenants),
-		Retention:     f.data.Deployment.Retention.Resolved(),
+		Images:               images,
+		Peers:                peers,
+		StackHosts:           stackHosts,
+		StackMembers:         stackMembers,
+		Fleet:                fleet,
+		OperatorFQDNs:        operatorFQDNs,
+		TenantIDs:            sortedTenantIDs(f.data.Tenants),
+		MailBrandedHostnames: mailBrandedHostnames,
+		Retention:            f.data.Deployment.Retention.Resolved(),
 	}
 }
 

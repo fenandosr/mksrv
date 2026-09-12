@@ -88,6 +88,20 @@ locals {
               value = "10 mail.${local.root_domain}"
               ttl   = 300
             }] : [],
+            # branded_hostname (opt-in, default false — ADR 0032's shared
+            # mail.<root_domain> client hostname stays the default for every
+            # other tenant): publishes mail.<domain> in the tenant's own zone,
+            # pointing at the same shared server, so this tenant's users can
+            # configure mail.<their-own-domain> in their mail client instead
+            # of the operator's hostname. The matching TLS SAN is handled
+            # separately, live, by reconcileMailTLS (internal/cli/mail_hosting.go)
+            # — Caddy's cert can only cover a hostname once DNS resolves it.
+            try(coalesce(t.mail.branded_hostname, false), false) ? [{
+              fqdn  = "mail.${d}"
+              type  = "A"
+              value = local.edge_ip
+              ttl   = 300
+            }] : [],
             [
               {
                 fqdn = d

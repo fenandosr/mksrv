@@ -15,6 +15,7 @@ mail:
   spf_includes: [amazonses.com]
   dmarc_policy: reject
   dmarc_strict: true
+  branded_hostname: true
   mailboxes:
     - address: admin@acme.example.com
       name: "Team Lead"
@@ -29,6 +30,7 @@ mail:
 | `spf_includes` | extra `include:` mechanisms folded into the computed SPF record, ahead of `mx` — for senders other than the shared mail server already authorized to send as this domain (e.g. a pre-existing SES sending identity). |
 | `dmarc_policy` | the computed record's `p=` tag: `none` \| `quarantine` (default) \| `reject`. |
 | `dmarc_strict` | `true` adds `adkim=s; aspf=s` (strict DKIM/SPF alignment) to the computed DMARC record. |
+| `branded_hostname` | opt-out of the shared client hostname (default `false`, see "Client settings" below). `true` publishes `mail.<domain>` (one of `domains`) in this tenant's own zone, pointing at the same shared server, and folds it into the shared server's TLS cert as an extra SAN — so this tenant's users configure `mail.<their-own-domain>` instead of the operator hostname. Per-tenant: it grows the shared cert's SAN list, so it's opt-in rather than automatic for every hosted tenant. |
 | `mailboxes` | declarative list, `{address, name?}`. `address`'s domain must be one of `domains`. No password field — mksrv generates one per mailbox. |
 
 ## Migrating real mailboxes from another mail server
@@ -99,6 +101,10 @@ not your own domain — `mail.<root_domain>` (ask your operator), port `993`
 IMAPS / `587` submission (STARTTLS) or `465` (implicit TLS). Your address is
 still `you@acme.example.com`; the server hostname is shared across every tenant
 hosted here, the same shape as any multi-domain hosted-mail provider.
+
+If your tenant sets `branded_hostname: true`, use `mail.<your-own-domain>`
+instead — same ports, same server, just your own domain in the client config
+instead of the operator's.
 
 ## Not yet
 
