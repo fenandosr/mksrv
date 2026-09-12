@@ -92,3 +92,34 @@ func TestQuadletUnits(t *testing.T) {
 		t.Fatalf("quadletUnits() = %v", units)
 	}
 }
+
+func TestTailscaleUnit(t *testing.T) {
+	t.Parallel()
+	unit, err := renderText("tailscale.container", tailscaleUnit, MeshParams{
+		LoginServer: "https://vpn.mksrv.example",
+		Hostname:    "prod-edge",
+		Image:       MeshImage,
+	})
+	if err != nil {
+		t.Fatalf("renderText() error = %v", err)
+	}
+	body := string(unit)
+	for _, want := range []string{
+		// container_t denies the tun_socket class needed to create a real TUN
+		// device, silently (dontaudit) -- confirmed live on the prod edge:
+		// tstun.New("tailscale0"): permission denied, no AVC in ausearch even
+		// with dontaudit disabled. Without this the mesh node can never come up.
+		"SecurityLabelDisable=true",
+		"DeviceAllow=/dev/net/tun rwm",
+		// Unquoted, systemd's Environment= splits an embedded space into a
+		// second bogus assignment, so --accept-routes never reached tailscaled.
+		`Environment="TS_EXTRA_ARGS=--login-server=https://vpn.mksrv.example --accept-routes"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("tailscale unit missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "Environment=TS_EXTRA_ARGS=--login-server") {
+		t.Fatalf("TS_EXTRA_ARGS must be quoted as a single value:\n%s", body)
+	}
+}

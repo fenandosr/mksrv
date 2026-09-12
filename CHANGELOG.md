@@ -18,6 +18,23 @@
   (still one manual cert file, no SNI/per-domain cert plumbing needed there).
   Enabled for `mcps` (`mail.mcps-epcm.org`).
 
+- Fix (mesh): the `mksrv-tailscale` Quadlet unit could not create its
+  `tailscale0` TUN device on RHEL/Rocky hosts — `tstun.New("tailscale0"):
+  permission denied` on every start, so the node never joined the tailnet.
+  Root cause: `container-selinux` confines Podman containers as
+  `container_t`, which denies the `tun_socket` object class (create/ioctl
+  on `/dev/net/tun`) even with `NET_ADMIN`/`NET_RAW` and correct device
+  permissions — and the denial is marked `dontaudit`, so it never appears
+  in `ausearch` (confirmed live on the prod edge, including with
+  `dontaudit` rules disabled). Fixed via `SecurityLabelDisable=true`
+  (Podman's documented fix for tun/tap-in-container on SELinux hosts,
+  scoped to this one container) plus an explicit `DeviceAllow=/dev/net/tun
+  rwm`. Also fixed a second, unrelated bug found in the same unit: an
+  unquoted `Environment=TS_EXTRA_ARGS=--login-server=... --accept-routes`
+  was split by systemd on the embedded space into a second, bogus `--env
+  --accept-routes` podman argument, so `--accept-routes` never actually
+  reached `tailscaled`.
+
 - Fix (infra): a tenant's web SSO gate (`mksrv-websso-<id>.service`,
   oauth2-proxy) could land in `failed` and stay there needing a manual
   `systemctl reset-failed` + restart, purely because Keycloak was still

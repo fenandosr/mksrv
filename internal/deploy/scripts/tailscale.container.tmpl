@@ -10,15 +10,31 @@ Network=host
 AddCapability=NET_ADMIN
 AddCapability=NET_RAW
 AddDevice=/dev/net/tun
+# RHEL/Rocky's container-selinux policy confines Podman containers as
+# container_t, which denies the "tun_socket" object class (create/ioctl on
+# /dev/net/tun) needed to bring up a real kernel TUN device -- surfaces as
+# tstun.New(...): permission denied (EACCES on TUNSETIFF), even with
+# NET_ADMIN/NET_RAW and correct DAC perms on the device node, and even though
+# the denial is marked dontaudit so it never shows up in `ausearch` (confirmed
+# live, prod edge, 2026-09-12). Disabling SELinux labeling for just this
+# container is Podman's documented fix for tun/tap-in-container on SELinux
+# hosts; it does not affect confinement of any other container.
+SecurityLabelDisable=true
 Environment=TS_STATE_DIR=/var/lib/tailscale
 Environment=TS_USERSPACE=false
 Environment=TS_ACCEPT_DNS=false
 Environment=TS_HOSTNAME={{ .Hostname }}
-Environment=TS_EXTRA_ARGS=--login-server={{ .LoginServer }} --accept-routes
+# Quoted: systemd's Environment= splits an unquoted value on whitespace as if
+# it were several NAME=value assignments, so an unquoted multi-word value here
+# silently turned "--accept-routes" into its own bogus `--env --accept-routes`
+# podman arg (confirmed live via `systemctl show -p ExecStart`) -- meaning
+# --accept-routes was never actually reaching tailscaled.
+Environment="TS_EXTRA_ARGS=--login-server={{ .LoginServer }} --accept-routes"
 Secret=mksrv-mesh-authkey,type=env,target=TS_AUTHKEY
 Volume=mksrv-tailscale-state:/var/lib/tailscale
 
 [Service]
+DeviceAllow=/dev/net/tun rwm
 Restart=always
 TimeoutStartSec=90
 
