@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Add (M32 follow-up, ADR 0032): migrating a mailbox from another mail
+  server no longer forces a password reset. docker-mailserver's
+  `postfix-accounts.cf` hash format (`{SHA512-CRYPT}$6$...`) is portable —
+  no per-installation secret involved — so an operator can seed a
+  mailbox's existing hash directly into SSM
+  (`/mksrv/{env}/mail/tenant_<id>_<local>_password_hash`, verbatim from the
+  old server's own `postfix-accounts.cf`) before `mksrv tenant apply`;
+  `reconcileMailboxes` checks for it first and uses it as-is, only
+  generating a fresh password when it's absent (a genuinely new mailbox).
+  `internal/secrets` gains `IsNotFound`, an exported check for "the SSM
+  parameter doesn't exist" distinct from a real read failure, so a caller
+  can treat "no pre-seeded hash" as an expected outcome instead of an
+  error.
+
 - Fix (infra): publishing a DKIM record failed for any real key —
   `internal/aws.UpsertTXT` wrapped the whole value in one quoted string,
   but RFC 1035 caps a single TXT character-string at 255 bytes and a DKIM
@@ -24,7 +38,6 @@
   live that `ONE_DIR=1` doesn't put DKIM keys there; they land under the
   config bind mount, `/tmp/docker-mailserver/opendkim/keys/<domain>/`.
   Both fixed against a real, running container.
-
 - Fix (infra): `mksrv deploy --stack mail` hard-failed on every first deploy
   to a host with no mailboxes provisioned yet — its `tcp`/993 health check
   retried for its full ~5 minutes and then failed, because

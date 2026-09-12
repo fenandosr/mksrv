@@ -63,6 +63,31 @@ func TestEnsureRandomCreatesOnceThenReads(t *testing.T) {
 	}
 }
 
+func TestIsNotFound(t *testing.T) {
+	t.Parallel()
+	api := &fakeSSM{store: map[string]string{}}
+	r := NewResolver(api, "prod")
+
+	_, err := r.Get(context.Background(), "/mksrv/{env}/does/not/exist")
+	if err == nil {
+		t.Fatal("Get() on a missing parameter returned no error")
+	}
+	if !IsNotFound(err) {
+		t.Fatalf("IsNotFound(%v) = false, want true", err)
+	}
+
+	if err := r.Put(context.Background(), "/mksrv/{env}/present", "v"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = r.Get(context.Background(), "/mksrv/{env}/present")
+	if err != nil {
+		t.Fatalf("Get() on a present parameter error = %v", err)
+	}
+	if IsNotFound(err) {
+		t.Fatal("IsNotFound(nil) = true, want false")
+	}
+}
+
 func TestRandomAlphanumeric(t *testing.T) {
 	t.Parallel()
 	for _, n := range []int{1, 16, 43, 100} {

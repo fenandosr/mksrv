@@ -31,6 +31,28 @@ mail:
 | `dmarc_strict` | `true` adds `adkim=s; aspf=s` (strict DKIM/SPF alignment) to the computed DMARC record. |
 | `mailboxes` | declarative list, `{address, name?}`. `address`'s domain must be one of `domains`. No password field — mksrv generates one per mailbox. |
 
+## Migrating real mailboxes from another mail server
+
+docker-mailserver's `postfix-accounts.cf` format (`email|{SHA512-CRYPT}$6$...`)
+is portable — a salted hash carries no per-installation secret. To migrate a
+user without forcing a password reset, seed their existing hash directly
+(copied verbatim from the old server's own `postfix-accounts.cf`) into SSM
+*before* running `mksrv tenant apply`:
+
+```bash
+aws ssm put-parameter --type SecureString \
+  --name "/mksrv/<env>/mail/tenant_<id>_<local_part>_password_hash" \
+  --value '{SHA512-CRYPT}$6$...'
+```
+
+`<local_part>` is the address's local part, lowercased, with anything that
+isn't `[a-z0-9]` collapsed to `_` (`alberto.zarza@…` → `alberto_zarza`) — same
+rule `mksrv` uses for the generated-password ref, just a `_hash` suffix
+instead. `mksrv tenant apply` checks for this ref *before* generating a
+password; when present, it uses the hash as-is (nothing generated, nothing
+else stored) — the user keeps logging in with the same password they always
+had. Leave it unset for a genuinely new mailbox; mksrv generates one as usual.
+
 If a domain already has its own SPF/DMARC (e.g. from a prior, non-mksrv mail
 setup) and `hosted` is turned on, `mksrv apply --infra-only` will try to
 **create** those two records and fail (`already exists`) since Terraform

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/fenandosr/mksrv/internal/model"
+	secretsx "github.com/fenandosr/mksrv/internal/secrets"
 	sshx "github.com/fenandosr/mksrv/internal/ssh"
 	"github.com/fenandosr/mksrv/internal/ui"
 )
@@ -22,10 +23,26 @@ const (
 
 var mailLocalPartRe = regexp.MustCompile(`[^a-z0-9]+`)
 
+func mailLocalPartKey(address string) string {
+	return mailLocalPartRe.ReplaceAllString(strings.ToLower(model.TenantMailbox{Address: address}.MailLocalPart()), "_")
+}
+
 // mailPasswordRef is the SSM path for one mailbox's generated password.
 func mailPasswordRef(tenantID, address string) string {
-	local := mailLocalPartRe.ReplaceAllString(strings.ToLower(model.TenantMailbox{Address: address}.MailLocalPart()), "_")
-	return "/mksrv/{env}/mail/tenant_" + tenantID + "_" + local + "_password"
+	return "/mksrv/{env}/mail/tenant_" + tenantID + "_" + mailLocalPartKey(address) + "_password"
+}
+
+// mailPasswordHashRef is the SSM path for a *pre-computed* password hash for
+// one mailbox — an operator migrating real users off another mail server can
+// seed this directly (`aws ssm put-parameter --type SecureString`) with the
+// exact `{SHA512-CRYPT}$6$...` line already in that server's own
+// postfix-accounts.cf (the format docker-mailserver uses is portable between
+// installations — salted, no per-install secret involved) so the mailbox
+// keeps working with the user's existing password instead of forcing a
+// reset. Checked before mailPasswordRef/EnsureRandom; only ever read here,
+// mksrv never writes to it.
+func mailPasswordHashRef(tenantID, address string) string {
+	return "/mksrv/{env}/mail/tenant_" + tenantID + "_" + mailLocalPartKey(address) + "_password_hash"
 }
 
 // mailHost returns the fleet host carrying the `mail` stack, or nil.
@@ -113,15 +130,27 @@ func (f *fleet) reconcileMailboxes(ctx context.Context, printer ui.Printer, clie
 	for _, id := range tenantIDs {
 		t := f.data.Tenants[id]
 		for _, mb := range t.Mail.Mailboxes {
-			pass, err := f.resolver.EnsureRandom(ctx, mailPasswordRef(id, mb.Address), 24)
+			hash, err := f.resolver.Get(ctx, mailPasswordHashRef(id, mb.Address))
 			if err != nil {
-				return fmt.Errorf("mail %s: password for %s: %w", id, mb.Address, err)
+				if !secretsx.IsNotFound(err) {
+					return fmt.Errorf("mail %s: password hash for %s: %w", id, mb.Address, err)
+				}
+				// No pre-seeded hash (the common case: a brand-new mailbox,
+				// not a migrated one) — generate and hash a fresh password.
+				pass, passErr := f.resolver.EnsureRandom(ctx, mailPasswordRef(id, mb.Address), 24)
+				if passErr != nil {
+					return fmt.Errorf("mail %s: password for %s: %w", id, mb.Address, passErr)
+				}
+				res, hashErr := client.RunInput(ctx, "openssl passwd -6 -stdin", []byte(pass))
+				if hashErr != nil {
+					return fmt.Errorf("mail %s: hash password for %s: %w", id, mb.Address, hashErr)
+				}
+				hash = strings.TrimSpace(res.Stdout)
 			}
-			res, err := client.RunInput(ctx, "openssl passwd -6 -stdin", []byte(pass))
-			if err != nil {
-				return fmt.Errorf("mail %s: hash password for %s: %w", id, mb.Address, err)
-			}
-			lines = append(lines, line{strings.ToLower(mb.Address), strings.TrimSpace(res.Stdout)})
+			// else: a pre-computed hash was seeded directly (migrated
+			// mailbox) — the user's existing password keeps working, nothing
+			// generated or stored.
+			lines = append(lines, line{strings.ToLower(mb.Address), hash})
 		}
 	}
 	sort.Slice(lines, func(i, j int) bool { return lines[i].address < lines[j].address })
