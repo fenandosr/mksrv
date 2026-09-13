@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- Fix (cache): a tenant's Celery worker crashed on every start (or, worse,
+  ran for a few minutes and then crash-looped) with
+  `redis.exceptions.NoPermissionError`, even against a freshly-provisioned
+  Redis ACL user. Root cause: Kombu's Redis transport uses several fixed or
+  per-process-dynamic KEY names for its own broker bookkeeping —
+  `unacked`/`unacked_index`/`unacked_mutex` (in-flight delivery tracking and
+  the lock guarding it), `_kombu.binding.*` (queue/exchange bindings), and
+  `<uuid>.reply.celery.pidbox` (each worker's remote-control reply queue) —
+  none of which respect `broker_transport_options={"global_keyprefix":
+  "<id>:"}`, so they never matched the tenant's `~<id>:*` key scope.
+  `redisACLLine` now grants these explicitly (`celeryBookkeepingKeys`)
+  alongside the existing per-tenant key namespace.
+  **Channels are now unscoped (`&*`, not `&<id>:*`)**: even after also
+  granting the pidbox reply channel explicitly, a worker recreated with that
+  grant ran clean for several minutes and then crash-looped on the
+  identical error anyway, and no narrower channel pattern was found that
+  didn't eventually recur — Celery/Kombu's pub/sub usage around pidbox
+  wasn't fully pinned down live. Pub/sub channels carry no persisted tenant
+  data, so the isolation cost of unscoping them is low; keys (where a
+  tenant's actual cached/queued data lives) stay strictly scoped. Verified
+  live end-to-end on the prod `hg` tenant's first real deployment
+  (encrypt/decrypt/datakey/hmac already worked; Celery didn't) — clean for
+  several minutes with zero container restarts after this change, versus
+  12 restarts in a similar window on the channel-scoped attempt.
+
 - Add (secrets, RBAC): a third, narrower OpenBao AppRole tier —
   `svc-<id>` / `tenant-<id>-svc` policy — for a tenant-owned production
   service (Django, Celery, …) that only needs Transit
