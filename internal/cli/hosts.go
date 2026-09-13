@@ -525,6 +525,7 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 		OperatorFQDNs:        operatorFQDNs,
 		TenantIDs:            sortedTenantIDs(f.data.Tenants),
 		MailBrandedHostnames: mailBrandedHostnames,
+		MailRelayOutbound:    dep.Mail != nil && dep.Mail.RelayOutbound,
 		Retention:            f.data.Deployment.Retention.Resolved(),
 	}
 }
