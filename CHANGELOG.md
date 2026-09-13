@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- Add (secrets, RBAC): a third, narrower OpenBao AppRole tier —
+  `svc-<id>` / `tenant-<id>-svc` policy — for a tenant-owned production
+  service (Django, Celery, …) that only needs Transit
+  encrypt/decrypt/hmac/datakey, not the read-only KV access the existing
+  `tenant-<id>` AppRole's `-dev` policy also grants. `mksrv tenant secret-id
+  <id> --service` mints a wrapped SecretID from it instead of the `-dev`
+  role. Requested live by a tenant service developer wiring up their own
+  production deployment: "a leaked credential shouldn't reach the rest of
+  the tenant's secrets."
+
+  Fixes a real, previously-latent bug found while building this: the
+  `mksrv-operator` AppRole's policy (the one `mksrv tenant secret-id` runs
+  under) scoped itself to `tenant-*` roles using `path
+  "auth/approle/role/tenant-+/secret-id"` — but this OpenBao's ACL engine
+  does not glob-match `+` or `*` embedded between literal text in a path
+  segment (confirmed live: an identical *literal* path granted access a
+  `tenant-+`/`tenant-*` version of the same rule silently denied). Since
+  `--list` swallows all errors as "no SecretIDs issued", this had never
+  surfaced as a loud failure — only actually minting a SecretID does.
+  `operatorAppRolePolicyHCL` is now a function that spells out one explicit
+  path block per tenant id (for both the `tenant-<id>` and `svc-<id>`
+  roles), regenerated from the *full* tenant roster on every
+  `provisionOpenBaoTenants` run (not just the ids a given `tenant apply`
+  happened to select), and never grants a role's own definition path — only
+  its `/secret-id`, `/secret-id-accessor/*`, `/role-id` sub-paths.
+
 - Add (mail, ADR 0032 opt-out): `mail.branded_hostname` lets a tenant's mail
   users configure `mail.<their-own-domain>` in Outlook/Thunderbird/etc.
   instead of the shared operator hostname (`mail.<root_domain>`) every other

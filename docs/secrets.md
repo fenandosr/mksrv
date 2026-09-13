@@ -87,6 +87,11 @@ stacks: [database, monitor, cache, openbao]
     columns), and datakey (envelope encryption); not rewrap or rotate;
 - an **AppRole `tenant-<id>`** bound to `tenant-<id>-dev` (`token_ttl 1h`) — for
   services; its RoleID and SecretID land in SSM;
+- a narrower **`svc-<id>` policy + AppRole** — Transit encrypt/decrypt/hmac/
+  datakey on the tenant's own key, no KV at all (not even read-only). For a
+  tenant-owned production service (Django, Celery, …) that only needs to
+  en/decrypt, not the broader `-dev` access a human developer's own AppRole
+  gets — `mksrv tenant secret-id <id> --service` mints from this one instead;
 - a **Transit key `transit/keys/<id>`** (`aes256-gcm96`, non-exportable,
   auto-rotated every 90 days) for PII-column encryption;
 - an **OIDC auth mount `oidc-<id>/`** with two roles: `tenant-<id>-dev` (bound to
@@ -108,6 +113,9 @@ Don't copy the bootstrap SecretID out of SSM. Mint a named, wrapped one:
 ```
 mksrv tenant secret-id acme --name celery-prod --wrap-ttl 24h
 # → role_id + a single-use wrapping token
+
+mksrv tenant secret-id acme --service --name django-prod --wrap-ttl 24h
+# same thing, but from svc-acme (Transit only, no KV) instead of tenant-acme
 ```
 
 Send the wrapping token on a side channel; the recipient unwraps it once
@@ -116,10 +124,22 @@ does not expire (`--ttl` / `--num-uses` override that); `--cidr 100.64.0.0/10`
 binds it to the mesh. `--list` shows the named accessors, `--revoke <accessor>`
 kills one without touching the others.
 
+Bump `--wrap-ttl` for anything that won't be unwrapped immediately — the
+wrapping token (not the SecretID) is what expires, and once it does the value
+is gone for good, with no way to recover it short of minting a new one. The
+default is 1h; a wrapping token handed off across a slower channel (email, a
+ticket, a different timezone) is worth 24h or more.
+
 The command runs under a least-privilege `mksrv-operator` AppRole (mint / list /
-revoke SecretIDs for `tenant-*` roles, nothing else), created with the root token
-on first use and self-contained after that — the human operator never handles
-the root token for this.
+revoke SecretIDs for `tenant-<id>` and `svc-<id>` roles, nothing else), created
+with the root token on first use and self-contained after that — the human
+operator never handles the root token for this. Its policy spells out one
+explicit path block per tenant id rather than a wildcard: this OpenBao's ACL
+engine does not glob-match `+` or `*` embedded between literal text in a path
+segment (confirmed live — `tenant-+/secret-id` and `tenant-*/secret-id` were
+both silently denied a request an identical literal path granted), so
+`provisionOpenBaoTenants` regenerates the whole policy from the tenant roster
+on every `tenant apply`.
 
 A tenant service authenticates and reads its own secrets:
 

@@ -7,15 +7,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/fenandosr/mksrv/internal/keycloak"
+	"github.com/fenandosr/mksrv/internal/model"
 	sshx "github.com/fenandosr/mksrv/internal/ssh"
 	"github.com/fenandosr/mksrv/internal/ui"
 )
 
 // openbaoOIDCRedirect is the loopback callback `bao login -method=oidc` uses.
 const openbaoOIDCRedirect = "http://localhost:8250/oidc/callback"
+
+// openbaoTenantIDs returns every tenant consuming the `openbao` stack, sorted
+// by id — the full roster, not just one `tenant apply` run's selection, so a
+// partial apply never narrows the mksrv-operator policy's access to another
+// tenant that just wasn't named this time (operatorAppRolePolicyHCL).
+func openbaoTenantIDs(tenants map[string]model.Tenant) []string {
+	var ids []string
+	for id, t := range tenants {
+		if slices.Contains(t.Stacks, "openbao") {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
 
 // oidcConfigArgs builds the `bao write auth/oidc-<id>/config ...` arguments.
 // A bare `bao login` uses the dev role; admins pass `-role=tenant-<id>-admin`.
@@ -215,6 +232,32 @@ path "transit/keys/%[1]s" {
 `, id)
 }
 
+// tenantServicePolicyHCL is the narrowest tier: Transit encrypt/decrypt/hmac/
+// datakey only, on the tenant's own key. No KV at all — a leaked SecretID
+// bound to this policy can encrypt and decrypt the tenant's PII columns and
+// nothing else (not even read-only access to the tenant's other secrets,
+// unlike the `-dev` policy). For a tenant-owned production service (Django,
+// Celery, …) that only needs to en/decrypt, not the broader access a human
+// developer's AppRole gets. Requested live for `hg`'s pilot deployment: the
+// existing `tenant-<id>` AppRole is bound to `-dev`, which also grants
+// read-only KV over the tenant's whole subtree — more than a production
+// service should hold.
+func tenantServicePolicyHCL(id string) string {
+	return fmt.Sprintf(`path "transit/encrypt/%[1]s" {
+  capabilities = ["update"]
+}
+path "transit/decrypt/%[1]s" {
+  capabilities = ["update"]
+}
+path "transit/hmac/%[1]s" {
+  capabilities = ["update"]
+}
+path "transit/datakey/plaintext/%[1]s" {
+  capabilities = ["update"]
+}
+`, id)
+}
+
 type baoDataRoleID struct {
 	Data struct {
 		RoleID string `json:"role_id"`
@@ -269,6 +312,22 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 		return dialError(leader.Name, err)
 	}
 	defer client.Close()
+
+	// Keep the mksrv-operator policy (operatorAppRolePolicyHCL, tenant_secretid.go)
+	// current — one explicit block per tenant, generated from the FULL roster
+	// (every openbao consumer, not just this run's `tenants`), so a partial
+	// `tenant apply <id>` never narrows another tenant's already-granted
+	// access. operatorBaoToken only writes it once, at first bootstrap, and
+	// never touches the root token again after that by design, so a newly
+	// added tenant (or the `-svc` tier) wouldn't otherwise reach an
+	// already-bootstrapped cluster. Piggybacks on the root token this function
+	// already holds for its own tenant policies; cheap and idempotent.
+	if _, err := client.RunInput(ctx,
+		baoExec(rootToken, "policy", "write", "mksrv-operator", "-"),
+		[]byte(operatorAppRolePolicyHCL(openbaoTenantIDs(f.data.Tenants))),
+	); err != nil {
+		return fmt.Errorf("openbao: refresh mksrv-operator policy: %w", err)
+	}
 
 	authRes, err := client.Run(ctx, baoExec(rootToken, "auth", "list", "-format=json"))
 	if err != nil {
@@ -340,6 +399,43 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 			}
 		}
 
+		// The `svc` tier (Transit only, no KV) for a tenant-owned production
+		// service. Distinct AppRole from `role` above (which stays bound to
+		// `-dev`) — `mksrv tenant secret-id <id> --service` mints from this one.
+		// No bootstrap SecretID minted/stored here (unlike `role` above): mksrv
+		// itself never needs this credential, only the tenant's service does,
+		// and only via the wrapped, on-demand `secret-id` flow.
+		//
+		// Named svc-<id>, not tenant-<id>-svc: operatorAppRolePolicyHCL's `+`
+		// glob only matches a wildcard at the end of a path segment (confirmed
+		// live — a `tenant-+-svc` grant does not match `tenant-hg-svc`), so the
+		// wildcard-friendly id has to be the suffix, same shape as tenant-<id>.
+		svcRole := "svc-" + id
+		if _, err := client.RunInput(ctx,
+			baoExec(rootToken, "policy", "write", svcRole, "-"), []byte(tenantServicePolicyHCL(id)),
+		); err != nil {
+			return fmt.Errorf("openbao %s: write policy %s: %w", id, svcRole, err)
+		}
+		if _, err := client.Run(ctx, baoExec(rootToken,
+			"write", "auth/approle/role/"+svcRole,
+			"token_policies="+svcRole,
+			"token_ttl=1h", "token_max_ttl=4h",
+			"secret_id_num_uses=0", "secret_id_ttl=0",
+		)); err != nil {
+			return fmt.Errorf("openbao %s: write approle %s: %w", id, svcRole, err)
+		}
+		svcRIDRes, err := client.Run(ctx, baoExec(rootToken, "read", "-format=json", "auth/approle/role/"+svcRole+"/role-id"))
+		if err != nil {
+			return fmt.Errorf("openbao %s: read role-id for %s: %w", id, svcRole, err)
+		}
+		var svcRID baoDataRoleID
+		if err := json.Unmarshal([]byte(svcRIDRes.Stdout), &svcRID); err != nil || svcRID.Data.RoleID == "" {
+			return fmt.Errorf("openbao %s: parse role-id for %s: %w", id, svcRole, err)
+		}
+		if _, err := f.resolver.EnsureString(ctx, "/mksrv/{env}/openbao/approle_"+id+"_svc_role_id", svcRID.Data.RoleID); err != nil {
+			return fmt.Errorf("openbao %s: store role-id for %s: %w", id, svcRole, err)
+		}
+
 		// OIDC: humans log in with their Keycloak identity via
 		// `bao login -method=oidc -path=oidc-<id>`.
 		realm := tenantRealm(f.data.Tenants[id])
@@ -402,7 +498,7 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 			}
 		}
 
-		printer.Success("tenant %s: openbao admin/dev policies + approle + transit + oidc + secrets (realm %s)", id, realm)
+		printer.Success("tenant %s: openbao admin/dev/svc policies + approle + transit + oidc + secrets (realm %s)", id, realm)
 	}
 	return nil
 }
