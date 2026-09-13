@@ -104,6 +104,18 @@ type MailConfig struct {
 	// realm's Keycloak SMTP settings from it (password reset / email
 	// verification). Never touches a tenant's own domain (M25).
 	OutboundSMTP bool `json:"outbound_smtp,omitempty"`
+	// RelayOutbound relays the shared mail stack's (ADR 0032) outbound mail
+	// through SES instead of direct-to-recipient-MX delivery, reusing the
+	// same operator SES SMTP credential OutboundSMTP provisions (requires
+	// it to also be true). AWS throttles/blocks outbound port 25 on EC2 by
+	// default (an account-level anti-spam measure, lifted only via an AWS
+	// Support request) — confirmed live: a hosted tenant could receive mail
+	// fine but every outbound delivery attempt timed out silently. Relaying
+	// through SES (port 587, unaffected) also means the shared mailserver's
+	// own IP reputation is never at stake — SES absorbs bounce/complaint
+	// handling and a compromised mailbox can't poison delivery for every
+	// other hosted tenant.
+	RelayOutbound bool `json:"relay_outbound,omitempty"`
 }
 
 type Host struct {

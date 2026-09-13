@@ -70,9 +70,14 @@ type Context struct {
 	// a branded tenant's mail client can point at mail.<their-own-domain>
 	// instead of the operator hostname (ADR 0032 opt-out).
 	MailBrandedHostnames []string
-	Retention            model.RetentionConfig
-	Tenant               *model.Tenant
-	Secrets              map[string]string
+	// MailRelayOutbound mirrors deployment.yaml's mail.relay_outbound — wires
+	// the shared mail stack's Postfix to relay outbound mail through SES
+	// (RELAY_HOST/RELAY_PORT, credentials via a podman Secret reconcileMailRelay
+	// pushes) instead of direct-to-recipient-MX delivery.
+	MailRelayOutbound bool
+	Retention         model.RetentionConfig
+	Tenant            *model.Tenant
+	Secrets           map[string]string
 }
 
 // Peer returns the private VPC IP of another fleet host, or "" if unknown.

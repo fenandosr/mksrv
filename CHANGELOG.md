@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- Add (mail, ADR 0032): `mail.relay_outbound` relays the shared mail
+  stack's outbound mail through SES (port 587) instead of
+  direct-to-recipient-MX delivery, reusing the same operator SES SMTP
+  credential `mail.outbound_smtp` already provisions. Root cause this
+  fixes: AWS throttles/blocks outbound TCP port 25 on EC2 by default (an
+  account-level anti-spam measure, lifted only via an AWS Support
+  request — mksrv/Terraform cannot do this). Confirmed live on `mcps`,
+  the first hosted-mail tenant with a real inbound+outbound mailbox:
+  inbound delivery worked perfectly, but every outbound delivery attempt
+  to a real recipient MX timed out silently — nothing in mksrv's own
+  config was wrong, the network path out on port 25 just never got a
+  response. Also a legitimate default independent of the port 25 block:
+  it keeps the shared mailserver's own IP reputation out of the picture
+  entirely — a single compromised mailbox sending spam through direct MX
+  delivery would otherwise risk poisoning deliverability for every other
+  hosted-mail tenant sharing that IP.
+
+  `reconcileMailRelay` (new, `mail_hosting.go`) pushes the credential as
+  a podman Secret during `tenant apply`; `mailserver.container.tmpl`
+  adds `RELAY_HOST`/`RELAY_PORT` + the Secret references when the flag
+  is on, picked up by `mksrv deploy --stack mail` — docker-mailserver's
+  own relay-hosts feature then routes every domain it manages through
+  SES, no per-domain config needed. Every relayed domain still needs its
+  own verified SES identity (SES rejects sending as an unverified FROM
+  domain in production mode) — not something `mail.hosted: true`
+  provisions today.
+
+  Verified live end-to-end on `mcps-epcm.org`: outbound
+  (`status=sent (250 Ok ...)`, relayed via SES) and inbound (a real
+  external send-in landed in the mailbox, `dkim=pass`/`spf=pass`/
+  `dmarc=pass`) both confirmed working after this change.
+
 - Fix (cache): a tenant's Celery worker crashed on every start (or, worse,
   ran for a few minutes and then crash-looped) with
   `redis.exceptions.NoPermissionError`, even against a freshly-provisioned

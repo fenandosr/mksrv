@@ -108,6 +108,9 @@ func (f *fleet) provisionMail(ctx context.Context, printer ui.Printer, selected 
 	if err := f.reconcileMailTLS(ctx, printer, client); err != nil {
 		return err
 	}
+	if err := f.reconcileMailRelay(ctx, printer, client); err != nil {
+		return err
+	}
 	for _, id := range selected {
 		t, ok := f.data.Tenants[id]
 		if !ok || !tenantMailHosted(t) {
@@ -216,6 +219,39 @@ func (f *fleet) reconcileMailTLS(ctx context.Context, printer ui.Printer, client
 		return fmt.Errorf("restart mailserver: %w", err)
 	}
 	printer.Success("mail: TLS cert for %s refreshed", hostname)
+	return nil
+}
+
+// reconcileMailRelay pushes the operator SES SMTP credential (already
+// mirrored to SSM by tenantSMTPSpec — requires mail.outbound_smtp: true) as
+// the podman secrets mailserver.container.tmpl references when
+// mail.relay_outbound is on. No-op when the flag is off. Does not itself
+// restart mksrv-mailserver or add the RELAY_HOST env vars to its Quadlet
+// unit — that's `mksrv deploy --stack mail` re-rendering the template, which
+// must run after this so the secrets already exist when the container
+// starts referencing them.
+func (f *fleet) reconcileMailRelay(ctx context.Context, printer ui.Printer, client *sshx.Client) error {
+	if f.data.Deployment.Mail == nil || !f.data.Deployment.Mail.RelayOutbound {
+		return nil
+	}
+	user, err := f.resolver.Get(ctx, "/mksrv/{env}/mail/ses_smtp_user")
+	if err != nil {
+		return fmt.Errorf("mail relay: ses smtp user: %w (enable mail.outbound_smtp and run `mksrv apply` first)", err)
+	}
+	password, err := f.resolver.Get(ctx, "/mksrv/{env}/mail/ses_smtp_password")
+	if err != nil {
+		return fmt.Errorf("mail relay: ses smtp password: %w", err)
+	}
+	for name, val := range map[string]string{
+		"mksrv-mail-relay-user":     user,
+		"mksrv-mail-relay-password": password,
+	} {
+		if _, err := client.RunInput(ctx,
+			"sudo podman secret create --replace "+quoteArg(name)+" -", []byte(val)); err != nil {
+			return fmt.Errorf("mail relay: push %s: %w", name, err)
+		}
+	}
+	printer.Success("mail: outbound relay credentials ready (run `mksrv deploy --stack mail` to apply)")
 	return nil
 }
 

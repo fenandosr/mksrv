@@ -19,6 +19,24 @@ Environment=ENABLE_CLAMAV=0
 Environment=ENABLE_FAIL2BAN=0
 Environment=PERMIT_DOCKER=none
 Environment=TZ={{ .Timezone }}
+{{ if .MailRelayOutbound }}
+# mail.relay_outbound (ADR 0032): AWS throttles/blocks outbound port 25 on
+# EC2 by default (an account-level anti-spam measure, lifted only via an AWS
+# Support request) — confirmed live: inbound delivery worked fine, every
+# outbound delivery attempt to a real MX timed out silently. RELAY_HOST here
+# routes ALL outbound mail for every domain docker-mailserver manages
+# through SES on port 587 (unaffected) instead of direct-to-recipient-MX —
+# docker-mailserver's own relay-hosts feature, no per-domain config needed.
+# Also means the shared mailserver's own IP reputation is never at stake:
+# SES absorbs bounce/complaint handling, so one compromised mailbox can't
+# poison delivery for every other hosted tenant. Credentials are the same
+# operator SES SMTP user mail.outbound_smtp provisions for Keycloak's own
+# email — reconcileMailRelay pushes them as a podman Secret.
+Environment=RELAY_HOST=email-smtp.{{ .Region }}.amazonaws.com
+Environment=RELAY_PORT=587
+Secret=mksrv-mail-relay-user,type=env,target=RELAY_USER
+Secret=mksrv-mail-relay-password,type=env,target=RELAY_PASSWORD
+{{ end }}
 # Public, unlike every other mksrv service — the sending MTA on the other end
 # has no VPN key to present (ADR 0032). SG opens exactly these four ports on
 # the edge; :143/:110 (unencrypted IMAP/POP3) are never offered.

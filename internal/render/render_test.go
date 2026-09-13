@@ -141,6 +141,10 @@ func TestStackRendersMail(t *testing.T) {
 	if !strings.Contains(string(unit), "HealthCmd=ss --listening --tcp --numeric | grep -q :993") {
 		t.Fatalf("mailserver unit's HealthCmd is missing --numeric (ss resolves 993 to \"imaps\" without it, so the :993 grep never matches):\n%s", unit)
 	}
+	// mail.relay_outbound off by default -- no RELAY_HOST/Secret= lines.
+	if strings.Contains(string(unit), "RELAY_HOST") || strings.Contains(string(unit), "mksrv-mail-relay") {
+		t.Fatalf("mailserver unit should have no relay config when MailRelayOutbound is false:\n%s", unit)
+	}
 
 	frag, ok := files["/var/lib/mksrv/caddy.d/15-mail.caddy"]
 	if !ok {
@@ -148,6 +152,39 @@ func TestStackRendersMail(t *testing.T) {
 	}
 	if !strings.HasPrefix(strings.TrimSpace(string(frag)), "mail.example.com {") {
 		t.Fatalf("mail Caddy fragment with no branded tenants should be just the root-domain hostname:\n%s", frag)
+	}
+}
+
+// TestStackRendersMailRelayOutbound guards mail.relay_outbound (ADR 0032):
+// AWS throttles/blocks outbound port 25 on EC2 by default, confirmed live —
+// inbound delivery worked, every outbound delivery attempt to a real MX
+// timed out silently. When on, the mailserver unit must relay through SES
+// on port 587 instead, using the operator SES SMTP credential
+// reconcileMailRelay pushes as a podman Secret.
+func TestStackRendersMailRelayOutbound(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	ctx := baseContext()
+	ctx.Host.Stacks = []string{"base", "identity", "mail"}
+	ctx.Region = "us-east-1"
+	ctx.MailRelayOutbound = true
+	files, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), catalog["mail"], ctx)
+	if err != nil {
+		t.Fatalf("Stack() error = %v", err)
+	}
+	unit := string(files["/etc/containers/systemd/mksrv-mailserver.container"])
+	for _, want := range []string{
+		"Environment=RELAY_HOST=email-smtp.us-east-1.amazonaws.com",
+		"Environment=RELAY_PORT=587",
+		"Secret=mksrv-mail-relay-user,type=env,target=RELAY_USER",
+		"Secret=mksrv-mail-relay-password,type=env,target=RELAY_PASSWORD",
+	} {
+		if !strings.Contains(unit, want) {
+			t.Fatalf("mailserver unit missing %q:\n%s", want, unit)
+		}
 	}
 }
 
