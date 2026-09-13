@@ -17,21 +17,41 @@ import (
 
 // operatorAppRolePolicyHCL is the least-privilege policy the `mksrv tenant
 // secret-id` command runs under: it can mint, list, look up and destroy
-// SecretIDs for any `tenant-*` AppRole, and read their RoleIDs — nothing else.
-// No KV, no Transit, no policy writes. `+` matches one path segment.
-const operatorAppRolePolicyHCL = `path "auth/approle/role/tenant-+/secret-id" {
+// SecretIDs for the `tenant-<id>` and `svc-<id>` AppRole of every tenant in
+// ids, and read their RoleIDs — nothing else. No KV, no Transit, no policy
+// writes, and never a role's own definition (no capability on
+// `auth/approle/role/tenant-<id>` itself, only its `/secret-id`,
+// `/secret-id-accessor/*`, `/role-id` sub-paths) — the operator can mint and
+// revoke credentials, never repoint a role at a different policy.
+//
+// One explicit block per id, no wildcard: confirmed live that this OpenBao's
+// ACL engine does not glob-match a `+` or `*` embedded between literal text
+// in a path segment (`tenant-+/secret-id` and `tenant-*/secret-id` both
+// denied a request an identical *literal* path granted). ids should be every
+// tenant currently consuming the openbao stack, not just the ones a given
+// `tenant apply` run happens to select — provisionOpenBaoTenants passes the
+// full roster so a partial apply never narrows another tenant's access.
+func operatorAppRolePolicyHCL(ids []string) string {
+	var b strings.Builder
+	for _, id := range ids {
+		for _, role := range []string{"tenant-" + id, "svc-" + id} {
+			fmt.Fprintf(&b, `path "auth/approle/role/%[1]s/secret-id" {
   capabilities = ["create", "update", "list"]
 }
-path "auth/approle/role/tenant-+/secret-id-accessor/lookup" {
+path "auth/approle/role/%[1]s/secret-id-accessor/lookup" {
   capabilities = ["update"]
 }
-path "auth/approle/role/tenant-+/secret-id-accessor/destroy" {
+path "auth/approle/role/%[1]s/secret-id-accessor/destroy" {
   capabilities = ["update"]
 }
-path "auth/approle/role/tenant-+/role-id" {
+path "auth/approle/role/%[1]s/role-id" {
   capabilities = ["read"]
 }
-`
+`, role)
+		}
+	}
+	return b.String()
+}
 
 // baoLogin is `bao write -format=json auth/approle/login`.
 type baoLogin struct {
@@ -61,7 +81,9 @@ func (f *fleet) operatorBaoToken(ctx context.Context, client *sshx.Client) (stri
 		return "", fmt.Errorf("openbao root token: %w (run mksrv openbao bootstrap first)", err)
 	}
 	if _, err := client.RunInput(ctx,
-		baoExec(root, "policy", "write", "mksrv-operator", "-"), []byte(operatorAppRolePolicyHCL)); err != nil {
+		baoExec(root, "policy", "write", "mksrv-operator", "-"),
+		[]byte(operatorAppRolePolicyHCL(openbaoTenantIDs(f.data.Tenants))),
+	); err != nil {
 		return "", fmt.Errorf("write mksrv-operator policy: %w", err)
 	}
 	if _, err := client.Run(ctx, baoExec(root,
@@ -108,6 +130,7 @@ func baoAppRoleLogin(ctx context.Context, client *sshx.Client, roleID, secretID 
 // tenantSecretIDOptions carries the `mksrv tenant secret-id` flags.
 type tenantSecretIDOptions struct {
 	Name    string
+	Service bool
 	WrapTTL time.Duration
 	TTL     time.Duration
 	NumUses int
@@ -117,9 +140,13 @@ type tenantSecretIDOptions struct {
 }
 
 // secretIDMintArgs builds the `bao write` argv that mints one wrapped SecretID
-// for role (`auth/approle/role/tenant-<id>`).
+// for role (`auth/approle/role/tenant-<id>` or, with --service,
+// `auth/approle/role/tenant-<id>-svc`).
 func secretIDMintArgs(role string, o tenantSecretIDOptions) []string {
 	meta := map[string]string{"issued_by": "mksrv"}
+	if o.Service {
+		meta["tier"] = "svc"
+	}
 	if o.Name != "" {
 		meta["name"] = o.Name
 	}
@@ -174,7 +201,16 @@ func (a *App) runTenantSecretID(ctx context.Context, printer ui.Printer, globals
 	if err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	role := "auth/approle/role/tenant-" + id
+	// The narrow, KV-less tier (docs/rbac.md) — for a tenant-owned production
+	// service, not a human developer's AppRole. Named svc-<id>, not
+	// tenant-<id>-svc: operatorAppRolePolicyHCL's `+` glob only matches a
+	// wildcard at the end of a path segment, so the wildcard-friendly part
+	// has to be the suffix, same shape as tenant-<id>.
+	roleName := "tenant-" + id
+	if o.Service {
+		roleName = "svc-" + id
+	}
+	role := "auth/approle/role/" + roleName
 
 	switch {
 	case o.List:
@@ -249,7 +285,7 @@ func (a *App) runTenantSecretID(ctx context.Context, printer ui.Printer, globals
 		})
 	}
 
-	printer.Success("tenant %s: wrapped SecretID minted (TTL %s)", id, o.WrapTTL)
+	printer.Success("tenant %s: wrapped SecretID minted for %s (TTL %s)", id, roleName, o.WrapTTL)
 	printer.Info("")
 	printer.Info("  role_id (not secret):  %s", roleID)
 	printer.Info("  wrapping token:        %s", wrapped.WrapInfo.Token)
