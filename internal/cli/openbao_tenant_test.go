@@ -6,7 +6,21 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/fenandosr/mksrv/internal/model"
 )
+
+func TestOpenBaoTenantIDs(t *testing.T) {
+	t.Parallel()
+	ids := openbaoTenantIDs(map[string]model.Tenant{
+		"hg":      {ID: "hg", Stacks: []string{"database", "openbao"}},
+		"bitabit": {ID: "bitabit", Stacks: []string{"openbao", "cache"}},
+		"other":   {ID: "other", Stacks: []string{"database"}}, // no openbao -> excluded
+	})
+	if want := []string{"bitabit", "hg"}; len(ids) != len(want) || ids[0] != want[0] || ids[1] != want[1] {
+		t.Fatalf("openbaoTenantIDs() = %v, want %v", ids, want)
+	}
+}
 
 func TestTenantPolicies(t *testing.T) {
 	t.Parallel()
@@ -48,7 +62,26 @@ func TestTenantPolicies(t *testing.T) {
 		t.Fatalf("dev base KV grant should be read-only:\n%s", base)
 	}
 
-	for _, p := range []string{admin, dev} {
+	svc := tenantServicePolicyHCL("acme")
+	for _, want := range []string{
+		`path "transit/encrypt/acme" {`,
+		`path "transit/decrypt/acme" {`,
+		`path "transit/hmac/acme" {`,
+		`path "transit/datakey/plaintext/acme" {`,
+	} {
+		if !strings.Contains(svc, want) {
+			t.Fatalf("svc policy missing %q:\n%s", want, svc)
+		}
+	}
+	// The whole point: no KV, not even read-only, and no key management
+	// (rotate/rewrap/config) either — narrower than -dev, not just -admin.
+	for _, forbidden := range []string{"kv/", "transit/rewrap", "transit/keys/acme/rotate", "transit/keys/acme/config"} {
+		if strings.Contains(svc, forbidden) {
+			t.Fatalf("svc policy is too permissive, contains %q:\n%s", forbidden, svc)
+		}
+	}
+
+	for _, p := range []string{admin, dev, svc} {
 		if strings.Contains(p, "tenants/other") || strings.Contains(p, "transit/encrypt/other") {
 			t.Fatalf("policy not scoped to one tenant:\n%s", p)
 		}
