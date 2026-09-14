@@ -200,6 +200,18 @@ type TenantDatabase struct {
 	Extensions []string `json:"extensions,omitempty"`
 	// ConnectionLimit caps concurrent connections for <id>_login. 0 = unlimited.
 	ConnectionLimit int `json:"connection_limit,omitempty"`
+	// PublicSchemaCreate grants CREATE on db_<id>'s own `public` schema to
+	// mksrv_owner (the shared bucket role every <id>_login session runs as —
+	// see tenantDatabaseSQL). ADR 0026 deliberately leaves `public` closed by
+	// default: a well-behaved app respects search_path and only ever needs
+	// CREATE on the tenant's own Schema (above). Some apps don't — confirmed
+	// live with Vikunja, whose migration engine (xorm) hardcodes
+	// "public"."migration" regardless of search_path — and fail their first
+	// migration with "permission denied for schema public" until this is on.
+	// Safe to enable per-tenant: db_<id> is that tenant's own database, never
+	// shared with another tenant's db_<other>, so this never crosses the
+	// isolation boundary between tenants — only within this one's own DB.
+	PublicSchemaCreate bool `json:"public_schema_create,omitempty"`
 }
 
 // DBSchema returns the tenant's application schema — "app" unless overridden.

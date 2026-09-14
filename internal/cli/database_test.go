@@ -152,6 +152,33 @@ func TestTenantDatabaseSQL(t *testing.T) {
 		strings.Contains(sql, `GRANT SELECT ON ALL TABLES IN SCHEMA "app" TO mksrv_app, mksrv_anon`) {
 		t.Fatalf("SQL still blanket-grants SELECT to mksrv_anon:\n%s", sql)
 	}
+	// public_schema_create off by default -- no GRANT on the public schema.
+	if strings.Contains(sql, `GRANT CREATE ON SCHEMA public`) {
+		t.Fatalf("SQL should not grant CREATE on public when public_schema_create is unset:\n%s", sql)
+	}
+}
+
+// TestTenantDatabaseSQLPublicSchemaCreate guards public_schema_create: some
+// apps (confirmed live with Vikunja) hardcode object creation in `public`
+// regardless of search_path and fail their first migration with "permission
+// denied for schema public" otherwise. The grant must target mksrv_owner, not
+// the tenant's own <id>_login -- every <id>_login session runs as mksrv_owner
+// (ALTER ROLE ... SET role TO, tenantDatabaseSQL above), so that's the role
+// whose privileges are actually checked; granting <id>_login directly does
+// nothing (confirmed live: GRANT to bitabit_login, still "permission denied"
+// until re-granted to mksrv_owner).
+func TestTenantDatabaseSQLPublicSchemaCreate(t *testing.T) {
+	t.Parallel()
+	sql := tenantDatabaseSQL("bitabit", "pw", "apw", model.Tenant{
+		ID:       "bitabit",
+		Database: &model.TenantDatabase{PublicSchemaCreate: true},
+	})
+	if !strings.Contains(sql, `GRANT CREATE ON SCHEMA public TO mksrv_owner;`) {
+		t.Fatalf("SQL missing the public schema grant:\n%s", sql)
+	}
+	if strings.Contains(sql, `GRANT CREATE ON SCHEMA public TO "bitabit_login"`) {
+		t.Fatalf("SQL must grant mksrv_owner, not the tenant's own login role:\n%s", sql)
+	}
 }
 
 func TestTenantDatabaseSQLWithOverrides(t *testing.T) {

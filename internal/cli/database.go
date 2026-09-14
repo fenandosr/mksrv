@@ -339,6 +339,18 @@ func tenantDatabaseSQL(id, password, authPassword string, t model.Tenant) string
 		stmts = append(stmts, fmt.Sprintf(`CREATE EXTENSION IF NOT EXISTS %q;`, ext))
 	}
 
+	// public_schema_create (opt-in, default false — ADR 0026 leaves `public`
+	// closed): some apps (confirmed with Vikunja) hardcode object creation
+	// in `public` regardless of search_path. Every <id>_login session runs
+	// as mksrv_owner (ALTER ROLE ... SET role TO, above) — that's the role
+	// whose privileges actually get checked, granting the tenant's own
+	// login role directly here would do nothing. Scoped to this db_<id>
+	// only: GRANT ON SCHEMA is per-database, so this never reaches another
+	// tenant's db_<other>.public.
+	if t.Database != nil && t.Database.PublicSchemaCreate {
+		stmts = append(stmts, fmt.Sprintf(`GRANT CREATE ON SCHEMA public TO %s;`, dbOwnerRole))
+	}
+
 	stmts = append(stmts,
 		fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS %q AUTHORIZATION %s;`, schema, dbOwnerRole),
 		fmt.Sprintf(`ALTER SCHEMA %q OWNER TO %s;`, schema, dbOwnerRole),
