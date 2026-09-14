@@ -313,6 +313,20 @@ func TestStackRendersTenantLoginTheme(t *testing.T) {
 			t.Fatalf("login.css missing %q:\n%s", want, css)
 		}
 	}
+
+	// info.ftl / error.ftl / logout-confirm.ftl share the login theme's CSS
+	// (one file for the whole theme) but not its markup -- verified live
+	// against a real realm that these templates render a plain
+	// <p class="instruction"> the form-focused rules above never touch, so
+	// it stays dark-on-dark on the glass card without an explicit rule.
+	for _, want := range []string{
+		"#kc-info-message", "#kc-error-message", "#kc-logout-confirm", ".instruction",
+		".pf-m-success", ".pf-m-danger", ".pf-m-warning",
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("login.css missing message-page selector %q:\n%s", want, css)
+		}
+	}
 }
 
 func TestStackRendersDataPlane(t *testing.T) {
