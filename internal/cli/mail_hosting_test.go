@@ -107,3 +107,49 @@ func TestMailHostAndSelection(t *testing.T) {
 		t.Fatalf("mailHost() without the stack = %+v, want nil", h)
 	}
 }
+
+func TestMTASTSFragmentPath(t *testing.T) {
+	t.Parallel()
+	if got := mtaSTSFragmentPath("mcps", "mcps-epcm.org"); got != "/var/lib/mksrv/caddy.d/16-mta-sts-mcps-mcps-epcm.org.caddy" {
+		t.Fatalf("path = %q", got)
+	}
+}
+
+// TestMTASTSPolicyAlwaysTesting guards the one hard rule in the doc comment
+// on model.TenantMail.MTASTS: mksrv never publishes `mode: enforce` itself,
+// regardless of what a tenant's DMARC/SPF posture already is elsewhere —
+// there's no way to know a prior policy (on infrastructure mksrv never saw)
+// was already in enforce, or to monitor delivery before flipping to it.
+func TestMTASTSPolicyAlwaysTesting(t *testing.T) {
+	t.Parallel()
+	policy := mtaSTSPolicy("mail.cloud-it.click")
+	for _, want := range []string{"version: STSv1", "mode: testing", "mx: mail.cloud-it.click", "max_age: 604800"} {
+		if !strings.Contains(policy, want) {
+			t.Fatalf("policy missing %q:\n%s", want, policy)
+		}
+	}
+	if strings.Contains(policy, "enforce") {
+		t.Fatalf("policy must never say enforce:\n%s", policy)
+	}
+}
+
+// TestMTASTSFragmentServesWellKnownOnly guards that the site block answers
+// only the exact well-known path and 404s everything else on that hostname —
+// mta-sts.<domain> shouldn't silently fall through to the edge's default
+// handling for an unrelated path.
+func TestMTASTSFragmentServesWellKnownOnly(t *testing.T) {
+	t.Parallel()
+	frag := mtaSTSFragment("mcps-epcm.org", "mail.cloud-it.click")
+	if !strings.HasPrefix(frag, "mta-sts.mcps-epcm.org {") {
+		t.Fatalf("fragment missing the mta-sts hostname:\n%s", frag)
+	}
+	if !strings.Contains(frag, "/.well-known/mta-sts.txt") {
+		t.Fatalf("fragment missing the well-known path:\n%s", frag)
+	}
+	if !strings.Contains(frag, "mode: testing") {
+		t.Fatalf("fragment must embed the testing-mode policy body:\n%s", frag)
+	}
+	if !strings.Contains(frag, "respond 404") {
+		t.Fatalf("fragment must 404 everything but the well-known path:\n%s", frag)
+	}
+}

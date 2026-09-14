@@ -102,6 +102,19 @@ locals {
               value = local.edge_ip
               ttl   = 300
             }] : [],
+            # mta_sts (opt-in, default false): publishes mta-sts.<domain> in
+            # the tenant's own zone, pointing at the edge — where Caddy
+            # serves the actual policy file (provisionMTASTS,
+            # internal/cli/mail_hosting.go). DNS here, the file over there:
+            # Caddy can't get a cert for a hostname that doesn't resolve yet,
+            # so this record has to land first (same ordering dependency as
+            # branded_hostname above).
+            try(coalesce(t.mail.mta_sts, false), false) ? [{
+              fqdn  = "mta-sts.${d}"
+              type  = "A"
+              value = local.edge_ip
+              ttl   = 300
+            }] : [],
             [
               {
                 fqdn = d

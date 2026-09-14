@@ -316,3 +316,92 @@ func parseDKIMRecord(raw string) string {
 	}
 	return value
 }
+
+// mtaSTSFragmentPath is the Caddy fragment mksrv writes for one tenant domain's
+// MTA-STS policy host. Prefix 16- (unused — 15 is mail.caddy, 20 is
+// database.caddy): grouped with mail-adjacent fragments, ahead of tenant web
+// vhosts.
+func mtaSTSFragmentPath(id, domain string) string {
+	return fmt.Sprintf("/var/lib/mksrv/caddy.d/16-mta-sts-%s-%s.caddy", id, domain)
+}
+
+// mtaSTSPolicy renders the RFC 8461 policy body served at
+// /.well-known/mta-sts.txt. Always `mode: testing` — see the MTASTS field doc
+// (internal/model/model.go): mksrv has no way to know a prior policy already
+// existed in enforce, or to monitor delivery before flipping to it safely.
+func mtaSTSPolicy(mxHostname string) string {
+	return fmt.Sprintf("version: STSv1\nmode: testing\nmx: %s\nmax_age: 604800\n", mxHostname)
+}
+
+// mtaSTSFragment is the Caddy site block for one domain: only the
+// well-known path is answered; anything else 404s rather than falling
+// through to Caddy's own default (which would otherwise expose whatever the
+// edge's catch-all does under a hostname that's supposed to be MTA-STS-only).
+func mtaSTSFragment(domain, mxHostname string) string {
+	policy := mtaSTSPolicy(mxHostname)
+	return fmt.Sprintf(`mta-sts.%s {
+	handle /.well-known/mta-sts.txt {
+		header Content-Type "text/plain"
+		respond %q 200
+	}
+	handle {
+		respond 404
+	}
+}
+`, domain, policy)
+}
+
+// provisionMTASTS reconciles the mta-sts.<domain> Caddy fragment on the edge
+// for every selected tenant with `mail.mta_sts: true` (ADR 0032). The
+// matching mta-sts.<domain> -> edge DNS record comes from Terraform's
+// dns_tenant module (`mksrv apply --infra-only`), same ordering dependency as
+// branded_hostname: the record has to exist before Caddy can get a cert for
+// the hostname. Fragments for dropped domains/tenants are removed.
+func (f *fleet) provisionMTASTS(ctx context.Context, printer ui.Printer, edgeClient *sshx.Client, tenants []string) error {
+	mxHostname := "mail." + f.data.Deployment.DNS.RootDomain
+	changed := 0
+	for _, id := range tenants {
+		t, ok := f.data.Tenants[id]
+		if !ok {
+			continue
+		}
+		want := map[string]string{}
+		if tenantMailHosted(t) && t.Mail.MTASTS {
+			for _, d := range t.Mail.Domains {
+				want[mtaSTSFragmentPath(id, d)] = mtaSTSFragment(d, mxHostname)
+			}
+		}
+		res, err := edgeClient.Run(ctx, fmt.Sprintf("ls /var/lib/mksrv/caddy.d/16-mta-sts-%s-*.caddy 2>/dev/null || true", quoteArg(id)))
+		if err == nil {
+			for _, line := range strings.Fields(res.Stdout) {
+				if _, keep := want[line]; !keep {
+					if _, err := edgeClient.Run(ctx, "sudo rm -f "+quoteArg(line)); err != nil {
+						return fmt.Errorf("tenant %s: remove stale mta-sts fragment %s: %w", id, line, err)
+					}
+					changed++
+				}
+			}
+		}
+		for _, path := range sortedKeys(want) {
+			old, _ := edgeClient.Run(ctx, "sudo cat "+quoteArg(path)+" 2>/dev/null || true")
+			if old.Stdout == want[path] {
+				continue
+			}
+			if err := edgeClient.WriteFileSudo(ctx, path, []byte(want[path]), 0o644); err != nil {
+				return fmt.Errorf("tenant %s: write mta-sts fragment %s: %w", id, path, err)
+			}
+			changed++
+		}
+		if len(want) > 0 {
+			printer.Success("tenant %s: mta-sts policy (testing mode) for %d domain(s)", id, len(want))
+		}
+	}
+	if changed == 0 {
+		return nil
+	}
+	if _, err := edgeClient.Run(ctx,
+		"sudo podman exec mksrv-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile || sudo systemctl restart mksrv-caddy.service"); err != nil {
+		return fmt.Errorf("reload edge caddy for mta-sts: %w", err)
+	}
+	return nil
+}

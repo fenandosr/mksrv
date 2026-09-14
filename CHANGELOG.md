@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Add (mail, ADR 0032): per-tenant `mail.mta_sts` publishes an
+  [MTA-STS](https://datatracker.ietf.org/doc/html/rfc8461) policy for a
+  tenant's mail domain — a `mta-sts.<domain>` DNS record pointing at the
+  edge, and the edge's Caddy serving
+  `https://mta-sts.<domain>/.well-known/mta-sts.txt` (new
+  `provisionMTASTS`, wired into `mksrv tenant apply` alongside
+  `provisionMail`). Always `mode: testing`, never `enforce` — mksrv has no
+  way to know a prior policy (from before a tenant migrated in) was
+  already `enforce`, or to monitor delivery before flipping to it safely.
+
+  Prompted by decommissioning an old, unmanaged server: `mcps-epcm.org`
+  had a live `_mta-sts` TXT record (`id=20260108`) whose policy host
+  (`mta-sts.mcps-epcm.org`, on the old box) went unreachable the moment
+  that box was stopped — any sender still enforcing/checking the cached
+  policy was hitting a dead host. `mksrv apply --infra-only` writes the
+  DNS record (same ordering dependency as `branded_hostname` — has to
+  land before Caddy can get a cert for the hostname), `mksrv tenant apply`
+  writes the Caddy fragment.
+
 - Add (mail, ADR 0032): `mail.relay_outbound` relays the shared mail
   stack's outbound mail through SES (port 587) instead of
   direct-to-recipient-MX delivery, reusing the same operator SES SMTP
