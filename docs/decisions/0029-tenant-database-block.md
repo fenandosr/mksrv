@@ -153,3 +153,17 @@ semantic pass runs.
 - Deferred: a CDN/WAF in front of `*.rest` (ADR 0028 territory); per-table
   publish helpers (`mksrv tenant ... expose <table>`); moving `max_connections`
   itself under mksrv control so `connection_limit` can be validated against it.
+
+**Addendum**: `database.public_schema_create` (opt-in, default false).
+`schema` above stays every tenant's default `CREATE` target (ADR 0026 leaves
+`public` closed by default) — but some apps aren't schema-aware: confirmed
+live with Vikunja, whose migration engine (xorm) hardcodes object creation in
+`"public"` regardless of `search_path`, and fails its first migration with
+"permission denied for schema public" without this. `true` grants `CREATE ON
+SCHEMA public` to `mksrv_owner` inside that tenant's own `db_<id>` only —
+`GRANT ON SCHEMA` is per-database, so it never reaches another tenant's
+`db_<other>.public`. Must target `mksrv_owner`, not `<id>_login`: every
+`<id>_login` session runs as `mksrv_owner` (`ALTER ROLE ... SET role TO`,
+`tenantDatabaseSQL`) — granting the login role directly does nothing (learned
+live: granted `bitabit_login` first, still "permission denied" until
+re-granted to `mksrv_owner`).

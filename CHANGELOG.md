@@ -21,6 +21,34 @@
   land before Caddy can get a cert for the hostname), `mksrv tenant apply`
   writes the Caddy fragment.
 
+- Fix (database): PostgREST port assignment (`postgrestPort`) indexed into
+  every tenant in the workspace, sorted — including tenants with no
+  `database` stack at all. Adding `gtex` (a `web:`-only tenant) shifted
+  every actual PostgREST consumer alphabetically after it by one port.
+  Confirmed live in production: `hg`'s freshly computed port collided with
+  `mcps`'s still-running container on its old, not-yet-recomputed port
+  (`tenant apply` stops at the first hard error, so `mcps` — later than `hg`
+  in sorted order — never got reconciled that run), crash-looping `hg`'s
+  postgrest (`bind: address already in use`). Fixed by indexing into a
+  `postgrestConsumerIDs` list — sorted, but built from every `database`-
+  stack tenant with PostgREST enabled across the *whole* workspace, not the
+  raw tenant-id list and not the current run's `--tenant` selection — so an
+  unrelated tenant never shifts anyone's port, and a partial `tenant apply
+  <id>` always computes the same port a full run would.
+
+- Add (database, ADR 0029 addendum): `database.public_schema_create` grants
+  `CREATE ON SCHEMA public` (scoped to that tenant's own `db_<id>` only) to
+  `mksrv_owner` when set. ADR 0026 leaves `public` closed by default — every
+  tenant's own `schema` (default `app`) is the intended `CREATE` target — but
+  some apps aren't schema-aware. Confirmed live deploying Vikunja as a demo
+  for `bitabit`: its migration engine (xorm) hardcodes object creation in
+  `"public"` regardless of `search_path`, and its first migration failed with
+  "permission denied for schema public" until this was on. Also confirmed
+  live that the grant has to target `mksrv_owner`, not the tenant's own
+  `<id>_login` — every `<id>_login` session runs as `mksrv_owner`
+  (`ALTER ROLE ... SET role TO`), so granting the login role directly is a
+  no-op.
+
 - Add (mail, ADR 0032): `mail.relay_outbound` relays the shared mail
   stack's outbound mail through SES (port 587) instead of
   direct-to-recipient-MX delivery, reusing the same operator SES SMTP

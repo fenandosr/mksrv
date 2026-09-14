@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/fenandosr/mksrv/internal/model"
 	"github.com/fenandosr/mksrv/internal/render"
 	sshx "github.com/fenandosr/mksrv/internal/ssh"
 	"github.com/fenandosr/mksrv/internal/ui"
@@ -22,6 +24,31 @@ import (
 // container. Tenants take consecutive ports in sorted-id order; the Headscale
 // ACL opens 3010-3019, so this supports up to ten tenants.
 const postgrestBasePort = 3010
+
+// postgrestConsumerIDs returns, sorted, every tenant in the whole workspace
+// that actually gets a PostgREST container — `database` in `stacks:` and
+// PostgRESTEnabled(). postgrestPort indexes into THIS list, not the raw
+// tenant-id list and not the current run's `--tenant` selection: confirmed
+// live (adding `gtex`, a `web:`-only tenant with no `database` stack) that
+// indexing against every tenant shifts every actual PostgREST consumer's port
+// whenever an unrelated tenant is inserted alphabetically before them — mcps
+// kept its stale container on the old port (a partial `tenant apply` run
+// stops at the first hard error, so a tenant later in sorted order than the
+// one that fails never gets reconciled this run) while hg's freshly computed
+// port collided with it, crash-looping hg's postgrest. Anchoring to the full
+// set of consumers (never just `tenants`/the current selection) also keeps a
+// partial `tenant apply <id>` from computing a different port than a full run
+// would for that same tenant.
+func postgrestConsumerIDs(tenants map[string]model.Tenant) []string {
+	ids := make([]string, 0, len(tenants))
+	for id, t := range tenants {
+		if slices.Contains(t.Stacks, "database") && t.PostgRESTEnabled() {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
 
 // postgrestPort returns the host port for a tenant's PostgREST container, or 0
 // when the tenant is not in the sorted list.
@@ -91,7 +118,7 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 	}
 
 	dep := f.data.Deployment
-	sortedIDs := sortedTenantIDs(f.data.Tenants)
+	sortedIDs := postgrestConsumerIDs(f.data.Tenants)
 	rctxBase := f.renderContext(*dataHost)
 	dataPrivateIP := rctxBase.Host.PrivateIP
 
