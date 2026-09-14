@@ -49,6 +49,17 @@
   (`ALTER ROLE ... SET role TO`), so granting the login role directly is a
   no-op.
 
+- Fix (identity, ADR 0030): web SSO (`web[].sso: true`) login failed outright
+  — Keycloak rejected the authorization request with "invalid_request /
+  Missing parameter: code_challenge_method", oauth2-proxy surfacing it as a
+  403 "Login Failed". `EnsureClient` sets `pkce.code.challenge.method: S256`
+  on every Keycloak client it creates, making PKCE mandatory — but the
+  oauth2-proxy container was never told to actually send it. Confirmed live
+  testing the first real web SSO login this engagement (bitabit's Vikunja
+  demo, `tasks.bit-a-bit.org`): the outgoing authorization request had no
+  `code_challenge`/`code_challenge_method` at all until
+  `OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256` was added.
+
 - Add (mail, ADR 0032): `mail.relay_outbound` relays the shared mail
   stack's outbound mail through SES (port 587) instead of
   direct-to-recipient-MX delivery, reusing the same operator SES SMTP
