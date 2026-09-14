@@ -88,8 +88,22 @@ func webFragment(w model.TenantWebEndpoint, ssoPort int) string {
 	if len(w.SSOGroups) > 0 {
 		authURI += "?allowed_groups=" + strings.Join(w.SSOGroups, ",")
 	}
+
+	// sso_bypass_paths (ADR 0030 addendum): oauth2-proxy only understands its
+	// own browser session cookie, not an app's own token-authenticated API —
+	// confirmed live, an external client presenting a valid Vikunja API token
+	// still got bounced to /oauth2/start, since the gate runs *before* the
+	// request ever reaches the app. Each bypass path gets its own `handle`
+	// ahead of the catch-all gated one below — Caddy's `handle` blocks are
+	// mutually exclusive per request, first match wins, so these take
+	// priority without needing a `not` matcher on the gated block.
+	var bypass strings.Builder
+	for _, p := range w.SSOBypassPaths {
+		fmt.Fprintf(&bypass, "\thandle %s {\n\t\t%s\n\t}\n", p, proxy)
+	}
+
 	return fmt.Sprintf(`%s {
-	handle /oauth2/* {
+%s	handle /oauth2/* {
 		reverse_proxy 127.0.0.1:%d
 	}
 	handle {
@@ -104,7 +118,7 @@ func webFragment(w model.TenantWebEndpoint, ssoPort int) string {
 		%s
 	}
 }
-`, w.Hostname, ssoPort, ssoPort, authURI, proxy)
+`, w.Hostname, bypass.String(), ssoPort, ssoPort, authURI, proxy)
 }
 
 // webSSOContainer renders the per-tenant oauth2-proxy Quadlet for the edge.

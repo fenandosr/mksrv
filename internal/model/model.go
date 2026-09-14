@@ -174,6 +174,19 @@ type TenantWebEndpoint struct {
 	SSO bool `json:"sso"`
 	// SSOGroups, when set, restricts the gate to members of these realm groups.
 	SSOGroups []string `json:"sso_groups"`
+	// SSOBypassPaths exempts matching Caddy path patterns (e.g. "/api/*") from
+	// the oauth2-proxy gate — for an app's own token-authenticated API, which
+	// enforces its own auth per-request and doesn't understand oauth2-proxy's
+	// browser session cookie. Without this, an external client presenting a
+	// valid app-issued API token still gets bounced to the Keycloak login
+	// redirect before ever reaching the app. Confirmed live: an unofficial iOS
+	// client for a tenant's self-hosted app couldn't authenticate with its own
+	// API token — oauth2-proxy intercepted the request first (a plain 302 to
+	// /oauth2/start, never forwarded). Safe to bypass: the origin app's own API
+	// still requires its own valid credential: bypassing this gate widens
+	// *unauthenticated* reach only to whatever that API itself already exposes
+	// without a token.
+	SSOBypassPaths []string `json:"sso_bypass_paths"`
 }
 
 // WebSSO reports whether any web endpoint gates on Keycloak (ADR 0030).

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Add (identity, ADR 0030 addendum): `web[].sso_bypass_paths` exempts
+  matching Caddy path patterns (e.g. `/api/*`) from the oauth2-proxy gate.
+  oauth2-proxy only understands its own browser session cookie, not an
+  app's own token-authenticated API. Confirmed live: an unofficial iOS
+  client for bitabit's Vikunja demo presented a valid Vikunja API token,
+  but still got bounced to `/oauth2/start` — the gate ran before the
+  request ever reached the app, which never got a chance to check its own
+  token. Each bypass path renders its own `handle` block ahead of the
+  catch-all gated one — Caddy's `handle` blocks are mutually exclusive per
+  request and match in source order, so the bypass has to come first.
+  Safe to use: the origin app still enforces its own auth per request,
+  this only removes the *additional* Keycloak-session requirement in
+  front of it, so bypassing widens unauthenticated reach only to whatever
+  that API already exposes without a token.
+
 - Add (mail, ADR 0032): per-tenant `mail.mta_sts` publishes an
   [MTA-STS](https://datatracker.ietf.org/doc/html/rfc8461) policy for a
   tenant's mail domain — a `mta-sts.<domain>` DNS record pointing at the
