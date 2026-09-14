@@ -60,6 +60,26 @@
   `code_challenge`/`code_challenge_method` at all until
   `OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256` was added.
 
+- Fix (identity): `EnsureClient` never gave a client its own `aud` claim.
+  Keycloak doesn't include the requesting client in the ID/access token's
+  `aud` by default — that comes from the realm's built-in "roles" scope's
+  audience-resolve mapper, computed from the user's `resource_access`
+  (client roles), which for a client that defines no roles of its own
+  (every mksrv-created client so far) never includes the client itself.
+  Confirmed live testing web SSO login end to end (bitabit's Vikunja demo,
+  right after the PKCE fix got past Keycloak): oauth2-proxy's strict `aud`
+  validation rejected the callback outright — "audience from claim aud
+  with value [realm-management account] does not match with any of
+  allowed audiences map[bitabit-websso:{}]" — realm-management/account are
+  just the realm's own built-in clients the admin test user happens to
+  hold roles in, unrelated to the client that was actually logging in.
+  Fixed with a new `ensureAudienceMapper` (idempotent, `oidc-audience-mapper`
+  hardcoding `included.client.audience` to the client's own id), called
+  from `EnsureClient` — covers both its callers (the web SSO oauth2-proxy
+  client and OpenBao's OIDC client, ADR 0030 and the OIDC login path in
+  `docs/secrets.md`, which likely hit the identical failure unverified
+  until now).
+
 - Add (mail, ADR 0032): `mail.relay_outbound` relays the shared mail
   stack's outbound mail through SES (port 587) instead of
   direct-to-recipient-MX delivery, reusing the same operator SES SMTP
