@@ -16,6 +16,7 @@ mail:
   dmarc_policy: reject
   dmarc_strict: true
   branded_hostname: true
+  mta_sts: true
   mailboxes:
     - address: admin@acme.example.com
       name: "Team Lead"
@@ -31,6 +32,7 @@ mail:
 | `dmarc_policy` | the computed record's `p=` tag: `none` \| `quarantine` (default) \| `reject`. |
 | `dmarc_strict` | `true` adds `adkim=s; aspf=s` (strict DKIM/SPF alignment) to the computed DMARC record. |
 | `branded_hostname` | opt-out of the shared client hostname (default `false`, see "Client settings" below). `true` publishes `mail.<domain>` (one of `domains`) in this tenant's own zone, pointing at the same shared server, and folds it into the shared server's TLS cert as an extra SAN — so this tenant's users configure `mail.<their-own-domain>` instead of the operator hostname. Per-tenant: it grows the shared cert's SAN list, so it's opt-in rather than automatic for every hosted tenant. |
+| `mta_sts` | `true` publishes an [MTA-STS](https://datatracker.ietf.org/doc/html/rfc8461) policy (default `false`) for each of `domains`: a `mta-sts.<domain>` DNS record pointing at the edge, and the edge's Caddy serving `https://mta-sts.<domain>/.well-known/mta-sts.txt` declaring `mx: mail.<root_domain>`. Sending MTAs that support it then refuse to deliver over a downgraded/unencrypted connection, or to an MX outside this list. Always published in `mode: testing`, never `enforce` — mksrv has no way to know a prior policy (from before this tenant migrated in) was already in `enforce`, or to monitor delivery before flipping to it safely. Move to `enforce` by hand once you've confirmed delivery is clean (not automated yet). |
 | `mailboxes` | declarative list, `{address, name?}`. `address`'s domain must be one of `domains`. No password field — mksrv generates one per mailbox. |
 
 ## Migrating real mailboxes from another mail server
@@ -87,12 +89,18 @@ For every tenant with `hosted: true` (skipped otherwise):
 3. Generates (once) and publishes the DKIM key for each of your domains —
    the one DNS write mksrv makes directly via the AWS SDK instead of Terraform,
    because the key only exists after `docker-mailserver` creates it.
+4. If `mta_sts: true`: writes the `mta-sts.<domain>` Caddy fragment on the
+   edge for each of your domains and reloads Caddy — nothing to provision
+   server-side beyond that (it's just a static policy file, no cert to
+   generate: Caddy issues one automatically like every other hostname).
 
 ## What `mksrv apply --infra-only` does
 
 If `hosted: true`: writes MX (if `inbound: true`), SPF, and DMARC into your
 zone — fully computed from the block above, no dependency on the server's
-state. Otherwise, nothing.
+state. If also `mta_sts: true`: writes the `mta-sts.<domain>` A record too —
+has to land before `mksrv tenant apply`'s Caddy fragment, or Caddy can't get a
+cert for a hostname that doesn't resolve yet. Otherwise, nothing.
 
 ## Client settings
 

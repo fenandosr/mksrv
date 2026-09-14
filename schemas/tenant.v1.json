@@ -36,6 +36,7 @@
         "dmarc_policy": {"type": "string", "enum": ["none", "quarantine", "reject"], "default": "quarantine"},
         "dmarc_strict": {"type": "boolean", "default": false},
         "branded_hostname": {"type": "boolean", "default": false},
+        "mta_sts": {"type": "boolean", "default": false},
         "mailboxes": {
           "type": "array", "maxItems": 200,
           "items": {

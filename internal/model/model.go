@@ -295,6 +295,18 @@ type TenantMail struct {
 	// operator's hostname. Opt-in: per-tenant, since it grows the shared
 	// cert's SAN list and adds a DNS record per opted-in tenant.
 	BrandedHostname bool `json:"branded_hostname,omitempty"`
+	// MTASTS publishes an MTA-STS policy (RFC 8461) for this tenant's
+	// domain: a DNS A record for mta-sts.<domain> pointing at the edge, and
+	// the edge's Caddy serving https://mta-sts.<domain>/.well-known/mta-sts.txt
+	// declaring `mx: <the shared mail server's hostname>`. Sending MTAs that
+	// support MTA-STS then refuse to deliver over a downgraded/unencrypted
+	// connection or to an MX outside this list. Always published in `testing`
+	// mode, never `enforce` — mksrv has no way to know a prior policy's mode
+	// (a tenant migrating in may have had one already, on infrastructure
+	// mksrv never saw) or to monitor delivery before flipping to enforce
+	// would actually start refusing mail; start conservative, upgrade later
+	// once confirmed via TLS-RPT/logs (not implemented yet).
+	MTASTS bool `json:"mta_sts,omitempty"`
 	// Mailboxes are add/remove-only; mksrv generates each password.
 	Mailboxes []TenantMailbox `json:"mailboxes,omitempty"`
 }

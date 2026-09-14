@@ -250,6 +250,10 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 		return &ExitError{Code: 1, Err: err}
 	}
 
+	if err := f.provisionMTASTS(ctx, printer, edgeClient, selected); err != nil {
+		return &ExitError{Code: 1, Err: err}
+	}
+
 	if err := f.provisionBackup(ctx, printer, adminPass); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
