@@ -105,6 +105,22 @@ body#keycloak-bg,
 .pf-v5-c-login__main a:not(.pf-v5-c-button):hover { text-decoration-color: var(--mksrv-on-glass); }
 #kc-info { border-top-color: rgba(255, 255, 255, 0.14); }
 
+/* ---- message-only pages: info.ftl ("you should receive an email...",
+   "you are already logged in", email-verified, etc.), error.ftl and
+   logout-confirm.ftl all reuse the same <p class="instruction"> inside
+   #kc-info-message / #kc-error-message / #kc-logout-confirm -- verified
+   live (mcps realm, reset-credentials success banner + a forced error.ftl
+   + the logout confirmation page). keycloak.v2 assumes a solid white card
+   here and never gets touched by the rules above (those target the *form*,
+   this is plain flow text), so without this it stays dark-on-dark. */
+#kc-info-message,
+#kc-error-message,
+#kc-logout-confirm,
+#kc-logout-confirm .content-area,
+.instruction {
+  color: var(--mksrv-on-glass-dim);
+}
+
 /* ---- inputs ---- */
 .pf-v5-c-form-control {
   background: rgba(255, 255, 255, 0.10);
@@ -173,3 +189,12 @@ body#keycloak-bg,
 .pf-v5-c-alert__title { color: var(--mksrv-on-glass); }
 .pf-v5-c-form__helper-text.pf-m-error,
 .pf-v5-c-helper-text__item.pf-m-error .pf-v5-c-helper-text__item-text { color: #ff9a9a; }
+
+/* ---- alert severity accent: generic .pf-v5-c-alert above only carried
+   the glass look, no colour told success from error apart from
+   PatternFly's own icon glyph -- verified live (the "check your email"
+   success banner on the reset-credentials flow). Border only, so the
+   glass tint/blur stays identical across severities. ---- */
+.pf-v5-c-alert.pf-m-success { border-left: 3px solid #6fe0a5; }
+.pf-v5-c-alert.pf-m-danger { border-left: 3px solid #ff9a9a; }
+.pf-v5-c-alert.pf-m-warning { border-left: 3px solid #ffd27a; }
