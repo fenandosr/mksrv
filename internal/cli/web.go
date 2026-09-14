@@ -149,6 +149,14 @@ Environment=OAUTH2_PROXY_SET_XAUTHREQUEST=true
 Environment=OAUTH2_PROXY_PASS_ACCESS_TOKEN=true
 Environment=OAUTH2_PROXY_SKIP_PROVIDER_BUTTON=true
 Environment=OAUTH2_PROXY_UPSTREAMS=static://202
+# Every Keycloak client mksrv creates (EnsureClient) sets
+# pkce.code.challenge.method=S256, making PKCE mandatory for this client --
+# without oauth2-proxy also told to send it, Keycloak rejects the auth
+# request outright: "Missing parameter: code_challenge_method". Confirmed
+# live testing the first real web SSO login this engagement (bitabit's
+# Vikunja demo) -- 403 from oauth2-proxy, "invalid_request" from the
+# upstream IdP.
+Environment=OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256
 Secret=mksrv-websso-%[1]s-oidc,type=env,target=OAUTH2_PROXY_CLIENT_SECRET
 Secret=mksrv-websso-%[1]s-cookie,type=env,target=OAUTH2_PROXY_COOKIE_SECRET
 

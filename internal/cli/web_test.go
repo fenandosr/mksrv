@@ -94,6 +94,11 @@ func TestWebSSOContainer(t *testing.T) {
 		"OAUTH2_PROXY_CLIENT_ID=mcps-websso",
 		"OAUTH2_PROXY_REDIRECT_URL=https://git.mcps-epcm.org/oauth2/callback", // sorted-first hostname
 		"OAUTH2_PROXY_COOKIE_DOMAINS=.mcps-epcm.org",
+		// EnsureClient sets pkce.code.challenge.method=S256 on every Keycloak
+		// client it creates -- oauth2-proxy has to actually send PKCE too, or
+		// Keycloak rejects the auth request ("Missing parameter:
+		// code_challenge_method"). Confirmed live.
+		"OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256",
 		"Secret=mksrv-websso-mcps-oidc,type=env,target=OAUTH2_PROXY_CLIENT_SECRET",
 		"Secret=mksrv-websso-mcps-cookie,type=env,target=OAUTH2_PROXY_COOKIE_SECRET",
 		// After=mksrv-keycloak.service only waits for the unit to start, not
