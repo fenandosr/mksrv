@@ -59,6 +59,45 @@ func TestWebFragmentSSO(t *testing.T) {
 	if !strings.Contains(gated, "uri /oauth2/auth?allowed_groups=dev,admin") {
 		t.Fatalf("gated fragment missing allowed_groups:\n%s", gated)
 	}
+
+	// No sso_bypass_paths set -> no extra handle blocks, unchanged from before
+	// this field existed.
+	if strings.Contains(frag, "handle /api") {
+		t.Fatalf("fragment without sso_bypass_paths should have no bypass handle:\n%s", frag)
+	}
+}
+
+// TestWebFragmentSSOBypassPaths guards sso_bypass_paths: oauth2-proxy only
+// understands its own browser session cookie, not an app's own
+// token-authenticated API — confirmed live, an external client presenting a
+// valid Vikunja API token still got bounced to /oauth2/start because the
+// gate ran before the request ever reached the app. Each bypass path must
+// get its own ungated handle block, and it must come BEFORE the catch-all
+// gated handle{} in the rendered Caddyfile — Caddy's handle blocks are
+// mutually exclusive per request and match in source order, so a bypass
+// block placed after the catch-all would never be reached.
+func TestWebFragmentSSOBypassPaths(t *testing.T) {
+	t.Parallel()
+	w := model.TenantWebEndpoint{
+		Hostname:       "tasks.bit-a-bit.org",
+		Target:         "100.64.0.14:3456",
+		SSO:            true,
+		SSOBypassPaths: []string{"/api/*"},
+	}
+	frag := webFragment(w, 4180)
+	if !strings.Contains(frag, "handle /api/* {\n\t\treverse_proxy 100.64.0.14:3456") {
+		t.Fatalf("fragment missing an ungated handle for the bypass path:\n%s", frag)
+	}
+	bypassIdx := strings.Index(frag, "handle /api/*")
+	gatedIdx := strings.Index(frag, "handle {\n")
+	if bypassIdx < 0 || gatedIdx < 0 || bypassIdx > gatedIdx {
+		t.Fatalf("bypass handle must come before the catch-all gated handle:\n%s", frag)
+	}
+	// The bypass path itself must never go through forward_auth.
+	bypassBlock := frag[bypassIdx:gatedIdx]
+	if strings.Contains(bypassBlock, "forward_auth") {
+		t.Fatalf("bypass path block must not be gated:\n%s", bypassBlock)
+	}
 }
 
 func TestWebSSOPort(t *testing.T) {

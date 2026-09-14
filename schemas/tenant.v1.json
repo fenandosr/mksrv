@@ -105,7 +105,8 @@
           "provider": {"type": "string", "enum": ["edge"], "default": "edge"},
           "cdn": {"type": "boolean", "default": false},
           "sso": {"type": "boolean", "default": false},
-          "sso_groups": {"type": "array", "uniqueItems": true, "maxItems": 8, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$"}}
+          "sso_groups": {"type": "array", "uniqueItems": true, "maxItems": 8, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$"}},
+          "sso_bypass_paths": {"type": "array", "uniqueItems": true, "maxItems": 8, "items": {"type": "string", "maxLength": 128, "pattern": "^/\\S*$"}}
         }
       }
     },

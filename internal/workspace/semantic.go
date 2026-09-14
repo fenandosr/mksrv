@@ -338,6 +338,9 @@ func checkTenantWeb(report *Report, file string, tenant model.Tenant) {
 				semanticError(report, file, path+".sso_groups", "tenant.web.sso_groups", fmt.Sprintf("unknown realm group %q (admin|dev|apps|vpn)", g))
 			}
 		}
+		if len(w.SSOBypassPaths) > 0 && !w.SSO {
+			semanticError(report, file, path+".sso_bypass_paths", "tenant.web.sso_bypass_paths", "sso_bypass_paths requires sso: true")
+		}
 	}
 }
 

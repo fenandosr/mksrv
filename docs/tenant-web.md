@@ -23,6 +23,7 @@ web:
 | `cdn` | `false` (default). `true` is reserved for CloudFront + WAF and is not implemented yet — it fails validation. |
 | `sso` | `false` (default). `true` gates the hostname behind a Keycloak session at the edge (ADR 0030) — see below. |
 | `sso_groups` | optional list of realm groups (`admin`/`dev`/`apps`/`vpn`); only members of one of them pass the gate. Requires `sso: true`. |
+| `sso_bypass_paths` | optional list of Caddy path patterns (e.g. `/api/*`) exempted from the gate entirely — for the origin's own token-authenticated API. Requires `sso: true`. |
 
 ## What `mksrv` does
 
@@ -86,6 +87,26 @@ The origin can trust those headers for true SSO (JupyterHub
 them and just benefit from being unreachable without a realm session.
 
 Dropping the last `sso` entry tears the container down. `sso` + `cdn` is rejected.
+
+### `sso_bypass_paths` — letting an app's own API through
+
+```yaml
+web:
+  - hostname: tasks.bit-a-bit.org
+    target: omics-bitabit.prod.mksrv:3456
+    sso: true
+    sso_bypass_paths: ["/api/*"]
+```
+
+oauth2-proxy only understands its own browser session cookie — an app's own
+token-authenticated API (a mobile client, a personal-access-token integration)
+never gets a chance to check its own credential, because the gate bounces the
+request to `/oauth2/start` first. Confirmed live: an unofficial iOS client for
+Vikunja presented a valid Vikunja API token and still got redirected to
+Keycloak. `sso_bypass_paths` routes matching paths straight to the origin,
+skipping `forward_auth` entirely — the origin's own API auth still applies, so
+this only removes the *additional* Keycloak-session requirement in front of
+it. Scope it as narrowly as the app's real API surface (`/api/*`, not `/*`).
 
 ## VPN-only web services
 

@@ -193,6 +193,27 @@ func TestValidateAcceptsWebSSO(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsSSOBypassPathsWithoutSSO(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	patchTenant(t, root, "target: acme-nextcloud.prod.mksrv:80", "target: acme-nextcloud.prod.mksrv:80\n    sso_bypass_paths: [/api/*]")
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid report")
+	}
+	assertIssueCode(t, report, "tenant.web.sso_bypass_paths")
+}
+
+func TestValidateAcceptsWebSSOBypassPaths(t *testing.T) {
+	t.Parallel()
+	root := copyExample(t)
+	patchTenant(t, root, "target: acme-nextcloud.prod.mksrv:80", "target: acme-nextcloud.prod.mksrv:80\n    sso: true\n    sso_bypass_paths: [/api/*]")
+	report := revalidate(t, root)
+	if !report.Valid {
+		t.Fatalf("web sso_bypass_paths should validate: %#v", report.Issues)
+	}
+}
+
 func TestValidateRejectsUndersizedCluster(t *testing.T) {
 	t.Parallel()
 	root := copyExample(t)
