@@ -439,6 +439,17 @@ func TestEnsureClientReturnsSecret(t *testing.T) {
 	mux.HandleFunc("/admin/realms/master/clients/abc/client-secret", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"value": "s3cr3t"})
 	})
+	var mapperPosts []map[string]any
+	mux.HandleFunc("/admin/realms/master/clients/abc/protocol-mappers/models", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			mapperPosts = append(mapperPosts, body)
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
@@ -452,6 +463,28 @@ func TestEnsureClientReturnsSecret(t *testing.T) {
 	}
 	if secret != "s3cr3t" {
 		t.Fatalf("secret = %q", secret)
+	}
+
+	// ensureAudienceMapper: without this, Keycloak's `aud` claim is whatever
+	// the "roles" scope's audience-resolve mapper computes from the user's
+	// resource_access (built-in clients like account/realm-management) --
+	// never the client itself, unless a client defines its own roles.
+	// Confirmed live: oauth2-proxy's strict `aud` validation rejected the
+	// callback outright because of this ("audience from claim aud with
+	// value [realm-management account] does not match...").
+	if len(mapperPosts) != 1 {
+		t.Fatalf("EnsureClient() should create exactly one audience mapper, got %d", len(mapperPosts))
+	}
+	m := mapperPosts[0]
+	if m["protocolMapper"] != "oidc-audience-mapper" {
+		t.Fatalf("mapper type = %v, want oidc-audience-mapper", m["protocolMapper"])
+	}
+	cfg, _ := m["config"].(map[string]any)
+	if cfg["included.client.audience"] != "grafana" {
+		t.Fatalf("mapper config = %+v, want included.client.audience=grafana", cfg)
+	}
+	if cfg["id.token.claim"] != "true" {
+		t.Fatalf("mapper must claim the ID token (that's what oauth2-proxy validates): %+v", cfg)
 	}
 }
 

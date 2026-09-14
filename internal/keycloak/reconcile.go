@@ -365,6 +365,11 @@ func (c *Client) EnsureClient(ctx context.Context, realm string, spec ClientSpec
 		}
 		uuid = existing[spec.ClientID]
 	}
+	if uuid != "" {
+		if err := c.ensureAudienceMapper(ctx, realm, uuid, spec.ClientID); err != nil {
+			return "", err
+		}
+	}
 	if spec.Public || uuid == "" {
 		return "", nil
 	}
@@ -375,6 +380,44 @@ func (c *Client) EnsureClient(ctx context.Context, realm string, spec ClientSpec
 		return "", err
 	}
 	return secret.Value, nil
+}
+
+// ensureAudienceMapper adds a hardcoded-audience protocol mapper so the
+// issued ID/access tokens carry this client's own clientId in `aud` —
+// Keycloak does NOT do this by default. Without it, `aud` is whatever the
+// realm's built-in "roles" scope's audience-resolve mapper computes from the
+// user's `resource_access` (client roles) — which, for a client that defines
+// no roles of its own (every mksrv-created client so far), never includes
+// the client itself. Confirmed live: oauth2-proxy (keycloak-oidc provider,
+// strict `aud` validation) rejected the callback outright — "audience from
+// claim aud with value [realm-management account] does not match with any
+// of allowed audiences" — realm-management/account are just the realm's own
+// built-in clients the admin test user happens to hold roles in, unrelated
+// to the client that was actually logging in. Idempotent: no-ops if a mapper
+// of this name already exists.
+func (c *Client) ensureAudienceMapper(ctx context.Context, realm, clientUUID, clientID string) error {
+	var existing []struct {
+		Name string `json:"name"`
+	}
+	if _, err := c.do(ctx, http.MethodGet, "/realms/"+realm+"/clients/"+clientUUID+"/protocol-mappers/models", nil, &existing); err != nil {
+		return err
+	}
+	for _, m := range existing {
+		if m.Name == "mksrv-audience" {
+			return nil
+		}
+	}
+	_, err := c.do(ctx, http.MethodPost, "/realms/"+realm+"/clients/"+clientUUID+"/protocol-mappers/models", map[string]any{
+		"name":           "mksrv-audience",
+		"protocol":       "openid-connect",
+		"protocolMapper": "oidc-audience-mapper",
+		"config": map[string]string{
+			"included.client.audience": clientID,
+			"access.token.claim":       "true",
+			"id.token.claim":           "true",
+		},
+	}, nil)
+	return err
 }
 
 // UserSpec is one declarative realm user.
