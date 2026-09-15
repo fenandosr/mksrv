@@ -137,3 +137,14 @@ redeploy for the `PGRST_DB_ANON_ROLE=mksrv_anon` change.
   note). `postgrestDSN` is unchanged — PostgREST still connects as `<id>_auth`.
 - OpenBao per-group policies (M18), the Keycloak groups, and configd are
   untouched — only the Postgres realisation of the RBAC model changes.
+
+**Addendum**: `mksrv_owner` is also granted membership in `mksrv_app` and
+`mksrv_anon` (`GRANT mksrv_app, mksrv_anon TO mksrv_owner`, in
+`globalRBACRolesSQL`). Missed in the original decision: `docs/tenant-dev-guide.md`
+documents `SET ROLE mksrv_app` in a direct Postgres session (every
+`<id>_login` runs as `mksrv_owner`) as the least-privilege pattern for an app
+that talks to Postgres directly rather than through PostgREST — without this
+grant that `SET ROLE` fails with "permission denied to set role" for every
+tenant, since only `mksrv_web` (PostgREST's impersonation role) was ever made
+a member of the other three buckets. Found while onboarding a tenant that
+explicitly wanted a migrations-role/runtime-role split for its own API.
