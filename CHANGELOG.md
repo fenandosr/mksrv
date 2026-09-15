@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Fix (database, ADR 0026): `mksrv_owner` was never granted membership in
+  `mksrv_app` / `mksrv_anon`, so `docs/tenant-dev-guide.md`'s own documented
+  `SET ROLE mksrv_app` (dropping a direct Postgres session — every
+  `<id>_login` runs as `mksrv_owner` — to request-handling's least
+  privilege) failed with "permission denied to set role" for every tenant.
+  Found while answering an integrating tenant (mcps) that wanted exactly a
+  migrations-role/runtime-role split. `globalRBACRolesSQL` now grants
+  `mksrv_app, mksrv_anon TO mksrv_owner`.
+
 - Add (identity, ADR 0030 addendum): `web[].sso_bypass_paths` exempts
   matching Caddy path patterns (e.g. `/api/*`) from the oauth2-proxy gate.
   oauth2-proxy only understands its own browser session cookie, not an

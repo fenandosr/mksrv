@@ -54,7 +54,12 @@ A `dev` / `admin` connects over the VPN as the per-tenant role **`<id>_login`**
 `kv/tenants/<id>/database`). It can only connect to `db_<id>`. Every session
 starts as `mksrv_owner` (ADR 0026), so `SELECT current_user` returns
 `mksrv_owner` while `session_user` — and the Postgres logs — stay `<id>_login`.
-`RESET role` steps back to `<id>_login` (fewer privileges). PostgreSQL role
+`RESET role` steps back to `<id>_login` (fewer privileges). `mksrv_owner` is
+also a member of `mksrv_app` and `mksrv_anon`, so a direct session can
+`SET ROLE mksrv_app` to run request-handling code at the same reduced
+privilege PostgREST's `apps`-group requests get, without going through
+PostgREST at all — useful for an app that talks to Postgres directly (its own
+ORM) but still wants a migrations-role/runtime-role split. PostgreSQL role
 *names* are cluster-wide, so `\du` lists `mksrv_*` plus every tenant's
 `<id>_login` / `<id>_auth`; that reveals no data and grants no access.
 

@@ -289,6 +289,16 @@ func globalRBACRolesSQL() string {
 		create(dbAnonRole, "NOLOGIN"),
 		create(dbWebRole, "NOLOGIN NOINHERIT"),
 		fmt.Sprintf(`GRANT %s, %s, %s TO %s;`, dbOwnerRole, dbAppRole, dbAnonRole, dbWebRole),
+		// mksrv_owner also needs membership in the lesser buckets: the dev
+		// guide documents `SET ROLE mksrv_app` for request handlers to drop
+		// from mksrv_owner's full DDL to the app's normal, granted-only
+		// privilege set (docs/tenant-dev-guide.md, "Least privilege for
+		// request handling") — without this grant, every <id>_login session
+		// (which runs as mksrv_owner, see tenantDatabaseSQL) gets "permission
+		// denied to set role" the moment it tries. Found while answering an
+		// integrating tenant that wanted exactly this migrations/runtime
+		// role split.
+		fmt.Sprintf(`GRANT %s, %s TO %s;`, dbAppRole, dbAnonRole, dbOwnerRole),
 		"",
 	}, "\n")
 }

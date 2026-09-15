@@ -105,6 +105,12 @@ func TestGlobalRBACRolesSQL(t *testing.T) {
 		`'CREATE ROLE mksrv_owner NOLOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mksrv_owner')`,
 		`'CREATE ROLE mksrv_web NOLOGIN NOINHERIT' WHERE NOT EXISTS`,
 		`GRANT mksrv_owner, mksrv_app, mksrv_anon TO mksrv_web;`,
+		// mksrv_owner must also be a member of the lesser buckets, or the dev
+		// guide's own documented `SET ROLE mksrv_app` (every <id>_login
+		// session runs as mksrv_owner) fails with "permission denied to set
+		// role" — found while onboarding a tenant that wanted exactly a
+		// migrations-role/runtime-role split.
+		`GRANT mksrv_app, mksrv_anon TO mksrv_owner;`,
 	} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("global RBAC SQL missing %q:\n%s", want, sql)
