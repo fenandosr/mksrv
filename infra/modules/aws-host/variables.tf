@@ -113,6 +113,22 @@ variable "backup_enabled" {
   default     = false
 }
 
+variable "mail_cert_zone_arns" {
+  description = <<-EOT
+    Route53 hosted zone ARNs this host's acme.sh DNS-01 mail-cert issuance may
+    write to: the operator zone plus every mail-hosted tenant zone with
+    mail.branded_hostname. Empty on hosts that do not carry `mail` — Caddy
+    cannot issue a multi-SAN certificate (confirmed with its own maintainers:
+    "Caddy does not support multi-SAN certificates, for a multitude of
+    reasons"), so the shared mail server's cert (one hostname per mail-hosted
+    domain that opted into branded_hostname) is obtained directly via DNS-01,
+    scoped to only the zones it actually needs to write a _acme-challenge TXT
+    record into.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

@@ -35,6 +35,60 @@ func TestMailPasswordHashRef(t *testing.T) {
 	}
 }
 
+// TestMailCertHostnames guards ADR 0033's SAN list: mail.<root_domain> stays
+// first (it's the primary name mailCertIssueScript's --install-cert uses),
+// only hosted:true AND branded_hostname:true tenants contribute, one entry
+// per domain (a tenant can have more than one), sorted, and a
+// hosted-but-not-branded tenant (the default) contributes nothing.
+func TestMailCertHostnames(t *testing.T) {
+	t.Parallel()
+	tenants := map[string]model.Tenant{
+		"mcps": {ID: "mcps", Mail: &model.TenantMail{
+			Hosted: true, Domains: []string{"mcps-epcm.org"}, BrandedHostname: true,
+		}},
+		"hg": {ID: "hg", Mail: &model.TenantMail{
+			Hosted: true, Domains: []string{"b.example.org", "a.example.org"}, BrandedHostname: true,
+		}},
+		"bitabit": {ID: "bitabit", Mail: &model.TenantMail{
+			Hosted: true, Domains: []string{"bitabit.example.org"}, // not branded — default stays shared
+		}},
+		"gtex": {ID: "gtex"}, // no mail: block at all
+	}
+	got := mailCertHostnames("cloud-it.click", tenants)
+	want := []string{"mail.cloud-it.click", "mail.a.example.org", "mail.b.example.org", "mail.mcps-epcm.org"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("mailCertHostnames = %v, want %v", got, want)
+	}
+}
+
+// TestMailCertIssueScript guards the shape acme.sh needs: every hostname as
+// its own -d flag (mailCertHostnames' order preserved, root domain first —
+// the name --install-cert looks the issued cert up by), DNS-01 via
+// dns_aws (not Caddy's http-01/tls-alpn-01 — it cannot produce this cert at
+// all, ADR 0033), credentials from IMDS rather than a static key on disk,
+// and --force only appended when the caller actually asked for it.
+func TestMailCertIssueScript(t *testing.T) {
+	t.Parallel()
+	hostnames := []string{"mail.cloud-it.click", "mail.mcps-epcm.org"}
+	script := mailCertIssueScript(hostnames)
+	for _, want := range []string{
+		"-d mail.cloud-it.click -d mail.mcps-epcm.org",
+		"--dns dns_aws",
+		"--server letsencrypt",
+		"169.254.169.254/latest/api/token",
+		"AWS_ACCESS_KEY_ID",
+		"--install-cert -d mail.cloud-it.click",
+		mailAcmeShImage,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("mail cert script missing %q:\n%s", want, script)
+		}
+	}
+	if strings.Contains(script, "AWS_ACCESS_KEY_ID=AKIA") {
+		t.Fatal("mail cert script must not embed a static AWS key")
+	}
+}
+
 func TestMailTenants(t *testing.T) {
 	t.Parallel()
 	tenants := map[string]model.Tenant{

@@ -158,8 +158,27 @@ locals {
   }
 
   # ADR 0032: the shared mail server's own hostname lives on the operator
-  # domain, never a tenant's — its TLS cert and DNS never touch a tenant zone.
+  # domain, never a tenant's. branded_hostname (opt-in per tenant) is the one
+  # exception — it publishes mail.<tenant-domain> in the TENANT's own zone,
+  # pointing at the same shared server (see mail_cert_zone_arns below: its
+  # DNS-01 challenge needs write access there too, not just the operator zone).
   mail_hosts = { for name, h in local.aws_hosts : name => h if contains(h.stacks, "mail") }
+
+  # Zones acme.sh's DNS-01 challenge may write a _acme-challenge TXT record
+  # into, for the shared mail server's certificate: the operator zone always,
+  # plus every mail-hosted tenant zone that opted into branded_hostname (ADR
+  # 0032 addendum — Caddy cannot issue the multi-SAN cert this needs, see
+  # docs/decisions/0033-mail-cert-dns01-acme-sh.md).
+  mail_branded_tenant_zone_arns = [
+    for id, t in var.tenants : "arn:aws:route53:::hostedzone/${t.dns_override.zone_id}"
+    if try(coalesce(t.mail.hosted, false), false)
+    && try(coalesce(t.mail.branded_hostname, false), false)
+    && try(coalesce(t.dns_override.zone_id, ""), "") != ""
+  ]
+  mail_cert_zone_arns = length(local.mail_hosts) > 0 ? distinct(concat(
+    local.zone_id != null ? ["arn:aws:route53:::hostedzone/${local.zone_id}"] : [],
+    local.mail_branded_tenant_zone_arns,
+  )) : []
 
   # Shared operator endpoints, all fronted by the edge.
   operator_fqdns = distinct(concat(
@@ -321,6 +340,7 @@ module "aws_host" {
   openbao_kms_key_arn = contains(each.value.stacks, "openbao") && length(local.openbao_hosts) > 0 ? aws_kms_key.openbao[0].arn : ""
   backup_enabled      = contains(each.value.stacks, "backup") && length(local.backup_hosts) > 0
   backup_bucket_arn   = contains(each.value.stacks, "backup") && length(local.backup_hosts) > 0 ? aws_s3_bucket.backups[0].arn : ""
+  mail_cert_zone_arns = contains(each.value.stacks, "mail") ? local.mail_cert_zone_arns : []
 
   advertise_exitnode = try(each.value.advertise_exitnode, false)
   is_nat             = local.nat_via_edge && each.key == local.base_host

@@ -19,9 +19,6 @@ templates:
   - src: templates/mailserver.container.tmpl
     dst: /etc/containers/systemd/mksrv-mailserver.container
     scope: shared
-  - src: templates/mail.caddy.tmpl
-    dst: /var/lib/mksrv/caddy.d/15-mail.caddy
-    scope: shared
   # The Quadlet unit above bind-mounts these five directories; Podman doesn't
   # create a missing bind-mount source itself (fails the container start with
   # "statfs ...: no such file or directory" on a fresh host/volume), so they
