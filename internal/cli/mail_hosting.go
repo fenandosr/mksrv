@@ -179,12 +179,13 @@ func (f *fleet) reconcileMailboxes(ctx context.Context, printer ui.Printer, clie
 }
 
 const (
-	mailAcmeStateDir  = "/var/lib/mksrv/stacks/mail/acme-state"
-	mailCertScript    = "/var/lib/mksrv/stacks/mail/mail-cert-issue.sh"
-	mailCertService   = "/etc/systemd/system/mksrv-mail-cert.service"
-	mailCertTimer     = "/etc/systemd/system/mksrv-mail-cert.timer"
-	mailAcmeShImage   = "docker.io/neilpang/acme.sh:3.1.6"
-	mailAcmeShAccount = "mksrv-mail-cert" // --accountemail; no inbox needed, LE never emails this
+	mailAcmeStateDir     = "/var/lib/mksrv/stacks/mail/acme-state"
+	mailCertScript       = "/var/lib/mksrv/stacks/mail/mail-cert-issue.sh"
+	mailCertService      = "/etc/systemd/system/mksrv-mail-cert.service"
+	mailCertTimer        = "/etc/systemd/system/mksrv-mail-cert.timer"
+	mailAcmeShImage      = "docker.io/neilpang/acme.sh:3.1.6"
+	mailAcmeShAccount    = "mksrv-mail-cert" // --accountemail; no inbox needed, LE never emails this
+	mailAcmeShAccountTLD = "mksrv.invalid"   // RFC 2606 reserved -- never a real, resolvable domain
 )
 
 // mailCertHostnames is the shared mail server's full certificate SAN list:
@@ -258,7 +259,7 @@ acme() {
 		"$IMAGE" --home /acme.sh "$@"
 }
 
-ISSUE_ARGS=(--issue --server letsencrypt --dns dns_aws%[4]s --accountemail "%[5]s@invalid.mksrv.local")
+ISSUE_ARGS=(--issue --server letsencrypt --dns dns_aws%[4]s --accountemail "%[5]s@%[7]s")
 if [ "$FORCE" = "--force" ]; then
 	ISSUE_ARGS+=(--force)
 fi
@@ -268,7 +269,7 @@ acme --install-cert -d %[6]s \
 	--cert-file "$TLS_DIR/cert.pem" \
 	--key-file "$TLS_DIR/privkey.pem" \
 	--fullchain-file "$TLS_DIR/fullchain.pem"
-`, mailAcmeStateDir, mailTLSDir, mailAcmeShImage, domainArgs.String(), mailAcmeShAccount, primary)
+`, mailAcmeStateDir, mailTLSDir, mailAcmeShImage, domainArgs.String(), mailAcmeShAccount, primary, mailAcmeShAccountTLD)
 }
 
 const mailCertServiceUnit = `[Unit]
