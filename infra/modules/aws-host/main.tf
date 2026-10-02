@@ -184,10 +184,18 @@ resource "aws_iam_role_policy" "backup_s3" {
 
 # Mail cert DNS-01 (acme.sh, dns_aws): only the host carrying `mail`, and only
 # for the operator zone + mail-hosted-branded tenant zones it actually needs.
-# route53:GetChange has no zone-level resource type — ACME propagation checks
-# poll a change-id ARN, not a hosted-zone one — so it's granted on * like AWS's
-# own examples for this exact permission; it is a read of an async-change
-# status, not a write.
+# route53:GetChange and route53:ListHostedZones have no zone-level resource
+# type (confirmed live: ListHostedZones denied with Resource scoped to the
+# zone ARNs — AWS's own docs list it, alongside GetChange, among the Route53
+# actions that only support Resource: "*"), so both are granted that way like
+# AWS's own examples for these exact permissions. Neither writes anything:
+# GetChange polls an async change's status, ListHostedZones only resolves
+# which zone a domain belongs to (dns_aws needs this whenever a single
+# --issue spans hostnames in more than one zone — the operator's and a
+# branded tenant's — so AWS_HOSTED_ZONE_ID, which would avoid this grant
+# entirely, only works for a single-zone issuance). The actual record write
+# (ChangeResourceRecordSets) and the read that confirms it propagated
+# (ListResourceRecordSets) stay scoped to the exact zones below.
 resource "aws_iam_role_policy" "mail_cert_route53" {
   count       = length(var.mail_cert_zone_arns) > 0 ? 1 : 0
   name_prefix = "mksrv-mail-cert-route53-"
@@ -202,7 +210,7 @@ resource "aws_iam_role_policy" "mail_cert_route53" {
       },
       {
         Effect   = "Allow"
-        Action   = ["route53:GetChange"]
+        Action   = ["route53:GetChange", "route53:ListHostedZones"]
         Resource = "*"
       }
     ]
