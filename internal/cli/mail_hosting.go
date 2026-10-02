@@ -256,7 +256,7 @@ acme() {
 	podman run --rm --network host \
 		-e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
 		-v "$STATE":/acme.sh \
-		"$IMAGE" --home /acme.sh "$@"
+		"$IMAGE" "$@"
 }
 
 ISSUE_ARGS=(--issue --server letsencrypt --dns dns_aws%[4]s --accountemail "%[5]s@%[7]s")
