@@ -255,7 +255,7 @@ export AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r .Token)
 acme() {
 	podman run --rm --network host \
 		-e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
-		-v "$STATE":/acme.sh \
+		-v "$STATE":/acme.sh:Z \
 		"$IMAGE" "$@"
 }
 
@@ -265,7 +265,17 @@ if [ "$FORCE" = "--force" ]; then
 fi
 acme "${ISSUE_ARGS[@]}"
 
-acme --install-cert -d %[6]s \
+# --install-cert alone, with its own TLS_DIR mount -- :z (shared, lowercase)
+# because mksrv-mailserver.container also bind-mounts this same host
+# directory (:Z, exclusive): relabeling it from here with :Z too would steal
+# that container's access to its own already-working cert on every run of
+# this script, including the daily timer tick when nothing was actually
+# renewed. acme() above never touches TLS_DIR, so a no-op --issue check
+# never relabels it at all.
+podman run --rm --network host \
+	-v "$STATE":/acme.sh:Z \
+	-v "$TLS_DIR":"$TLS_DIR":z \
+	"$IMAGE" --install-cert -d %[6]s \
 	--cert-file "$TLS_DIR/cert.pem" \
 	--key-file "$TLS_DIR/privkey.pem" \
 	--fullchain-file "$TLS_DIR/fullchain.pem"
