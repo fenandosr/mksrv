@@ -179,13 +179,11 @@ func (f *fleet) reconcileMailboxes(ctx context.Context, printer ui.Printer, clie
 }
 
 const (
-	mailAcmeStateDir     = "/var/lib/mksrv/stacks/mail/acme-state"
-	mailCertScript       = "/var/lib/mksrv/stacks/mail/mail-cert-issue.sh"
-	mailCertService      = "/etc/systemd/system/mksrv-mail-cert.service"
-	mailCertTimer        = "/etc/systemd/system/mksrv-mail-cert.timer"
-	mailAcmeShImage      = "docker.io/neilpang/acme.sh:3.1.6"
-	mailAcmeShAccount    = "mksrv-mail-cert" // --accountemail; no inbox needed, LE never emails this
-	mailAcmeShAccountTLD = "mksrv.invalid"   // RFC 2606 reserved -- never a real, resolvable domain
+	mailAcmeStateDir = "/var/lib/mksrv/stacks/mail/acme-state"
+	mailCertScript   = "/var/lib/mksrv/stacks/mail/mail-cert-issue.sh"
+	mailCertService  = "/etc/systemd/system/mksrv-mail-cert.service"
+	mailCertTimer    = "/etc/systemd/system/mksrv-mail-cert.timer"
+	mailAcmeShImage  = "docker.io/neilpang/acme.sh:3.1.6"
 )
 
 // mailCertHostnames is the shared mail server's full certificate SAN list:
@@ -259,7 +257,7 @@ acme() {
 		"$IMAGE" "$@"
 }
 
-ISSUE_ARGS=(--issue --server letsencrypt --dns dns_aws%[4]s --accountemail "%[5]s@%[7]s")
+ISSUE_ARGS=(--issue --server letsencrypt --dns dns_aws%[4]s)
 if [ "$FORCE" = "--force" ]; then
 	ISSUE_ARGS+=(--force)
 fi
@@ -275,11 +273,11 @@ acme "${ISSUE_ARGS[@]}"
 podman run --rm --network host \
 	-v "$STATE":/acme.sh:Z \
 	-v "$TLS_DIR":"$TLS_DIR":z \
-	"$IMAGE" --install-cert -d %[6]s \
+	"$IMAGE" --install-cert -d %[5]s \
 	--cert-file "$TLS_DIR/cert.pem" \
 	--key-file "$TLS_DIR/privkey.pem" \
 	--fullchain-file "$TLS_DIR/fullchain.pem"
-`, mailAcmeStateDir, mailTLSDir, mailAcmeShImage, domainArgs.String(), mailAcmeShAccount, primary, mailAcmeShAccountTLD)
+`, mailAcmeStateDir, mailTLSDir, mailAcmeShImage, domainArgs.String(), primary)
 }
 
 const mailCertServiceUnit = `[Unit]
