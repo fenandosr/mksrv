@@ -146,12 +146,13 @@ func TestStackRendersMail(t *testing.T) {
 		t.Fatalf("mailserver unit should have no relay config when MailRelayOutbound is false:\n%s", unit)
 	}
 
-	frag, ok := files["/var/lib/mksrv/caddy.d/15-mail.caddy"]
-	if !ok {
-		t.Fatal("no mail Caddy fragment rendered")
-	}
-	if !strings.HasPrefix(strings.TrimSpace(string(frag)), "mail.example.com {") {
-		t.Fatalf("mail Caddy fragment with no branded tenants should be just the root-domain hostname:\n%s", frag)
+	// This stack no longer renders a Caddy fragment for mail at all — Caddy
+	// cannot issue the multi-SAN cert mail.branded_hostname needs (ADR 0033);
+	// the shared mail server's certificate comes from acme.sh DNS-01 instead
+	// (internal/cli/mail_hosting.go's reconcileMailCert, not this stack's
+	// templates).
+	if _, ok := files["/var/lib/mksrv/caddy.d/15-mail.caddy"]; ok {
+		t.Fatal("mail stack should no longer render a Caddy fragment")
 	}
 }
 
@@ -188,32 +189,13 @@ func TestStackRendersMailRelayOutbound(t *testing.T) {
 	}
 }
 
-// TestStackRendersMailBrandedHostnames guards ADR 0032's opt-out
-// (mail.branded_hostname): the root-domain hostname must stay first in the
-// Caddy site's address list, since reconcileMailTLS looks the resulting
-// cert up by that exact name — a per-tenant SAN is additive, not a
-// replacement.
-func TestStackRendersMailBrandedHostnames(t *testing.T) {
-	t.Parallel()
-	catalog, err := engine.Catalog(schema.New())
-	if err != nil {
-		t.Fatalf("Catalog() error = %v", err)
-	}
-	ctx := baseContext()
-	ctx.Host.Stacks = []string{"base", "identity", "mail"}
-	ctx.MailBrandedHostnames = []string{"mail.acme.example.com", "mail.mcps-epcm.org"}
-	files, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), catalog["mail"], ctx)
-	if err != nil {
-		t.Fatalf("Stack() error = %v", err)
-	}
-	frag, ok := files["/var/lib/mksrv/caddy.d/15-mail.caddy"]
-	if !ok {
-		t.Fatal("no mail Caddy fragment rendered")
-	}
-	if !strings.HasPrefix(strings.TrimSpace(string(frag)), "mail.example.com, mail.acme.example.com, mail.mcps-epcm.org {") {
-		t.Fatalf("mail Caddy fragment address list wrong (root domain must stay first):\n%s", frag)
-	}
-}
+// Mail's Caddy fragment and its MailBrandedHostnames SAN list are gone —
+// Caddy cannot issue the multi-SAN cert mail.branded_hostname needs ("Caddy
+// does not support multi-SAN certificates", confirmed live and with a Caddy
+// maintainer, see ADR 0033). The shared mail server's certificate is now
+// obtained directly via acme.sh DNS-01 (internal/cli/mail_hosting.go,
+// mailCertHostnames/mailCertIssueScript), not through this stack's rendered
+// templates at all.
 
 func TestStackRendersIdentity(t *testing.T) {
 	t.Parallel()

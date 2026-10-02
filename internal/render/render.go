@@ -64,12 +64,6 @@ type Context struct {
 	Fleet           []Member            // every fleet host, including this one (sorted by Name) — for cross-host scraping (M23)
 	OperatorFQDNs   []string            // every operator + tenant-rest FQDN fronted by the edge, for blackbox probing (M23)
 	TenantIDs       []string            // every tenant declared in the workspace, sorted — for a shared template to fan out per tenant (e.g. Keycloak's per-tenant theme mounts, M24)
-	// MailBrandedHostnames is "mail.<domain>" for every tenant that opted
-	// into mail.branded_hostname (sorted) — extra SANs the shared mail
-	// server's Caddy TLS fragment requests alongside mail.<root_domain>, so
-	// a branded tenant's mail client can point at mail.<their-own-domain>
-	// instead of the operator hostname (ADR 0032 opt-out).
-	MailBrandedHostnames []string
 	// MailRelayOutbound mirrors deployment.yaml's mail.relay_outbound — wires
 	// the shared mail stack's Postfix to relay outbound mail through SES
 	// (RELAY_HOST/RELAY_PORT, credentials via a podman Secret reconcileMailRelay

@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Fix (mail, ADR 0033): `mail.branded_hostname` never actually worked —
+  Caddy cannot issue a multi-SAN certificate ("Caddy does not support
+  multi-SAN certificates, for a multitude of reasons" — confirmed with a
+  Caddy maintainer), so it silently obtained two independent single-SAN
+  certificates for the shared mail server instead of one covering both
+  hostnames, and `docker-mailserver` (one static cert for every TLS
+  connection, no documented per-domain SNI mode) could only ever satisfy one
+  of them. Confirmed live: `mail.mcps-epcm.org` clients got a
+  certificate/hostname mismatch on every connection, invisible unless
+  specifically tested. The shared mail server's certificate is now obtained
+  directly via `acme.sh` (DNS-01 against Route53, credentials from
+  short-lived IMDSv2 instance-role keys, never a static key), with a daily
+  renewal timer — bypassing Caddy for this one certificate entirely.
+  `reconcileMailCert` replaces `reconcileMailTLS`; `mail.caddy.tmpl` and the
+  `MailBrandedHostnames` render-context field are removed. New Terraform
+  variable `mail_cert_zone_arns` scopes the grant to exactly the zones this
+  needs.
+
 - Fix (database, ADR 0026): `mksrv_owner` was never granted membership in
   `mksrv_app` / `mksrv_anon`, so `docs/tenant-dev-guide.md`'s own documented
   `SET ROLE mksrv_app` (dropping a direct Postgres session — every

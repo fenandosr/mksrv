@@ -178,3 +178,11 @@ recreate, and covered by the existing `backup` stack's restic run once the
   `internal/cli/mail.go`, `stacks/mail/*` (real templates, storage, health,
   Caddy fragment for the cert), `infra/modules/aws-host` (SG ports),
   `infra/root/main.tf` (tenant MX/SPF/DMARC locals, operator A record).
+
+**Addendum (ADR 0033)**: the `branded_hostname` SAN-via-Caddy mechanism
+described above never actually worked — Caddy cannot issue a multi-SAN
+certificate, so each branded hostname's clients got a hostname/cert mismatch
+in production, invisible unless specifically tested. The shared mail
+server's certificate is now obtained directly via acme.sh (DNS-01), not
+copied from Caddy; see ADR 0033 for the full story and the replacement
+mechanism.

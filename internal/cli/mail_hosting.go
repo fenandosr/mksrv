@@ -105,7 +105,7 @@ func (f *fleet) provisionMail(ctx context.Context, printer ui.Printer, selected 
 	if err := f.reconcileMailboxes(ctx, printer, client, all); err != nil {
 		return err
 	}
-	if err := f.reconcileMailTLS(ctx, printer, client); err != nil {
+	if err := f.reconcileMailCert(ctx, printer, client); err != nil {
 		return err
 	}
 	if err := f.reconcileMailRelay(ctx, printer, client); err != nil {
@@ -178,47 +178,170 @@ func (f *fleet) reconcileMailboxes(ctx context.Context, printer ui.Printer, clie
 	return nil
 }
 
-// reconcileMailTLS copies the cert Caddy holds for the shared mail hostname
-// into the mailserver's manual-TLS mount, restarting only on change.
-func (f *fleet) reconcileMailTLS(ctx context.Context, printer ui.Printer, client *sshx.Client) error {
-	hostname := "mail." + f.data.Deployment.DNS.RootDomain
-	find := fmt.Sprintf(
-		"sudo podman exec mksrv-caddy sh -c 'find /data/caddy/certificates -type d -iname %s 2>/dev/null | head -1'",
-		quoteArg(hostname),
-	)
-	res, err := client.Run(ctx, find)
-	if err != nil || strings.TrimSpace(res.Stdout) == "" {
-		printer.Warn("mail: no cert for %s in Caddy yet (it appears after the first `tenant apply` + a Caddy reload); skipping TLS copy", hostname)
-		return nil
-	}
-	dir := strings.TrimSpace(res.Stdout)
+const (
+	mailAcmeStateDir     = "/var/lib/mksrv/stacks/mail/acme-state"
+	mailCertScript       = "/var/lib/mksrv/stacks/mail/mail-cert-issue.sh"
+	mailCertService      = "/etc/systemd/system/mksrv-mail-cert.service"
+	mailCertTimer        = "/etc/systemd/system/mksrv-mail-cert.timer"
+	mailAcmeShImage      = "docker.io/neilpang/acme.sh:3.1.6"
+	mailAcmeShAccount    = "mksrv-mail-cert" // --accountemail; no inbox needed, LE never emails this
+	mailAcmeShAccountTLD = "mksrv.invalid"   // RFC 2606 reserved -- never a real, resolvable domain
+)
 
-	cert, err := client.Run(ctx, "sudo podman exec mksrv-caddy cat "+quoteArg(dir+"/"+hostname+".crt"))
-	if err != nil {
-		return fmt.Errorf("read mail cert: %w", err)
+// mailCertHostnames is the shared mail server's full certificate SAN list:
+// mail.<root_domain> first (the primary name acme.sh issues/installs under),
+// then "mail.<domain>" for every domain of every mail-hosted tenant that
+// opted into branded_hostname — sorted, one entry per domain (a tenant can
+// have more than one). Caddy cannot issue this cert itself: "Caddy does not
+// support multi-SAN certificates, for a multitude of reasons" (Francis
+// Lavoie, a Caddy maintainer — confirmed live too: the Caddyfile's
+// `mail.<root>, mail.<branded> { ... }` site block, which looked like exactly
+// the standard "share a cert across these hostnames" pattern, in fact made
+// Caddy obtain and renew TWO independent single-SAN certs). See ADR 0033.
+func mailCertHostnames(rootDomain string, tenants map[string]model.Tenant) []string {
+	hostnames := []string{"mail." + rootDomain}
+	var branded []string
+	for _, id := range sortedTenantIDs(tenants) {
+		t := tenants[id]
+		if !tenantMailHosted(t) || !t.Mail.BrandedHostname {
+			continue
+		}
+		for _, d := range t.Mail.Domains {
+			branded = append(branded, "mail."+d)
+		}
 	}
-	key, err := client.Run(ctx, "sudo podman exec mksrv-caddy cat "+quoteArg(dir+"/"+hostname+".key"))
-	if err != nil {
-		return fmt.Errorf("read mail key: %w", err)
+	sort.Strings(branded)
+	return append(hostnames, branded...)
+}
+
+// mailCertIssueScript renders the script that obtains (and, on a later run,
+// renews) the shared mail server's certificate directly via ACME DNS-01 —
+// bypassing Caddy entirely, since it cannot produce the multi-SAN cert this
+// needs (mailCertHostnames). Idempotent: acme.sh's own `--issue` skips
+// reissuing a cert that isn't yet due for renewal, unless the SAN list
+// changed, in which case ignoreDueDate forces one anyway — a tenant that just
+// turned on branded_hostname shouldn't have to wait for the next scheduled
+// run. Credentials: a short-lived IMDSv2 token exchanged for the instance
+// role's temporary keys (`mail_cert_route53` on the Terraform side, scoped to
+// exactly the zones this needs) — never a static key on disk, matching how
+// restic already reaches S3 in backup.sh.tmpl.
+func mailCertIssueScript(hostnames []string) string {
+	var domainArgs strings.Builder
+	for _, h := range hostnames {
+		fmt.Fprintf(&domainArgs, " -d %s", h)
+	}
+	primary := hostnames[0]
+	return fmt.Sprintf(`#!/usr/bin/env bash
+# mksrv shared mail server certificate — rendered by reconcileMailCert, run by
+# mksrv-mail-cert.timer (daily) and once immediately whenever the SAN list
+# below changes. DNS-01 via Route53, credentials from the instance role —
+# Caddy cannot produce this cert itself (ADR 0033).
+set -euo pipefail
+
+STATE=%[1]s
+TLS_DIR=%[2]s
+IMAGE=%[3]s
+FORCE=${1:-}
+
+mkdir -p "$STATE" "$TLS_DIR"
+
+TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+ROLE=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/iam/security-credentials/)
+CREDS=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" "http://169.254.169.254/latest/meta-data/iam/security-credentials/$ROLE")
+export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r .AccessKeyId)
+export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r .SecretAccessKey)
+export AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r .Token)
+
+acme() {
+	podman run --rm --network host \
+		-e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
+		-v "$STATE":/acme.sh \
+		"$IMAGE" --home /acme.sh "$@"
+}
+
+ISSUE_ARGS=(--issue --server letsencrypt --dns dns_aws%[4]s --accountemail "%[5]s@%[7]s")
+if [ "$FORCE" = "--force" ]; then
+	ISSUE_ARGS+=(--force)
+fi
+acme "${ISSUE_ARGS[@]}"
+
+acme --install-cert -d %[6]s \
+	--cert-file "$TLS_DIR/cert.pem" \
+	--key-file "$TLS_DIR/privkey.pem" \
+	--fullchain-file "$TLS_DIR/fullchain.pem"
+`, mailAcmeStateDir, mailTLSDir, mailAcmeShImage, domainArgs.String(), mailAcmeShAccount, primary, mailAcmeShAccountTLD)
+}
+
+const mailCertServiceUnit = `[Unit]
+Description=mksrv shared mail server certificate (acme.sh, DNS-01)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash ` + mailCertScript + `
+TimeoutStartSec=600
+`
+
+const mailCertTimerUnit = `[Unit]
+Description=mksrv shared mail server certificate renewal (daily)
+
+[Timer]
+OnCalendar=*-*-* 05:00:00
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+`
+
+// reconcileMailCert ensures the issuance script + its systemd timer are in
+// place, and runs the script immediately (forcing reissuance) whenever the
+// SAN list changed since the last run — rather than waiting for the next
+// scheduled tick — then restarts the mailserver only if the cert actually
+// changed. See mailCertIssueScript for why this exists instead of copying a
+// cert from Caddy.
+func (f *fleet) reconcileMailCert(ctx context.Context, printer ui.Printer, client *sshx.Client) error {
+	hostnames := mailCertHostnames(f.data.Deployment.DNS.RootDomain, f.data.Tenants)
+	script := mailCertIssueScript(hostnames)
+
+	oldScript, _ := client.Run(ctx, "sudo cat "+mailCertScript+" 2>/dev/null || true")
+	sanListChanged := strings.TrimSpace(oldScript.Stdout) != strings.TrimSpace(script)
+
+	if err := client.WriteFileSudo(ctx, mailCertScript, []byte(script), 0o700); err != nil {
+		return fmt.Errorf("write %s: %w", mailCertScript, err)
+	}
+	if err := client.WriteFileSudo(ctx, mailCertService, []byte(mailCertServiceUnit), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", mailCertService, err)
+	}
+	if err := client.WriteFileSudo(ctx, mailCertTimer, []byte(mailCertTimerUnit), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", mailCertTimer, err)
+	}
+	if _, err := client.Run(ctx, "sudo systemctl daemon-reload && sudo systemctl enable --now mksrv-mail-cert.timer"); err != nil {
+		return fmt.Errorf("enable mksrv-mail-cert.timer: %w", err)
 	}
 
 	oldCert, _ := client.Run(ctx, "sudo cat "+mailTLSDir+"/fullchain.pem 2>/dev/null || true")
-	if oldCert.Stdout == cert.Stdout {
+	needIssue := sanListChanged || strings.TrimSpace(oldCert.Stdout) == ""
+	if needIssue {
+		force := ""
+		if sanListChanged {
+			force = " --force"
+		}
+		printer.Info("mail: issuing certificate for %s (this can take a minute)", strings.Join(hostnames, ", "))
+		if _, err := client.Run(ctx, "sudo bash "+mailCertScript+force); err != nil {
+			return fmt.Errorf("issue mail certificate: %w", err)
+		}
+	}
+
+	newCert, _ := client.Run(ctx, "sudo cat "+mailTLSDir+"/fullchain.pem 2>/dev/null || true")
+	if newCert.Stdout == oldCert.Stdout {
 		return nil
-	}
-	if _, err := client.Run(ctx, "sudo mkdir -p "+mailTLSDir); err != nil {
-		return err
-	}
-	if err := client.WriteFileSudo(ctx, mailTLSDir+"/fullchain.pem", []byte(cert.Stdout), 0o644); err != nil {
-		return err
-	}
-	if err := client.WriteFileSudo(ctx, mailTLSDir+"/privkey.pem", []byte(key.Stdout), 0o600); err != nil {
-		return err
 	}
 	if _, err := client.Run(ctx, "sudo systemctl restart mksrv-mailserver.service"); err != nil {
 		return fmt.Errorf("restart mailserver: %w", err)
 	}
-	printer.Success("mail: TLS cert for %s refreshed", hostname)
+	printer.Success("mail: certificate refreshed for %s", strings.Join(hostnames, ", "))
 	return nil
 }
 

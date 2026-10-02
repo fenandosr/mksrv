@@ -182,6 +182,33 @@ resource "aws_iam_role_policy" "backup_s3" {
   })
 }
 
+# Mail cert DNS-01 (acme.sh, dns_aws): only the host carrying `mail`, and only
+# for the operator zone + mail-hosted-branded tenant zones it actually needs.
+# route53:GetChange has no zone-level resource type — ACME propagation checks
+# poll a change-id ARN, not a hosted-zone one — so it's granted on * like AWS's
+# own examples for this exact permission; it is a read of an async-change
+# status, not a write.
+resource "aws_iam_role_policy" "mail_cert_route53" {
+  count       = length(var.mail_cert_zone_arns) > 0 ? 1 : 0
+  name_prefix = "mksrv-mail-cert-route53-"
+  role        = aws_iam_role.host.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["route53:ChangeResourceRecordSets", "route53:ListResourceRecordSets"]
+        Resource = var.mail_cert_zone_arns
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["route53:GetChange"]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "host" {
   name_prefix = "${local.name}-"
   role        = aws_iam_role.host.name
