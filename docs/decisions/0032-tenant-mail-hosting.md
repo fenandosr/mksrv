@@ -186,3 +186,14 @@ in production, invisible unless specifically tested. The shared mail
 server's certificate is now obtained directly via acme.sh (DNS-01), not
 copied from Caddy; see ADR 0033 for the full story and the replacement
 mechanism.
+
+**Addendum (2026-10-06)**: `docker-mailserver`'s own `/var/mail`
+permission-fix step (`_chown_var_mail_if_necessary`) is broken under
+`pipefail` once more than one mailbox needs fixing, confirmed live on
+every container start — every mailbox directory is created `root:root`
+and never gets corrected, so Dovecot can't write its own index files
+(`STATUS`/`SELECT` fail with `[SERVERBUG] Internal error`). mksrv's own
+`mksrv-mailserver.container` unit now forces the chown itself
+(`ExecStartPost`) on every start, since the upstream image can't be
+patched without forking it. See `CHANGELOG.md` (Unreleased) for the exact
+mechanics.
