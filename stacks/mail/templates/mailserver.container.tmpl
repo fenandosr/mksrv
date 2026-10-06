@@ -60,6 +60,20 @@ HealthStartPeriod=60s
 [Service]
 Restart=always
 TimeoutStartSec=120
+# docker-mailserver's own permission-fix step (_chown_var_mail_if_necessary,
+# helpers/utils.sh) is broken under `pipefail` (set in start-mailserver.sh):
+# it detects "needs fixing" with `find /var/mail ... | read -r`, which is a
+# classic broken idiom once `find` has more than one match -- `read` consumes
+# one line and returns, closing the pipe while `find` is still writing, so
+# `find` exits non-zero on the broken pipe and `pipefail` makes the whole
+# `if` condition false. The chown it was guarding never runs. Confirmed live,
+# every start: every mailbox directory `_create_accounts()` creates fresh
+# (helpers/accounts.sh's `mkdir -p .../home`, run as root before any daemon
+# drops privileges) stays root:root forever, and Dovecot can't write its own
+# index files in it. Not patchable inside their image without forking it, so
+# mksrv does it from the outside -- unconditionally, every start, regardless
+# of what triggered it (a new mailbox, a cert renewal, a crash).
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 20); do podman logs --since 2m mksrv-mailserver 2>&1 | grep -q "Starting daemons" && break; sleep 1; done; podman exec mksrv-mailserver chown -R 5000:5000 /var/mail'
 
 [Install]
 WantedBy=multi-user.target

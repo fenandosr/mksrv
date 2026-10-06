@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Fix (mail): `docker-mailserver`'s own `/var/mail` permission-fix step
+  (`_chown_var_mail_if_necessary`) is broken under `pipefail` (set in its
+  `start-mailserver.sh`) once more than one mailbox needs fixing — it
+  detects "needs fixing" with `find /var/mail ... | read -r`, a broken idiom
+  once `find` has more than one match: `read` consumes one line and
+  returns, closing the pipe while `find` is still writing, so `find` exits
+  non-zero on the broken pipe and `pipefail` makes the guarding `if` false,
+  skipping the `chown` it was supposed to run. Confirmed live, every single
+  container start: every mailbox directory `_create_accounts()` creates
+  fresh (`mkdir -p .../home`, run as root before any daemon drops
+  privileges) stays `root:root` forever, so Dovecot can't write its own
+  index files in it (`STATUS`/`SELECT` on any folder fails with
+  `[SERVERBUG] Internal error`) — new mailboxes are born broken, and any
+  existing one can be knocked back to broken by the next unrelated restart
+  (a new mailbox for a different tenant, a mail cert renewal, a crash).
+  mksrv now forces the fix itself from outside the container, unconditionally
+  on every start (`mksrv-mailserver.container`'s `ExecStartPost`), since
+  this can't be patched inside `docker-mailserver`'s own image without
+  forking it.
 - Fix (mail, ADR 0033): `mail.branded_hostname` never actually worked —
   Caddy cannot issue a multi-SAN certificate ("Caddy does not support
   multi-SAN certificates, for a multitude of reasons" — confirmed with a

@@ -145,6 +145,12 @@ func TestStackRendersMail(t *testing.T) {
 	if strings.Contains(string(unit), "RELAY_HOST") || strings.Contains(string(unit), "mksrv-mail-relay") {
 		t.Fatalf("mailserver unit should have no relay config when MailRelayOutbound is false:\n%s", unit)
 	}
+	// docker-mailserver's own permission-fix (_chown_var_mail_if_necessary)
+	// is broken under pipefail once more than one mailbox needs fixing --
+	// confirmed live, every container start. mksrv forces it from outside.
+	if !strings.Contains(string(unit), "ExecStartPost=") || !strings.Contains(string(unit), "chown -R 5000:5000 /var/mail") {
+		t.Fatalf("mailserver unit missing the ExecStartPost vmail chown workaround:\n%s", unit)
+	}
 
 	// This stack no longer renders a Caddy fragment for mail at all — Caddy
 	// cannot issue the multi-SAN cert mail.branded_hostname needs (ADR 0033);
