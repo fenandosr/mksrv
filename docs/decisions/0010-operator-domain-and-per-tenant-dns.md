@@ -67,3 +67,10 @@ profiles and signing-key rotation are deferred.
 - SES starts in sandbox; production access is a manual request during bring-up.
 - Real domains, zone ids, account ids, and tenant lists live only in the private
   workspace repository, never here.
+
+## Addendum (2026-10-05)
+
+The SOPS+age half of "Secrets: SSM Parameter Store + age" was never built.
+`internal/secrets` (M6) resolves exclusively against SSM `SecureString`;
+there is no workspace-local `secrets.sops.yaml`, and `mksrv secrets set`
+writes only to SSM. Nothing secret is ever stored in the workspace itself.

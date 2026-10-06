@@ -51,3 +51,12 @@ current directory, or `--workspace PATH`).
 - The scaffold's `deployment.yaml` must stay in lockstep with
   `schemas/deployment.v1.json`; a test validates the rendered default against the
   embedded schema.
+
+## Addendum (2026-10-05)
+
+The `secrets.sops.yaml` entry in the scaffolded `.gitignore`/`README.md` (and
+in ADR 0010's secrets design below) assumed a SOPS+age half of secret
+resolution that was never implemented — M6 shipped SSM Parameter Store only
+(`internal/secrets`). The scaffold template and this workspace's generated
+`.gitignore`/`README.md` no longer mention it; nothing workspace-local ever
+holds a secret.

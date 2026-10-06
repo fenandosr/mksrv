@@ -39,5 +39,5 @@ mksrv init ~/deploys/prod.workspace \
 `init` renders `deployment.yaml`, `tenants/`, `.gitignore`, `.mksrv/`, and a
 `README.md`, then validates the result. Omit a required flag on a terminal to be
 prompted for it; pass `--yes` to require every value up front. Keep the workspace
-in a **separate private repository**. Do not add secrets until SOPS is
-configured.
+in a **separate private repository**. Secrets resolve from AWS SSM Parameter
+Store at runtime — nothing secret is ever written into the workspace itself.

@@ -20,9 +20,8 @@ public mksrv engine                      private operator workspace
 │ CLI + schemas                │ reads → │ deployment.yaml               │
 │ Terraform modules/root       │         │ tenants/*.yaml                │
 │ stack descriptors/templates  │         │ tenants/*.users.yaml          │
-│ synthetic examples           │         │ secrets.sops.yaml             │
-└──────────────────────────────┘         │ mksrv.lock + .mksrv/ state    │
-                                         └───────────────────────────────┘
+│ synthetic examples           │         │ mksrv.lock + .mksrv/ state    │
+└──────────────────────────────┘         └───────────────────────────────┘
 ```
 
 The engine repository must never contain real hostnames, account identifiers,

@@ -16,5 +16,4 @@ tenant's declared `dns` records into its own zone with `allow_overwrite = false`
 (ADR 0011). Cloudflare and RFC2136 `dns_override` providers remain deferred.
 
 Secrets such as Cloudflare tokens and RFC2136 keys are references only; values
-must resolve from SOPS or SSM at runtime and must not enter Terraform state or
-logs.
+must resolve from SSM at runtime and must not enter Terraform state or logs.

@@ -8,8 +8,7 @@
 .terraform.lock.hcl
 crash.log
 
-# Secrets (decrypted forms must never be committed)
-secrets.sops.yaml
+# Resolved Terraform inputs (may contain resolved values from secrets)
 *.auto.tfvars.json
 
 # Editors and OS
