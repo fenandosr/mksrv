@@ -9,7 +9,6 @@ workspace/
 ├── tenants/
 │   ├── acme.yaml
 │   └── acme.users.yaml
-├── secrets.sops.yaml       # optional until secret-bearing commands are used
 ├── mksrv.lock
 └── .mksrv/                 # generated files, Terraform data/state, outputs
 ```

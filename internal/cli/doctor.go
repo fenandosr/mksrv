@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -30,7 +29,7 @@ type doctorResult struct {
 }
 
 func (a *App) runDoctor(ctx context.Context, printer ui.Printer, globals *globalOptions) error {
-	result := doctorResult{Healthy: true, Checks: make([]doctorCheck, 0, 7)}
+	result := doctorResult{Healthy: true, Checks: make([]doctorCheck, 0, 6)}
 	addCheck := func(name, status, message string) {
 		result.Checks = append(result.Checks, doctorCheck{Name: name, Status: status, Message: message})
 		if status == "fail" {
@@ -56,11 +55,6 @@ func (a *App) runDoctor(ctx context.Context, printer ui.Printer, globals *global
 		addCheck("ssh-agent", "pass", socket)
 	}
 
-	if path, err := exec.LookPath("sops"); err != nil {
-		addCheck("sops", "warn", "sops is not installed; secrets commands will require it")
-	} else {
-		addCheck("sops", "pass", path)
-	}
 	if awsCredentialHint() {
 		addCheck("aws-credentials", "pass", "local AWS credential configuration detected (no network call performed)")
 	} else {

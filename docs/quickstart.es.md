@@ -64,7 +64,6 @@ Toda salida legible va a stderr; el JSON de `--json` va a stdout.
 deployment.yaml           entorno, AWS, backend, DNS, identidad y hosts
 tenants/<id>.yaml          una empresa cliente; los FQDN derivan de base_domain
 tenants/<id>.users.yaml    lista declarativa de usuarios (opcional)
-secrets.sops.yaml          cifrado con sops+age (opcional hasta usar secretos)
 mksrv.lock                 versión del engine del último apply exitoso
 .mksrv/                    estado generado (tfvars, plan, outputs, mesh.json)
 ```
