@@ -128,4 +128,4 @@ session, and it can read the headers for audit.
 - Touchpoints: `schemas/tenant.v1.json`, `internal/model.TenantWebEndpoint`
   (`SSO`, `SSOGroups`), `internal/cli/web.go` (client ensure, container render,
   secret push, SSO fragment, teardown), `internal/cli/tenant.go` (pass the
-  Keycloak client into `provisionTenantWeb`), `docs/tenant-web.md`.
+  Keycloak client into `provisionTenantWeb`), `docs/how-to/tenant-web.md`.

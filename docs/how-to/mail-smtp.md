@@ -117,5 +117,5 @@ did, predating its migration to mksrv) or needs one set up by hand
 This page is `mail.outbound_smtp` — outbound-only, operator domain only, for
 Keycloak's own transactional email. A tenant that wants real inbound + outbound
 mailboxes on its own domain (`@acme.example.com`) is a different feature: the
-`mail` stack + a tenant's `mail:` block — see `docs/tenant-mail.md` and
+`mail` stack + a tenant's `mail:` block — see `docs/how-to/tenant-mail.md` and
 ADR 0032.

@@ -129,7 +129,7 @@ infra/                 Terraform root and module contracts
 stacks/                extensible stack catalog
 schemas/               public JSON Schemas
 examples/workspace/    fake CI-safe workspace
-docs/                  architecture, contracts, roadmap, and ADRs
+docs/                  tutorials, how-to guides, reference, and explanation (Diátaxis)
 ```
 
 ## Engine and workspace versions
@@ -169,8 +169,8 @@ source of version, commit, and date values.
 - **M5:** Keycloak users, SES, and optional inbound mail.
 - **M6:** Cloudflare/RFC2136, DNS overrides, secrets UX, polish, Spanish docs.
 
-See `docs/quickstart.md`, `docs/workspace.md`, and
-`docs/implementation-status.md`.
+See `docs/tutorials/quickstart.md`, `docs/reference/workspace.md`, and
+`docs/explanation/implementation-status.md`.
 
 ## License
 

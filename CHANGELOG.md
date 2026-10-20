@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Docs: reorganized `docs/` into Diátaxis's four quadrants —
+  `tutorials/` (the quickstarts), `how-to/` (task guides: mail, branding,
+  secrets, backup, tenant web/mail, migration), `reference/` (workspace,
+  stack catalog, DNS providers, capacity, storage, monitoring, RBAC), and
+  `explanation/` (architecture, implementation status, the M0 review, and
+  `decisions/` for the ADRs and open questions, now with an index). Added a
+  `docs/README.md` landing page and a short index in each quadrant. File
+  names are unchanged — only their directory — and every in-repo
+  cross-reference (`README.md`, `CONTRIBUTING.md`, the ADRs, and one Go
+  comment) was updated to the new paths; `CHANGELOG.md`'s own historical
+  path mentions are left as written.
 - Fix (mail): `docker-mailserver`'s own `/var/mail` permission-fix step
   (`_chown_var_mail_if_necessary`) is broken under `pipefail` (set in its
   `start-mailserver.sh`) once more than one mailbox needs fixing — it

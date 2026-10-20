@@ -139,7 +139,7 @@ then hosts then a manual `tenant apply`) also converges.
   `internal/cli/web.go` (fragment render + ACL rule), `internal/headscale.Policy`
   (the `fleet@ → <id>@` rule takes web ports), `infra/root` +
   `modules/dns` (the web A records + ACM validation records) + a new
-  `modules/tenant-cdn` (CloudFront + WAF, `count` on `cdn`), `docs/tenant-web.md`.
+  `modules/tenant-cdn` (CloudFront + WAF, `count` on `cdn`), `docs/how-to/tenant-web.md`.
 - Deferred: `provider: cloudflare` (mksrv creates the tunnel + DNS via the CF
   API and emits the `cloudflared` config for the tenant to run — needs the
   tenant's zone, or a delegated subzone, on Cloudflare; a pure addition on this

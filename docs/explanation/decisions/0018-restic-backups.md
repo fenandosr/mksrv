@@ -35,7 +35,7 @@ host), on a systemd timer, snapshotting to an S3 bucket.
 - **Schedule**: `mksrv-backup.timer`, daily at 06:00 + up to 1 h jitter,
   `Persistent`. Retention `--keep-daily 7 --keep-weekly 4 --keep-monthly 6`.
 - **CLI**: `mksrv backup run` (trigger + wait) and `mksrv backup list`. Restore is
-  **documented, not automated** (`docs/backup.md`) — it is rare and needs
+  **documented, not automated** (`docs/how-to/backup.md`) — it is rare and needs
   judgement.
 
 ## Consequences

@@ -201,7 +201,7 @@ func (a *App) runTenantSecretID(ctx context.Context, printer ui.Printer, globals
 	if err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	// The narrow, KV-less tier (docs/rbac.md) — for a tenant-owned production
+	// The narrow, KV-less tier (docs/reference/rbac.md) — for a tenant-owned production
 	// service, not a human developer's AppRole. Named svc-<id>, not
 	// tenant-<id>-svc: operatorAppRolePolicyHCL's `+` glob only matches a
 	// wildcard at the end of a path segment, so the wildcard-friendly part

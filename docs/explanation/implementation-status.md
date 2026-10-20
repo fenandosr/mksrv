@@ -245,7 +245,7 @@ Still deferred: Keycloak's own Postgres onto the cluster; folding
   volumes. Terraform `aws_s3_bucket.backups` + a scoped instance-role policy;
   restic password as a podman secret; a raft-snapshot-only periodic OpenBao
   token. `internal/cli/backup.go` (`provisionBackup`, `mksrv backup run/list`).
-  Restore is documented (`docs/backup.md`), not automated.
+  Restore is documented (`docs/how-to/backup.md`), not automated.
 
 ## M23 — implemented
 
@@ -273,10 +273,10 @@ Still deferred: Keycloak's own Postgres onto the cluster; folding
   `mksrv_backup_last_success_seconds` textfile metric on success; a
   `prometheus-rules.yml` alert-rule catalog (4 groups, 11 rules) is loaded via
   `rule_files:`; `fleet-overview` gets a "Firing alerts" panel. Notifications
-  are deliberately manual (`docs/monitoring.md`), not auto-provisioned — no
+  are deliberately manual (`docs/reference/monitoring.md`), not auto-provisioned — no
   live Grafana to verify the provisioning schema against.
 
-M23 is complete. See `docs/monitoring.md` for the full scrape/dashboard/alert
+M23 is complete. See `docs/reference/monitoring.md` for the full scrape/dashboard/alert
 reference.
 
 ## M24 — implemented
@@ -291,7 +291,7 @@ reference.
   would otherwise fail Keycloak entirely — every tenant's login, not just the
   new one's). `EnsureRealm` reconciles `loginTheme` idempotently; `tenant
   apply` restarts Keycloak once, unconditionally, after every other
-  Keycloak-touching step in that run. See `docs/branding.md`.
+  Keycloak-touching step in that run. See `docs/how-to/branding.md`.
 
 ## M25 — implemented (opt-in)
 
@@ -304,7 +304,7 @@ reference.
   regression test); `tenantSMTPSpec` mirrors it into SSM and `RealmSpec.SMTP`
   reconciles it onto every realm, unconditionally, each `tenant apply` run.
   The SES sandbox is a separate, manual blocker even with the flag on — see
-  `docs/mail-smtp.md`.
+  `docs/how-to/mail-smtp.md`.
 - Also fixed: `reconcileConfigd`'s roster never set `LogoDataURI`, so the
   Cloud-IT VPN desktop app never actually received a tenant's logo despite
   the field existing end to end since the client protocol was built.
@@ -419,4 +419,4 @@ reference.
   `local.has_mail`-gated public ingress rule (25/465/587/993, edge only);
   `infra/root/main.tf`'s `tenant_dns` local gains MX/SPF/DMARC per tenant mail
   domain (computed, no live dependency) and `operator_fqdns` gains
-  `mail.<root_domain>` when any host carries `mail`. `docs/tenant-mail.md`.
+  `mail.<root_domain>` when any host carries `mail`. `docs/how-to/tenant-mail.md`.

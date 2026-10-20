@@ -66,4 +66,4 @@ private IP, and nothing pointed Prometheus at the other hosts.
   alike) and gives the same fleet view even for one host.
 - Deferred to later M23 phases: OpenBao/Postgres/Redis exporters, blackbox
   probing of public endpoints (TLS expiry), Keycloak/Caddy metrics, alert
-  rules and notifications. See `docs/monitoring.md`.
+  rules and notifications. See `docs/reference/monitoring.md`.

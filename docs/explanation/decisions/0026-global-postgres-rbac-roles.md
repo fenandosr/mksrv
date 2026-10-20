@@ -124,7 +124,7 @@ redeploy for the `PGRST_DB_ANON_ROLE=mksrv_anon` change.
   dashboards already group). `session_user` and `log_line_prefix %u` still name
   the tenant.
 - `SELECT current_user` returns `mksrv_owner` in a human session — documented in
-  `docs/rbac.md`.
+  `docs/reference/rbac.md`.
 - `<id>_login` and `<id>_auth` still name the tenant in `pg_roles` (and
   `db_<id>` in `pg_database`). Hiding those needs role/db-name obfuscation
   (consistent across realm names, `*.rest` DNS certs, Headscale users — a
@@ -133,7 +133,7 @@ redeploy for the `PGRST_DB_ANON_ROLE=mksrv_anon` change.
   `tenantDatabaseSQL`, constant pre-request SQL, pgAdmin username),
   `stacks/database/templates/postgrest.container.tmpl` (`PGRST_DB_ANON_ROLE`),
   `internal/cli/tenant.go` (the `role` claim), `internal/cli/openbao_tenant.go`
-  (mirrored `username` → `<id>_login`), `docs/rbac.md`, ADR 0016 (superseded
+  (mirrored `username` → `<id>_login`), `docs/reference/rbac.md`, ADR 0016 (superseded
   note). `postgrestDSN` is unchanged — PostgREST still connects as `<id>_auth`.
 - OpenBao per-group policies (M18), the Keycloak groups, and configd are
   untouched — only the Postgres realisation of the RBAC model changes.

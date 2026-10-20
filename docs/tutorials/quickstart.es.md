@@ -68,4 +68,4 @@ mksrv.lock                 versión del engine del último apply exitoso
 .mksrv/                    estado generado (tfvars, plan, outputs, mesh.json)
 ```
 
-Ver `docs/architecture.md`, `docs/workspace.md` y `docs/stacks.md`.
+Ver `docs/explanation/architecture.md`, `docs/reference/workspace.md` y `docs/reference/stacks.md`.

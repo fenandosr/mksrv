@@ -56,7 +56,7 @@ it authenticate.
   already VPC-only) but broader than "only Prometheus". Revisit if OpenBao
   ever gets a public listener.
 - Dashboards: Vault (`12904`), PostgreSQL Database (`9628`/`14114`), Redis
-  Dashboard (`763`) — import IDs documented in `docs/monitoring.md`, not
+  Dashboard (`763`) — import IDs documented in `docs/reference/monitoring.md`, not
   vendored (license drift).
 - Deferred to phases 3–4: blackbox probing, Keycloak/Caddy metrics, alert
   rules and notifications.

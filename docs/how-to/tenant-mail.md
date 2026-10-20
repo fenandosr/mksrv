@@ -2,7 +2,7 @@
 
 A tenant can get real inbound + outbound mailboxes on its own domain, hosted on
 the fleet's shared `docker-mailserver` (ADR 0032). Different from
-`mail.outbound_smtp` (`docs/mail-smtp.md`), which is send-only, operator-domain,
+`mail.outbound_smtp` (`docs/how-to/mail-smtp.md`), which is send-only, operator-domain,
 for Keycloak's own email.
 
 ```yaml

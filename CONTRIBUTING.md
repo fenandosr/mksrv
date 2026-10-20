@@ -9,7 +9,7 @@ the strict separation between the public engine and private deployment data.
 2. Create a focused branch and add tests with the implementation.
 3. Run `make test lint schema-lint hygiene`.
 4. Run `make tf-validate` when Terraform is available.
-5. Record non-obvious architecture choices in `docs/decisions/`.
+5. Record non-obvious architecture choices in `docs/explanation/decisions/`.
 6. Keep examples synthetic and use only the documented reserved values.
 
 ## Public-repository safety

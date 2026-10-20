@@ -144,4 +144,4 @@ equality search over encrypted data — pin `key_version=1` so the 90-day rotati
 doesn't break the index; the tenant's own key is used, so a blind index never
 correlates across tenants. `datakey` backs envelope encryption: one wrapped key
 per row, batch-unwrapped in a single `transit/decrypt` on read. `rewrap` and
-`rotate` stay `admin`-only. `docs/secrets.md` documents both patterns.
+`rotate` stay `admin`-only. `docs/how-to/secrets.md` documents both patterns.

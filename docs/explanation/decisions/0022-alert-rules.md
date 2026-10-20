@@ -50,7 +50,7 @@ number of binary "is this OK" signals.
   Grafana instance, and this system is already running production traffic.
   Shipping unverified provisioning YAML risks Grafana logging errors on every
   restart or, worse, alerting silently not routing anywhere while looking
-  configured. `docs/monitoring.md` instead documents the two-minute manual
+  configured. `docs/reference/monitoring.md` instead documents the two-minute manual
   path (Alerting → Contact points → add a receiver; Notification policies →
   point the default policy at it) — a deliberate, disclosed scope cut, not an
   oversight.
@@ -61,7 +61,7 @@ number of binary "is this OK" signals.
   file is static, no per-target cost).
 - Alerts are visible in Prometheus's own `/alerts` and queryable via `ALERTS`
   in Grafana, but nothing pages anyone until a contact point is wired up
-  manually (see `docs/monitoring.md`).
+  manually (see `docs/reference/monitoring.md`).
 - This closes M23. Any further monitoring work (notifications, more
   subsystem-specific rules, Alertmanager for anything Grafana-managed
   alerting doesn't cover) is a new milestone, not a phase of this one.

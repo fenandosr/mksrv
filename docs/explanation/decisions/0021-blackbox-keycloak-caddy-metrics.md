@@ -49,7 +49,7 @@ request rate and latency.
   "every public endpoint" (e.g. a status page) can reuse it instead of
   re-deriving the list a third time.
 - Dashboards: Blackbox Exporter (`7587`), Keycloak Metrics (`10441` or the
-  KC 25+ equivalent), Caddy (`13859`) — import IDs in `docs/monitoring.md`.
+  KC 25+ equivalent), Caddy (`13859`) — import IDs in `docs/reference/monitoring.md`.
 - Deferred to phase 4: an alert-rule catalog that actually uses
   `probe_ssl_earliest_cert_expiry` / `probe_success` (`CertExpiringSoon`,
   `EndpointDown`), plus notifications.

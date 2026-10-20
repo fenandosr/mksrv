@@ -144,7 +144,7 @@ semantic pass runs.
   disabled tenants), `stacks/database/templates/postgrest.container.tmpl`
   (`PGRST_DB_SCHEMAS` / `PGRST_DB_PRE_REQUEST` from `DBSchema`),
   `infra/root/main.tf` (`tenant_rest_fqdns` filtered by `database.postgrest`).
-- **Docs**: `docs/rbac.md` updated (anon no longer has a default `SELECT`). The
+- **Docs**: `docs/reference/rbac.md` updated (anon no longer has a default `SELECT`). The
   workspace `docs/tenant-dev-guide.md` states "Django's own tables … land there
   too — harmless"; that line predates this ADR and is wrong for a
   security-sensitive tenant (those tables would have been anon-readable under the
