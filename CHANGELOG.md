@@ -19,6 +19,12 @@
   health machinery every cloud stack already does. `gitea`/`codeserver`
   share their `meshnode` instance's network namespace rather than
   publishing ports. See `docs/how-to/tenant-local-hosts.md`.
+- `files` stack implemented for real (ADR 0040): Nextcloud + Samba, one
+  instance per tenant, dedicated Postgres database for Nextcloud via a new
+  shared `dedicatedAppDatabaseSQL` helper meant for reuse by `analytics`/
+  `marketing` too. Fixed a latent bug along the way: the Samba image's pinned
+  tag (`4.20.6`) doesn't exist upstream anymore — repinned to
+  `a3.24.2-s4.23.8-r0`, confirmed live. `docs/how-to/files.md`.
 - Docs: reorganized `docs/` into Diátaxis's four quadrants —
   `tutorials/` (the quickstarts), `how-to/` (task guides: mail, branding,
   secrets, backup, tenant web/mail, migration), `reference/` (workspace,

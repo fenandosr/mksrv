@@ -19,7 +19,7 @@ A `storage:` block requests dedicated EBS volumes mounted at
 | `openbao` | cluster | cloud | yes | identity | implemented (opt-in) |
 | `database` | service | cloud/local | yes | identity (+ `postgres` cluster when present) | implemented |
 | `cache` | service | cloud/local | yes | identity | implemented |
-| `files` | service | cloud/local | yes | identity | descriptor |
+| `files` | service | cloud/local | yes | database, identity | implemented |
 | `analytics` | service | cloud/local | yes | database, identity | descriptor |
 | `agent` | service | cloud/local | no | — | implemented (auto-assigned, ADR 0019) |
 | `monitor` | service | cloud/local | yes | identity, agent | implemented |
@@ -50,13 +50,20 @@ it like any other.
 
 ## Derived tenant endpoints
 
-For tenant `base_domain: acme.example.com`, stack endpoints use:
+Admin tools that can hold several tenants under one login (pgAdmin, Grafana)
+are **one shared instance on the operator's own domain** —
+`pgadmin.<root_domain>`, `grafana.<root_domain>` — with each tenant
+pre-registered inside it (`loadPgAdminServers`), not a subdomain per tenant.
 
-- `db.acme.example.com`
-- `pgadmin.acme.example.com`
-- `files.acme.example.com`
-- `analytics.acme.example.com`
-- `grafana.acme.example.com`
+A stack that gives each tenant its own, single-tenant instance (PostgREST,
+Nextcloud, and `analytics`'s Superset once implemented) instead gets a
+**`<tenant-id>.<stack>.<root_domain>`** hostname — works for every tenant
+uniformly, with no dependency on a tenant having its own Route53 zone (unlike
+`dns_override`/`web:`, ADR 0028, which is for tenant-owned infrastructure):
+
+- `<id>.rest.<root_domain>` — PostgREST (`database`)
+- `<id>.files.<root_domain>` — Nextcloud (`files`); Samba has no HTTP story,
+  so it's tailnet/loopback-only, never fronted by Caddy
 
 Realm login is served below the deployment Keycloak domain at
 `/realms/<realm>`. Mesh node naming is derived from the tenant ID and the

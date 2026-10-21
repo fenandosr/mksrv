@@ -42,3 +42,4 @@ unanswered.
 - [ADR 0037 (draft): Headscale ACLs by device role tag, not just by tenant](0037-headscale-acl-device-role-tags.md)
 - [ADR 0038: Per-tenant SES sending identity, credential, and relay](0038-per-tenant-ses-relay.md)
 - [ADR 0039: Tenant-declared database roles, configurable PostgREST, and declarative Keycloak clients](0039-tenant-roles-postgrest-keycloak-clients.md)
+- [ADR 0040: Dedicated per-app Postgres databases, and the `files` stack for real](0040-dedicated-app-databases-and-files-stack.md)

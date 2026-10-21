@@ -469,3 +469,24 @@ reference.
   `health:` check (the host can't reach a port in a namespace it isn't part
   of; both rely on podman's own in-container `HealthCmd` instead).
   `docs/how-to/tenant-local-hosts.md`.
+
+## M34 — implemented
+
+- `files` stack, for real (ADR 0040): Nextcloud + Samba, one instance per
+  tenant. New shared `internal/cli/appdb.go` (`dedicatedAppDatabaseSQL`) — a
+  standalone Postgres database + login role per (app, tenant), reused by
+  every future per-app-database stack (`analytics`, `marketing`) instead of
+  tenantDatabaseSQL's RBAC-bucket machinery, which is specific to the
+  tenant's own PostgREST-facing app. New `internal/cli/files.go`
+  (`provisionFilesTenants`, wired into `runTenantApply` next to
+  `reconcilePostgREST`): per-tenant Quadlet units via `render.One` (same
+  hand-rolled shape as `reconcilePostgREST`), a Caddy vhost for Nextcloud
+  (`<id>.files.<root_domain>`), consecutive per-tenant ports (8030+/4450+),
+  opened in the Headscale ACL. Fixed a pre-existing bug found while
+  implementing this: the Samba image's pinned tag (`4.20.6`) no longer exists
+  upstream — confirmed via `skopeo list-tags`, repinned to
+  `a3.24.2-s4.23.8-r0`. `docs/how-to/files.md`; `docs/reference/stacks.md`'s
+  "Derived tenant endpoints" section corrected to match what pgAdmin/Grafana/
+  PostgREST actually implemented (one shared instance on the operator
+  domain for admin tools; `<id>.<stack>.<root_domain>` for single-tenant
+  instances), not the pre-implementation aspiration it still described.

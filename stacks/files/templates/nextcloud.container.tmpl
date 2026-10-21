@@ -1,0 +1,40 @@
+[Unit]
+Description=mksrv Nextcloud ({{ .Tenant.ID }})
+{{- if not (.StackIP "postgres") }}
+Requires=mksrv-postgres.service
+After=mksrv-postgres.service
+{{- end }}
+
+[Container]
+ContainerName=mksrv-nextcloud-{{ .Tenant.ID }}
+Image={{ .Image "nextcloud" | default "docker.io/library/nextcloud:30-apache" }}
+Network=mksrv-files.network
+# Reachable by the edge over the VPC and by tenant devices over the tailnet —
+# same shape as database's per-tenant postgrest.container.tmpl.
+PublishPort={{ .Host.PrivateIP }}:{{ .Secrets.nextcloud_port }}:80
+{{- if .Host.TailnetIP }}
+PublishPort={{ .Host.TailnetIP }}:{{ .Secrets.nextcloud_port }}:80
+{{- end }}
+PublishPort=127.0.0.1:{{ .Secrets.nextcloud_port }}:80
+Volume=mksrv-nextcloud-{{ .Tenant.ID }}-data:/var/www/html
+Environment=POSTGRES_HOST={{ .Secrets.pg_host }}
+Environment=POSTGRES_DB={{ .Secrets.db_name }}
+Environment=POSTGRES_USER={{ .Secrets.db_role }}
+Environment=NEXTCLOUD_ADMIN_USER=admin
+Environment=NEXTCLOUD_TRUSTED_DOMAINS={{ .Secrets.files_fqdn }} {{ .Host.PrivateIP }}
+Environment=OVERWRITEPROTOCOL=https
+Environment=OVERWRITECLIURL=https://{{ .Secrets.files_fqdn }}
+Environment=TRUSTED_PROXIES={{ .Host.PrivateIP }}
+Secret=mksrv-files-{{ .Tenant.ID }}-dbpass,type=env,target=POSTGRES_PASSWORD
+Secret=mksrv-files-{{ .Tenant.ID }}-adminpass,type=env,target=NEXTCLOUD_ADMIN_PASSWORD
+HealthCmd=curl -fsS http://127.0.0.1/status.php
+HealthInterval=15s
+HealthRetries=10
+HealthStartPeriod=30s
+
+[Service]
+Restart=always
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

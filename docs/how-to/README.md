@@ -11,6 +11,8 @@ specific thing.
   troubleshooting.
 - [Tenant mail hosting](tenant-mail.md) — give a tenant real inbound/outbound
   mailboxes on its own domain via the shared `mail` stack.
+- [Tenant file services](files.md) — a per-tenant Nextcloud + Samba instance
+  (`files` stack), ports, and Samba's Windows caveat.
 - [Tenant web endpoints](tenant-web.md) — terminate TLS at the edge for a
   tenant's own hostname and reverse-proxy to a mesh node, with an optional
   Keycloak SSO gate.

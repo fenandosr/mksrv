@@ -43,6 +43,8 @@ Rough per-service memory (idle → light load):
 | `blackbox_exporter` (M23 phase 3) | 32 MiB | in `monitor`, no per-target overhead worth modelling |
 | Alloy · CrowdSec · Tailscale (per host) | 80 · 150 · 30 MiB | |
 | Caddy | 30 MiB | |
+| Nextcloud (per tenant, `files`) | 150 → 512 MiB | idle ~14 MiB confirmed live; Apache/PHP workers scale with concurrent sync/WebDAV traffic |
+| Samba (per tenant, `files`) | 20 → 80 MiB | idle ~7 MiB confirmed live; `smbd` forks a process per connection |
 
 Instance memory (`InstanceRAMMB`):
 
