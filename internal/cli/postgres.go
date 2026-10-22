@@ -211,7 +211,7 @@ func (f *fleet) provisionAppDatabase(ctx context.Context, printer ui.Printer, le
 	}
 	defer client.Close()
 
-	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	q := sqlQuote
 	sql := strings.Join([]string{
 		fmt.Sprintf(`SELECT format('CREATE ROLE %%I LOGIN PASSWORD %%L', 'app', %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app')\gexec`, q(appPass)),
 		fmt.Sprintf(`ALTER ROLE app WITH LOGIN PASSWORD %s;`, q(appPass)),

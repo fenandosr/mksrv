@@ -118,16 +118,29 @@ func (f *fleet) provisionFilesTenants(ctx context.Context, printer ui.Printer, e
 	if err != nil {
 		return fmt.Errorf("files: postgres superuser password: %w (deploy postgres first)", err)
 	}
-	pgClient, err := sshx.Dial(ctx, pg.target, f.knownHosts)
-	if err != nil {
-		return dialError(pg.name, err)
+	pgClient := client
+	if dataHost.Name != pg.name {
+		pgClient, err = sshx.Dial(ctx, pg.target, f.knownHosts)
+		if err != nil {
+			return dialError(pg.name, err)
+		}
+		defer pgClient.Close()
 	}
 	pg, pgClient = f.ensurePrimary(ctx, pgClient, pg)
-	defer pgClient.Close()
 
 	dep := f.data.Deployment
 	sortedIDs := f.filesConsumerIDs()
 	rctxBase := f.renderContext(*dataHost)
+	// Nextcloud joins mksrv-files.network, not Postgres's own network, so a
+	// container-name DSN (what pg.pgAdmin is in standalone mode — fine for
+	// pgAdmin, which shares that network) would never resolve via Podman's
+	// per-network aardvark-dns. The host's private IP works regardless of
+	// topology — standalone or the current Patroni primary (ensurePrimary
+	// above re-verified pg.name is still the leader) — the same address
+	// postgres.container.tmpl already publishes on. A later Patroni failover
+	// still needs a re-run of `tenant apply` to pick up the new primary;
+	// Nextcloud has no multi-host/libpq-style failover of its own.
+	pgHostIP := f.outputs.Hosts[pg.name].PrivateIP
 
 	for _, id := range consumers {
 		tenant := f.data.Tenants[id]
@@ -176,7 +189,7 @@ func (f *fleet) provisionFilesTenants(ctx context.Context, printer ui.Printer, e
 		rctx.Secrets = map[string]string{
 			"nextcloud_port": strconv.Itoa(ncPort),
 			"samba_port":     strconv.Itoa(smbPort),
-			"pg_host":        pg.pgAdmin,
+			"pg_host":        pgHostIP,
 			"db_name":        db,
 			"db_role":        role,
 			"files_fqdn":     filesFQDN,

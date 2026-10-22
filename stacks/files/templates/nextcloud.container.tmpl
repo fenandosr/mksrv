@@ -24,7 +24,7 @@ Environment=NEXTCLOUD_ADMIN_USER=admin
 Environment=NEXTCLOUD_TRUSTED_DOMAINS={{ .Secrets.files_fqdn }} {{ .Host.PrivateIP }}
 Environment=OVERWRITEPROTOCOL=https
 Environment=OVERWRITECLIURL=https://{{ .Secrets.files_fqdn }}
-Environment=TRUSTED_PROXIES={{ .Host.PrivateIP }}
+Environment=TRUSTED_PROXIES={{ .StackIP "base" }}
 Secret=mksrv-files-{{ .Tenant.ID }}-dbpass,type=env,target=POSTGRES_PASSWORD
 Secret=mksrv-files-{{ .Tenant.ID }}-adminpass,type=env,target=NEXTCLOUD_ADMIN_PASSWORD
 HealthCmd=curl -fsS http://127.0.0.1/status.php

@@ -7,6 +7,12 @@ import (
 	"strings"
 )
 
+// sqlQuote escapes a SQL string literal. The one shared implementation —
+// previously copy-pasted once in tenantDatabaseSQL (database.go) and again in
+// postgres.go's app-database bootstrap; a third copy here would be exactly
+// the duplication ADR 0034 argues against.
+func sqlQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+
 // dedicatedAppDatabaseSQL provisions one standalone Postgres database + login
 // role for a third-party app that manages its own schema and permissions end
 // to end (Nextcloud, Superset, Keila, Plunk, Umami, …) — unlike
@@ -17,7 +23,7 @@ import (
 // tenantDatabaseSQL's own ALTER ROLE idiom, so a leaked or rotated SSM value
 // is always what's actually live).
 func dedicatedAppDatabaseSQL(role, db, password string) string {
-	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	q := sqlQuote
 	return strings.Join([]string{
 		fmt.Sprintf(`SELECT format('CREATE ROLE %%I LOGIN PASSWORD %%L', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(role), q(password), q(role)),
 		fmt.Sprintf(`ALTER ROLE %q WITH LOGIN PASSWORD %s;`, role, q(password)),
