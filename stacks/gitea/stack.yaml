@@ -1,0 +1,24 @@
+name: gitea
+title: Gitea
+description: "Self-hosted Git (SQLite) on a tenant-owned local host (ADR 0034)"
+targets: [local]
+local_hosts_only: true
+per_tenant: true
+depends_on: [meshnode]
+apps:
+  - name: gitea
+    image: docker.io/gitea/gitea:1.23
+secrets:
+  - /mksrv/{env}/gitea/tenant_{tenant}_secret_key
+  - /mksrv/{env}/gitea/tenant_{tenant}_admin_pass
+resources:
+  min_ram_mb: 256
+  disk_gb: 5
+templates:
+  - src: templates/gitea.container.tmpl
+    dst: /etc/containers/systemd/gitea.container
+    scope: shared
+hooks:
+  post_deploy:
+    - run: hooks/create-admin.sh
+      scope: shared

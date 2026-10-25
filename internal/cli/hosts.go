@@ -34,6 +34,13 @@ type hostTarget struct {
 	Name   string
 	Target sshx.Target
 	Host   model.Host
+	// Local marks a tenant's local_hosts entry (ADR 0034): no SSH, no
+	// bootstrap, deployed in-process on whatever machine the CLI runs on.
+	// Target is unused for these.
+	Local bool
+	// LocalHost and TenantID are set only when Local is true.
+	LocalHost *model.TenantLocalHost
+	TenantID  string
 }
 
 type fleet struct {
@@ -70,8 +77,12 @@ func (f *fleet) ensureSecrets(ctx context.Context) error {
 }
 
 // stackSecrets resolves every secret a stack declares, generating a random
-// 32-byte value on first use. Keys are the reference leaf names.
-func (f *fleet) stackSecrets(ctx context.Context, stack model.Stack) (map[string]string, error) {
+// 32-byte value on first use. Keys are the reference leaf names. tenantID,
+// when non-empty, substitutes "{tenant}" in each ref — used by
+// deployLocalHost so a per-tenant local_hosts stack (e.g. `gitea`) gets its
+// own secret per tenant rather than sharing one across every tenant's
+// instance; cloud/shared stacks pass "" and get the ref as-is.
+func (f *fleet) stackSecrets(ctx context.Context, stack model.Stack, tenantID string) (map[string]string, error) {
 	if len(stack.Secrets) == 0 {
 		return nil, nil
 	}
@@ -80,6 +91,9 @@ func (f *fleet) stackSecrets(ctx context.Context, stack model.Stack) (map[string
 	}
 	out := make(map[string]string, len(stack.Secrets))
 	for _, ref := range stack.Secrets {
+		if tenantID != "" {
+			ref = strings.ReplaceAll(ref, "{tenant}", tenantID)
+		}
 		value, err := f.resolver.EnsureRandom(ctx, ref, 32)
 		if err != nil {
 			return nil, fmt.Errorf("resolve secret %s: %w", ref, err)
@@ -159,7 +173,37 @@ func (a *App) openFleet(ctx context.Context, printer ui.Printer, globals *global
 		f.byName[name] = ht
 	}
 	f.wireBastion()
+	f.addLocalHosts()
 	return f, nil
+}
+
+// addLocalHosts appends one hostTarget per tenant local_hosts entry (ADR
+// 0034), across every declared tenant, sorted by tenant id then host name.
+// These never go through wireBastion/SSH: Host is synthesized with just the
+// entry's own Stacks so orderedStacks/renderContext's existing
+// Host.Stacks-based logic works unchanged.
+func (f *fleet) addLocalHosts() {
+	tenantIDs := sortedTenantIDs(f.data.Tenants)
+	for _, tenantID := range tenantIDs {
+		tenant := f.data.Tenants[tenantID]
+		hostNames := make([]string, 0, len(tenant.LocalHosts))
+		for name := range tenant.LocalHosts {
+			hostNames = append(hostNames, name)
+		}
+		sort.Strings(hostNames)
+		for _, name := range hostNames {
+			entry := tenant.LocalHosts[name]
+			ht := hostTarget{
+				Name:      name,
+				Host:      model.Host{Stacks: entry.Stacks},
+				Local:     true,
+				LocalHost: &entry,
+				TenantID:  tenantID,
+			}
+			f.targets = append(f.targets, ht)
+			f.byName[name] = ht
+		}
+	}
 }
 
 // wireBastion routes every private AWS host's SSH through the edge (ADR 0027).
@@ -190,9 +234,21 @@ func (f *fleet) wireBastion() {
 	}
 }
 
+// selected resolves the hosts a command should act on. With no names, it
+// returns every cloud/SSH-reachable fleet host (base first) — never a
+// tenant's local_hosts entries (ADR 0034): those only ever run when named
+// explicitly, so an unqualified `mksrv deploy`/`mksrv host trust` from the
+// wrong machine can't trip a local host's safety guard. Naming one
+// explicitly resolves it through f.byName same as any other host.
 func (f *fleet) selected(names []string) ([]hostTarget, error) {
 	if len(names) == 0 {
-		return baseFirst(f.targets), nil
+		var cloud []hostTarget
+		for _, ht := range f.targets {
+			if !ht.Local {
+				cloud = append(cloud, ht)
+			}
+		}
+		return baseFirst(cloud), nil
 	}
 	var out []hostTarget
 	for _, name := range names {
@@ -254,6 +310,10 @@ func (a *App) runHostTrust(ctx context.Context, printer ui.Printer, globals *glo
 		return &ExitError{Code: 2, Err: err}
 	}
 	for _, ht := range hosts {
+		if ht.Local {
+			printer.Info("%s: local host, no SSH key to trust (ADR 0034)", ht.Name)
+			continue
+		}
 		res, err := sshx.Trust(ctx, f.knownHosts, ht.Target)
 		if err != nil {
 			return &ExitError{Code: 1, Err: fmt.Errorf("trust %s: %w", ht.Name, err), Printed: false}
@@ -287,6 +347,10 @@ func (a *App) runBootstrap(ctx context.Context, printer ui.Printer, globals *glo
 		return &ExitError{Code: 2, Err: err}
 	}
 	for _, ht := range hosts {
+		if ht.Local {
+			printer.Info("%s: local host, nothing to bootstrap (ADR 0034)", ht.Name)
+			continue
+		}
 		client, err := sshx.Dial(ctx, ht.Target, f.knownHosts)
 		if err != nil {
 			return dialError(ht.Name, err)
@@ -330,6 +394,12 @@ func (a *App) runDeploy(ctx context.Context, printer ui.Printer, globals *global
 	}
 
 	for _, ht := range hosts {
+		if ht.Local {
+			if err := f.deployLocalHost(ctx, printer, ht, limit); err != nil {
+				return err
+			}
+			continue
+		}
 		client, err := sshx.Dial(ctx, ht.Target, f.knownHosts)
 		if err != nil {
 			return dialError(ht.Name, err)
@@ -341,6 +411,167 @@ func (a *App) runDeploy(ctx context.Context, printer ui.Printer, globals *global
 		}
 	}
 	return nil
+}
+
+// localHostGuardName is the identity deployLocalHost/the local mesh join
+// check this machine against — MKSRV_LOCAL_HOST when set (for a machine
+// whose real hostname differs, or for testing), otherwise os.Hostname().
+func localHostGuardName() (string, error) {
+	if v := strings.TrimSpace(os.Getenv("MKSRV_LOCAL_HOST")); v != "" {
+		return v, nil
+	}
+	name, err := os.Hostname()
+	if err != nil {
+		return "", fmt.Errorf("determine local hostname: %w", err)
+	}
+	return name, nil
+}
+
+// checkLocalHostGuard refuses to act on ht unless this machine's own
+// identity (localHostGuardName) matches ht.Name — ADR 0034's hard safety
+// requirement: never silently no-op, or act on the wrong machine, when a
+// tenant's local_hosts entry is named on a machine that isn't it.
+func checkLocalHostGuard(ht hostTarget) error {
+	name, err := localHostGuardName()
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(name, ht.Name) {
+		return fmt.Errorf("refusing to act on local host %q from %q (set MKSRV_LOCAL_HOST if this machine's hostname is wrong)", ht.Name, name)
+	}
+	return nil
+}
+
+// deployLocalHost renders and deploys a tenant's local_hosts entry
+// in-process on this machine (ADR 0034) — no SSH, no bootstrap.
+func (f *fleet) deployLocalHost(ctx context.Context, printer ui.Printer, ht hostTarget, limit map[string]bool) error {
+	if err := checkLocalHostGuard(ht); err != nil {
+		return &ExitError{Code: 2, Err: err}
+	}
+	runner := deploy.NewLocalRunner()
+	deployed, _ := deploy.DeployedStacks(ctx, runner)
+	rctx, err := f.renderLocalContext(ht)
+	if err != nil {
+		return &ExitError{Code: 2, Err: fmt.Errorf("%s: %w", ht.Name, err)}
+	}
+	rctx.Deployed = deployed
+
+	for _, stackName := range orderedStacks(f.catalog, ht.Host.Stacks) {
+		if len(limit) > 0 && !limit[stackName] {
+			continue
+		}
+		stack := f.catalog[stackName]
+		if len(stack.Templates) == 0 {
+			continue
+		}
+		secretValues, err := f.stackSecrets(ctx, stack, ht.TenantID)
+		if err != nil {
+			return &ExitError{Code: 2, Err: fmt.Errorf("%s/%s: %w", ht.Name, stackName, err)}
+		}
+
+		instances := []string{""} // one pass, InstanceName empty, for every non-multi-instance stack
+		if stackName == "meshnode" && ht.LocalHost.Meshnode != nil {
+			instances = make([]string, 0, len(ht.LocalHost.Meshnode.Instances))
+			for _, inst := range ht.LocalHost.Meshnode.Instances {
+				instances = append(instances, inst.Name)
+			}
+		}
+		for _, instance := range instances {
+			if stackName == "meshnode" {
+				// The unit's Secret= directive requires the podman secret to
+				// already exist before the container can start at all — on a
+				// first deploy nothing has called `mksrv mesh` yet, so create
+				// it empty (tailscale just stays in NeedsLogin state, not a
+				// crash) rather than let DeployStack fail outright.
+				if err := ensureMeshAuthKeySecret(ctx, runner, instance); err != nil {
+					return &ExitError{Code: 2, Err: fmt.Errorf("%s/meshnode[%s]: %w", ht.Name, instance, err)}
+				}
+			}
+			instCtx := rctx
+			instCtx.InstanceName = instance
+			label := stackName
+			if instance != "" {
+				label = fmt.Sprintf("%s[%s]", stackName, instance)
+			}
+			printer.Info("%s: deploying %s", ht.Name, label)
+			res, err := deploy.DeployStack(ctx, runner, deploy.Options{
+				StacksRoot: f.stacksRoot,
+				Stack:      stack,
+				Context:    instCtx,
+				Secrets:    secretValues,
+			})
+			if err != nil {
+				return &ExitError{Code: 1, Err: fmt.Errorf("%s/%s: %w", ht.Name, label, err), Printed: false}
+			}
+			printer.Success("%s/%s: %d changed, %d unchanged, health %v", ht.Name, label, len(res.Changed), res.Unchanged, res.HealthOK)
+		}
+		if !slices.Contains(rctx.Deployed, stackName) {
+			rctx.Deployed = append(rctx.Deployed, stackName)
+		}
+	}
+	return nil
+}
+
+// meshAuthKeySecretName is the podman secret mesh.container.tmpl's
+// `Secret=...,type=env,target=TS_AUTHKEY` names — one per instance, since
+// several instances can share a local host.
+func meshAuthKeySecretName(instance string) string {
+	return "mksrv-meshnode-" + instance + "-authkey"
+}
+
+// ensureMeshAuthKeySecret creates the named podman secret empty if it
+// doesn't exist yet. Never overwrites an existing value — only
+// joinLocalMeshNodes does that, with a real pre-auth key via --replace.
+func ensureMeshAuthKeySecret(ctx context.Context, runner *deploy.LocalRunner, instance string) error {
+	name := meshAuthKeySecretName(instance)
+	if _, err := runner.Run(ctx, "sudo podman secret inspect "+quoteArg(name)); err == nil {
+		return nil
+	}
+	if _, err := runner.RunInput(ctx, "sudo podman secret create "+quoteArg(name)+" -", nil); err != nil {
+		return fmt.Errorf("create empty %s: %w", name, err)
+	}
+	return nil
+}
+
+// renderLocalContext is renderContext's sibling for a tenant local_hosts
+// entry (ADR 0034): no infra.Outputs lookup (none exists off the cloud
+// fleet), so the fleet-cross-host fields (Peers/StackHosts/StackMembers/
+// Fleet/OperatorFQDNs) are left empty — they're M23 cross-host-scraping
+// concerns that don't apply here.
+func (f *fleet) renderLocalContext(ht hostTarget) (render.Context, error) {
+	tenant, ok := f.data.Tenants[ht.TenantID]
+	if !ok {
+		return render.Context{}, fmt.Errorf("owning tenant %q not found", ht.TenantID)
+	}
+	dep := f.data.Deployment
+	images := map[string]string{}
+	for _, stackName := range ht.Host.Stacks {
+		for _, app := range f.catalog[stackName].Apps {
+			images[app.Name] = app.Image
+		}
+	}
+	return render.Context{
+		Env:       dep.Env,
+		Region:    dep.AWS.Region,
+		Timezone:  dep.Timezone,
+		ACMEEmail: dep.Identity.ACMEEmail,
+		Host: render.HostView{
+			Name:   ht.Name,
+			Role:   "local",
+			Stacks: ht.Host.Stacks,
+		},
+		Endpoints: render.Endpoints{
+			Keycloak:   dep.Identity.KeycloakDomain,
+			Headscale:  dep.Identity.HeadscaleDomain,
+			ConfigD:    "cfg." + dep.DNS.RootDomain,
+			RootDomain: dep.DNS.RootDomain,
+		},
+		Images:        images,
+		TenantIDs:     sortedTenantIDs(f.data.Tenants),
+		Tenant:        &tenant,
+		LocalHost:     ht.LocalHost,
+		LocalHostName: ht.Name,
+	}, nil
 }
 
 // deployHost renders and deploys every templated stack the host carries (or the
@@ -370,7 +601,7 @@ func (f *fleet) deployHost(ctx context.Context, printer ui.Printer, ht hostTarge
 		if len(stack.Templates) == 0 {
 			continue
 		}
-		secretValues, err := f.stackSecrets(ctx, stack)
+		secretValues, err := f.stackSecrets(ctx, stack, "")
 		if err != nil {
 			return &ExitError{Code: 2, Err: fmt.Errorf("%s/%s: %w", ht.Name, stackName, err)}
 		}
@@ -532,9 +763,19 @@ func (f *fleet) bootstrapParams(ht hostTarget) deploy.BootstrapParams {
 	}
 	sort.Slice(vols, func(i, j int) bool { return vols[i].Name < vols[j].Name })
 	isEdge := slices.Contains(ht.Host.Stacks, "base")
+	// Count only cloud/SSH-reachable targets — a tenant's local_hosts (ADR
+	// 0034) are never bootstrapped or NAT'd through, and were wrongly
+	// inflating this count into a false NAT=true for a single-cloud-host
+	// fleet that happens to have any tenant local_hosts declared.
+	cloudTargets := 0
+	for _, t := range f.targets {
+		if !t.Local {
+			cloudTargets++
+		}
+	}
 	return deploy.BootstrapParams{
 		IsEdge:       isEdge,
-		NAT:          isEdge && ht.Host.Provider != "existing" && len(f.targets) > 1,
+		NAT:          isEdge && ht.Host.Provider != "existing" && cloudTargets > 1,
 		Timezone:     f.data.Deployment.Timezone,
 		SwapMB:       model.SwapForStacks(ht.Host.Stacks, f.catalog, itype),
 		DataVolumeID: out.DataVolumeID,
@@ -568,7 +809,16 @@ func (a *App) runFleetApply(ctx context.Context, printer ui.Printer, globals *gl
 		return err
 	}
 
-	ordered := baseFirst(f.targets)
+	// Local hosts (ADR 0034) never bootstrap or deploy as part of the
+	// fleet-wide apply — they only ever run explicitly, via `mksrv deploy
+	// <name>`, on the machine they actually are.
+	var cloud []hostTarget
+	for _, ht := range f.targets {
+		if !ht.Local {
+			cloud = append(cloud, ht)
+		}
+	}
+	ordered := baseFirst(cloud)
 
 	for _, ht := range ordered {
 		if trustHosts {
@@ -656,6 +906,9 @@ func (a *App) runMesh(ctx context.Context, printer ui.Printer, globals *globalOp
 	loginServer := "https://" + f.data.Deployment.Identity.HeadscaleDomain
 	meshIPs := map[string]string{}
 	for _, ht := range f.targets {
+		if ht.Local {
+			continue // joined below, in-process, not over SSH
+		}
 		key, err := hs.PreAuthKey(ctx, fleetID, time.Hour, false)
 		if err != nil {
 			return &ExitError{Code: 1, Err: fmt.Errorf("preauth key for %s: %w", ht.Name, err)}
@@ -681,7 +934,87 @@ func (a *App) runMesh(ctx context.Context, printer ui.Printer, globals *globalOp
 		printer.Warn("could not write %s: %v", meshFile, err)
 	}
 	f.meshIPs = meshIPs
+	return f.joinLocalMeshNodes(ctx, printer, hs)
+}
+
+// joinLocalMeshNodes joins any meshnode instance declared on THIS machine
+// (ADR 0034) to the tailnet — one-time per instance. Requires `mksrv deploy
+// <name>` to have already created mesh-<instance>.service (its Secret=
+// directive needs the podman secret this pushes to already exist as a
+// container, even an empty one — see deployLocalHost's
+// ensureMeshAuthKeySecret). `mksrv mesh` has no single named target the way
+// `mksrv deploy <name>` does, so entries that don't match this machine's
+// hostname guard are silently skipped (not a mistake — just not this
+// instance's turn) rather than failing the whole command.
+func (f *fleet) joinLocalMeshNodes(ctx context.Context, printer ui.Printer, hs *headscale.Client) error {
+	guardName, err := localHostGuardName()
+	if err != nil {
+		return &ExitError{Code: 2, Err: err}
+	}
+	runner := deploy.NewLocalRunner()
+	for _, ht := range f.targets {
+		if !ht.Local || !strings.EqualFold(ht.Name, guardName) || ht.LocalHost.Meshnode == nil {
+			continue
+		}
+		tenantUserID, err := hs.EnsureUser(ctx, ht.TenantID)
+		if err != nil {
+			return &ExitError{Code: 1, Err: fmt.Errorf("headscale user %s: %w", ht.TenantID, err)}
+		}
+		for _, inst := range ht.LocalHost.Meshnode.Instances {
+			unit := "mesh-" + inst.Name + ".service"
+			container := "mesh-" + inst.Name
+			// The real join state, not systemd's unit-active state: the
+			// container (and its systemd unit) comes up and stays "active"
+			// even with an empty/stale TS_AUTHKEY — it just sits in
+			// NeedsLogin forever. `tailscale ip -4` only ever returns an
+			// address once actually logged in and connected.
+			if res, err := runner.Run(ctx, "sudo podman exec "+quoteArg(container)+" tailscale ip -4 2>/dev/null"); err == nil && strings.TrimSpace(res.Stdout) != "" {
+				printer.Info("%s/%s: already joined (%s)", ht.Name, inst.Name, strings.TrimSpace(res.Stdout))
+				continue
+			}
+			key, err := hs.PreAuthKey(ctx, tenantUserID, time.Hour, false)
+			if err != nil {
+				return &ExitError{Code: 1, Err: fmt.Errorf("preauth key for %s/%s: %w", ht.Name, inst.Name, err)}
+			}
+			if _, err := runner.RunInput(ctx,
+				"sudo podman secret create --replace "+quoteArg(meshAuthKeySecretName(inst.Name))+" -",
+				[]byte(key),
+			); err != nil {
+				return &ExitError{Code: 1, Err: fmt.Errorf("%s/%s: push auth key: %w — run `mksrv deploy %s` first if the unit doesn't exist yet", ht.Name, inst.Name, err, ht.Name)}
+			}
+			if _, err := runner.Run(ctx, "sudo systemctl restart "+quoteArg(unit)); err != nil {
+				return &ExitError{Code: 1, Err: fmt.Errorf("%s/%s: restart: %w", ht.Name, inst.Name, err), Printed: false}
+			}
+			ip, err := waitForLocalMeshIP(ctx, runner, container)
+			if err != nil {
+				return &ExitError{Code: 1, Err: fmt.Errorf("%s/%s: %w", ht.Name, inst.Name, err), Printed: false}
+			}
+			printer.Success("%s/%s: joined tailnet as %s", ht.Name, inst.Name, ip)
+		}
+	}
 	return nil
+}
+
+// waitForLocalMeshIP polls a just-restarted meshnode container for its
+// tailnet address, mirroring deploy.JoinMesh's own cloud-side polling loop
+// (internal/deploy/mesh.go) — tailscaled needs a moment to authenticate and
+// register after a fresh pre-auth key lands.
+func waitForLocalMeshIP(ctx context.Context, runner *deploy.LocalRunner, container string) (string, error) {
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		res, err := runner.Run(ctx, "sudo podman exec "+quoteArg(container)+" tailscale ip -4 2>/dev/null")
+		if err == nil {
+			if ip := strings.TrimSpace(res.Stdout); ip != "" {
+				return ip, nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
+	return "", fmt.Errorf("tailnet node did not obtain an address within the timeout")
 }
 
 func (a *App) newStatusCommand(opts *globalOptions) *cobra.Command {
@@ -711,6 +1044,10 @@ func (a *App) runStatus(ctx context.Context, printer ui.Printer, globals *global
 	statuses := make([]hostStatus, 0, len(f.targets))
 	healthy := true
 	for _, ht := range f.targets {
+		if ht.Local {
+			// No SSH session to check; local hosts aren't fleet status's concern.
+			continue
+		}
 		st := hostStatus{Host: ht.Name}
 		client, err := sshx.Dial(ctx, ht.Target, f.knownHosts)
 		if err != nil {

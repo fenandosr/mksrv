@@ -23,7 +23,7 @@ func TestValidateExampleWorkspace(t *testing.T) {
 	if !report.Valid {
 		t.Fatalf("report invalid: %#v", report.Issues)
 	}
-	if report.Hosts != 2 || report.Tenants != 1 || report.Users != 2 || report.CatalogStacks != 14 {
+	if report.Hosts != 2 || report.Tenants != 1 || report.Users != 2 || report.CatalogStacks != 17 {
 		t.Fatalf("counts = hosts:%d tenants:%d users:%d stacks:%d", report.Hosts, report.Tenants, report.Users, report.CatalogStacks)
 	}
 }
@@ -424,4 +424,137 @@ func assertIssueCode(t *testing.T, report Report, code string) {
 		}
 	}
 	t.Fatalf("issue code %q not found in %#v", code, report.Issues)
+}
+
+// Tests below cover ADR 0034's tenant local_hosts validation directly
+// against synthetic fixtures (same style as TestCheckHostStorageCollision)
+// rather than the real examples/workspace fixture, since local_hosts is
+// independent of its deployment.yaml/tenant shape.
+
+func TestCheckTenantLocalHostsValid(t *testing.T) {
+	t.Parallel()
+	catalog := map[string]model.Stack{
+		"meshnode":   {Targets: []string{"local"}, LocalHostsOnly: true, MultiInstance: true},
+		"gitea":      {Targets: []string{"local"}, LocalHostsOnly: true, DependsOn: []string{"meshnode"}},
+		"codeserver": {Targets: []string{"local"}, LocalHostsOnly: true, DependsOn: []string{"meshnode"}},
+	}
+	tenant := model.Tenant{ID: "acme", LocalHosts: map[string]model.TenantLocalHost{
+		"laptop": {
+			Stacks:     []string{"meshnode", "gitea", "codeserver"},
+			Meshnode:   &model.LocalMeshnodeParams{Instances: []model.MeshnodeInstance{{Name: "work"}}},
+			Gitea:      &model.LocalGiteaParams{Mesh: "work"},
+			Codeserver: &model.LocalCodeserverParams{Mesh: "work"},
+		},
+	}}
+	var report Report
+	checkTenantLocalHosts(&report, "acme.yaml", tenant, catalog, map[string]string{}, map[string]bool{})
+	if len(report.Issues) != 0 {
+		t.Fatalf("expected no issues: %#v", report.Issues)
+	}
+}
+
+func TestCheckTenantLocalHostsDuplicateName(t *testing.T) {
+	t.Parallel()
+	tenant := model.Tenant{ID: "hg", LocalHosts: map[string]model.TenantLocalHost{
+		"laptop": {Stacks: []string{"meshnode"}},
+	}}
+	seen := map[string]string{"laptop": "acme"}
+	var report Report
+	checkTenantLocalHosts(&report, "hg.yaml", tenant, map[string]model.Stack{
+		"meshnode": {Targets: []string{"local"}, LocalHostsOnly: true},
+	}, seen, map[string]bool{})
+	assertIssueCode(t, report, "tenant.local_host.duplicate")
+}
+
+// TestCheckTenantLocalHostsCollidesWithDeploymentHost guards the gap a code
+// review caught: a local host name doubles as fleet.byName's key, so one
+// colliding with a real deployment.yaml host would silently steal that
+// cloud host's entry (`mksrv deploy base` would then hit the local host, or
+// no-op, instead of the real edge) with nothing flagging it.
+func TestCheckTenantLocalHostsCollidesWithDeploymentHost(t *testing.T) {
+	t.Parallel()
+	tenant := model.Tenant{ID: "acme", LocalHosts: map[string]model.TenantLocalHost{
+		"Base": {Stacks: []string{"meshnode"}}, // case-insensitive, matches the guard's EqualFold
+	}}
+	var report Report
+	checkTenantLocalHosts(&report, "acme.yaml", tenant,
+		map[string]model.Stack{"meshnode": {Targets: []string{"local"}, LocalHostsOnly: true}},
+		map[string]string{}, map[string]bool{"base": true})
+	assertIssueCode(t, report, "tenant.local_host.collides_with_deployment_host")
+}
+
+// TestCheckTenantLocalHostsRejectsCloudStack guards the gap a code review
+// caught: the original check only required "local" in Targets, which every
+// cloud/local stack (database, cache, monitor, ...) also satisfies — so any
+// of them could be listed under local_hosts and pass validation, then get
+// rendered with no Peers/StackHosts/Tenant DB context and picked up by
+// fleet-wide lookups that expect an SSH-reachable host.
+func TestCheckTenantLocalHostsRejectsCloudStack(t *testing.T) {
+	t.Parallel()
+	catalog := map[string]model.Stack{"database": {Targets: []string{"cloud", "local"}}} // no LocalHostsOnly
+	tenant := model.Tenant{ID: "acme", LocalHosts: map[string]model.TenantLocalHost{
+		"laptop": {Stacks: []string{"database"}},
+	}}
+	var report Report
+	checkTenantLocalHosts(&report, "acme.yaml", tenant, catalog, map[string]string{}, map[string]bool{})
+	assertIssueCode(t, report, "stack.local_hosts_only")
+}
+
+func TestCheckTenantLocalHostsMissingDependency(t *testing.T) {
+	t.Parallel()
+	catalog := map[string]model.Stack{
+		"gitea": {Targets: []string{"local"}, LocalHostsOnly: true, DependsOn: []string{"meshnode"}},
+	}
+	tenant := model.Tenant{ID: "acme", LocalHosts: map[string]model.TenantLocalHost{
+		"laptop": {Stacks: []string{"gitea"}, Gitea: &model.LocalGiteaParams{Mesh: "work"}},
+	}}
+	var report Report
+	checkTenantLocalHosts(&report, "acme.yaml", tenant, catalog, map[string]string{}, map[string]bool{})
+	assertIssueCode(t, report, "tenant.local_host.dependency")
+}
+
+func TestCheckTenantLocalHostsMeshMismatch(t *testing.T) {
+	t.Parallel()
+	catalog := map[string]model.Stack{
+		"meshnode": {Targets: []string{"local"}, LocalHostsOnly: true},
+		"gitea":    {Targets: []string{"local"}, LocalHostsOnly: true},
+	}
+	tenant := model.Tenant{ID: "acme", LocalHosts: map[string]model.TenantLocalHost{
+		"laptop": {
+			Stacks:   []string{"meshnode", "gitea"},
+			Meshnode: &model.LocalMeshnodeParams{Instances: []model.MeshnodeInstance{{Name: "work"}}},
+			Gitea:    &model.LocalGiteaParams{Mesh: "personal"},
+		},
+	}}
+	var report Report
+	checkTenantLocalHosts(&report, "acme.yaml", tenant, catalog, map[string]string{}, map[string]bool{})
+	assertIssueCode(t, report, "tenant.local_host.mesh")
+}
+
+func TestCheckTenantLocalHostsGiteaRequiresBlock(t *testing.T) {
+	t.Parallel()
+	catalog := map[string]model.Stack{"gitea": {Targets: []string{"local"}, LocalHostsOnly: true}}
+	tenant := model.Tenant{ID: "acme", LocalHosts: map[string]model.TenantLocalHost{
+		"laptop": {Stacks: []string{"gitea"}},
+	}}
+	var report Report
+	checkTenantLocalHosts(&report, "acme.yaml", tenant, catalog, map[string]string{}, map[string]bool{})
+	assertIssueCode(t, report, "tenant.local_host.gitea_missing")
+}
+
+func TestCheckMultiInstanceStacks(t *testing.T) {
+	t.Parallel()
+	catalog := map[string]model.Stack{
+		"meshnode": {MultiInstance: true, InstanceKey: "name", Templates: []model.StackTemplate{{Scope: "per_instance"}}},
+		"broken":   {MultiInstance: true}, // missing instance_key and a per_instance template
+	}
+	var report Report
+	checkMultiInstanceStacks(catalog, &report)
+	assertIssueCode(t, report, "stack.multi_instance.instance_key")
+	assertIssueCode(t, report, "stack.multi_instance.no_template")
+	for _, iss := range report.Issues {
+		if strings.Contains(iss.File, "meshnode") {
+			t.Fatalf("meshnode is well-formed and should have no issues: %#v", iss)
+		}
+	}
 }

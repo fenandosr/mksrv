@@ -1,0 +1,28 @@
+[Unit]
+Description=mksrv code-server ({{ .Tenant.ID }}, ADR 0034)
+After=mesh-{{ .LocalHost.Codeserver.Mesh }}.service
+Requires=mesh-{{ .LocalHost.Codeserver.Mesh }}.service
+
+[Container]
+ContainerName=codeserver
+Image={{ .Image "codeserver" }}
+Network=container:mesh-{{ .LocalHost.Codeserver.Mesh }}
+# This image follows the linuxserver-style PUID/PGID convention (confirmed
+# live) -- unlike gitea/gitea's USER_UID/USER_GID, don't mix the two up.
+Environment=PUID=1000
+Environment=PGID=1000
+Secret=mksrv-codeserver-tenant_{{ .Tenant.ID }}_password,type=env,target=PASSWORD
+Volume=mksrv-codeserver-project:/home/coder/project
+Volume=mksrv-codeserver-config:/home/coder/.config
+Volume=mksrv-codeserver-local:/home/coder/.local
+HealthCmd=curl -fsS -o /dev/null http://127.0.0.1:8080/login
+HealthInterval=15s
+HealthRetries=10
+HealthStartPeriod=10s
+
+[Service]
+Restart=always
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target
