@@ -420,3 +420,45 @@ reference.
   `infra/root/main.tf`'s `tenant_dns` local gains MX/SPF/DMARC per tenant mail
   domain (computed, no live dependency) and `operator_fqdns` gains
   `mail.<root_domain>` when any host carries `mail`. `docs/how-to/tenant-mail.md`.
+
+## M33 — implemented
+
+- Tenant local hosts (ADR 0034): `meshnode`/`gitea`/`codeserver`, deployed
+  in-process by `mksrv deploy <name>`/`mksrv mesh` run on the tenant's own
+  machine — no SSH, no cloud provisioning, no bootstrap.
+  `schemas/stack.v1.json` gains `multi_instance`, `instance_key`,
+  `local_hosts_only`, and `scope: "per_instance"`; `schemas/tenant.v1.json`
+  gains `local_hosts`. `internal/model.go`: `Stack.MultiInstance`/
+  `InstanceKey`/`LocalHostsOnly`, `Tenant.LocalHosts` +
+  `TenantLocalHost`/`LocalMeshnodeParams`/`MeshnodeInstance`/
+  `LocalGiteaParams`/`LocalCodeserverParams`. `internal/render/render.go`
+  gains `Context.LocalHost`/`LocalHostName`/`InstanceName` — `per_instance`
+  templates skip/substitute `{instance}` exactly like `per_tenant` already
+  does for `{tenant}`. `internal/deploy/stack.go`'s `DeployStack` and its
+  helpers now take a `Runner` interface (`Run`/`RunInput`/`WriteFileSudo`,
+  mirroring `headscale.Runner`) instead of a concrete `*ssh.Client`; new
+  `internal/deploy/local_runner.go`'s `LocalRunner` implements it via
+  `os/exec`. `internal/cli/hosts.go`: `hostTarget.Local`/`LocalHost`,
+  `fleet.addLocalHosts` (populated from every tenant's `local_hosts`, after
+  `wireBastion` so it never sees them), `deployLocalHost` +
+  `renderLocalContext`, a hostname safety guard
+  (`checkLocalHostGuard`/`MKSRV_LOCAL_HOST`) that `mksrv deploy`/`mksrv mesh`
+  both refuse to skip, and `stackSecrets` gains a `tenantID` parameter so a
+  `{tenant}`-scoped secret ref gets its own value per tenant. Local hosts are
+  excluded from every command's no-args "all hosts" selection, and from
+  `host trust`/`bootstrap`/fleet-wide `apply`/`status` entirely — reachable
+  only by name. `internal/workspace/semantic.go` gains
+  `checkTenantLocalHosts` (codes `tenant.local_host.duplicate`/`.dependency`/
+  `.mesh`/`.meshnode_missing`/`.gitea_missing`/`.codeserver_missing`,
+  `stack.target`, `stack.local_hosts_only`) and `checkMultiInstanceStacks`
+  (codes `stack.multi_instance.instance_key`/`.no_template`). Three new
+  catalog entries: `stacks/meshnode` (a Tailscale Quadlet per declared
+  instance, `TS_AUTHKEY` injected once via `systemctl set-environment`, never
+  written to the unit file), `stacks/gitea` (SQLite, no env-only admin
+  bootstrap exists for the real image — seeded by a `post_deploy` hook
+  running `gitea admin user create` inside the container), `stacks/codeserver`
+  — both sharing their `meshnode` instance's network namespace
+  (`Network=container:mesh-<name>`), so neither gets the usual stack-level
+  `health:` check (the host can't reach a port in a namespace it isn't part
+  of; both rely on podman's own in-container `HealthCmd` instead).
+  `docs/how-to/tenant-local-hosts.md`.

@@ -151,6 +151,51 @@ type Tenant struct {
 	Web         []TenantWebEndpoint `json:"web,omitempty"`
 	DeviceLimit int                 `json:"device_limit,omitempty"`
 	Branding    Branding            `json:"branding,omitempty"`
+	// LocalHosts is infrastructure the tenant owns and runs directly — a
+	// third host category alongside cloud-provisioned and SSH-reachable
+	// `existing` hosts (ADR 0034). mksrv renders and manages its stacks but
+	// never provisions or SSHes to it: `mksrv deploy <name>` executes
+	// in-process on whatever machine the CLI runs on, guarded against
+	// running on the wrong machine.
+	LocalHosts map[string]TenantLocalHost `json:"local_hosts,omitempty"`
+}
+
+// TenantLocalHost is one machine the tenant owns and runs mksrv-managed
+// stacks on directly (ADR 0034) — no SSH, no cloud provisioning, no
+// bootstrap. Keyed by a name that must equal the machine's own hostname
+// (the safety guard `mksrv deploy`/`mksrv mesh` check against) and be
+// globally unique across every tenant's local_hosts.
+type TenantLocalHost struct {
+	Description string                 `json:"description,omitempty"`
+	Stacks      []string               `json:"stacks"`
+	Meshnode    *LocalMeshnodeParams   `json:"meshnode,omitempty"`
+	Gitea       *LocalGiteaParams      `json:"gitea,omitempty"`
+	Codeserver  *LocalCodeserverParams `json:"codeserver,omitempty"`
+}
+
+// LocalMeshnodeParams configures the `meshnode` stack's instances (ADR 0034)
+// — one Tailscale node per declared instance, joined via `mksrv mesh`.
+type LocalMeshnodeParams struct {
+	Instances []MeshnodeInstance `json:"instances"`
+}
+
+// MeshnodeInstance is one named mesh node; its Name is both the
+// `instance_key` value and the Quadlet unit suffix (mesh-<name>.service).
+type MeshnodeInstance struct {
+	Name string `json:"name"`
+}
+
+// LocalGiteaParams configures the `gitea` stack — Mesh names the
+// meshnode instance it shares a network namespace with
+// (Network=container:mesh-<mesh>).
+type LocalGiteaParams struct {
+	Mesh string `json:"mesh"`
+}
+
+// LocalCodeserverParams configures the `codeserver` stack — same Mesh
+// convention as LocalGiteaParams.
+type LocalCodeserverParams struct {
+	Mesh string `json:"mesh"`
 }
 
 // TenantWebEndpoint is a public HTTPS hostname in the tenant's own apex that the
@@ -384,22 +429,38 @@ type User struct {
 
 // Stack describes a stack catalog entry.
 type Stack struct {
-	Name         string          `json:"name"`
-	Title        string          `json:"title"`
-	Description  string          `json:"description"`
-	Targets      []string        `json:"targets"`
-	Kind         string          `json:"kind,omitempty"` // "service" (default) or "cluster"
-	PerTenant    bool            `json:"per_tenant"`
-	DependsOn    []string        `json:"depends_on,omitempty"`
-	Apps         []StackApp      `json:"apps"`
-	Networks     []string        `json:"networks,omitempty"`
-	Secrets      []string        `json:"secrets,omitempty"`
-	TailnetPorts []int           `json:"tailnet_ports,omitempty"`
-	Resources    StackResources  `json:"resources,omitempty"`
-	Storage      []StackVolume   `json:"storage,omitempty"`
-	Templates    []StackTemplate `json:"templates,omitempty"`
-	Hooks        StackHooks      `json:"hooks,omitempty"`
-	Health       []StackHealth   `json:"health,omitempty"`
+	Name        string   `json:"name"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Targets     []string `json:"targets"`
+	Kind        string   `json:"kind,omitempty"` // "service" (default) or "cluster"
+	PerTenant   bool     `json:"per_tenant"`
+	// MultiInstance marks a stack that runs several named instances on the
+	// same local host (e.g. `meshnode`, one Tailscale node per tenant
+	// use-case) instead of a single shared or per-tenant deployment.
+	// InstanceKey names the field (within whichever tenant local_hosts
+	// sub-block configures this stack) that carries each instance's unique
+	// key — documentation/schema metadata; deployLocalHost (internal/cli)
+	// still special-cases "meshnode" rather than dispatching on this
+	// generically, since it's the only multi-instance stack today.
+	MultiInstance bool   `json:"multi_instance,omitempty"`
+	InstanceKey   string `json:"instance_key,omitempty"`
+	// LocalHostsOnly marks a stack whose templates read Context.LocalHost
+	// (ADR 0034) — it must never be assigned to a deployment.yaml host
+	// (where LocalHost is always nil), only reached via a tenant's
+	// local_hosts. Checked in semanticChecks alongside the existing
+	// target/cloud-or-local check.
+	LocalHostsOnly bool            `json:"local_hosts_only,omitempty"`
+	DependsOn      []string        `json:"depends_on,omitempty"`
+	Apps           []StackApp      `json:"apps"`
+	Networks       []string        `json:"networks,omitempty"`
+	Secrets        []string        `json:"secrets,omitempty"`
+	TailnetPorts   []int           `json:"tailnet_ports,omitempty"`
+	Resources      StackResources  `json:"resources,omitempty"`
+	Storage        []StackVolume   `json:"storage,omitempty"`
+	Templates      []StackTemplate `json:"templates,omitempty"`
+	Hooks          StackHooks      `json:"hooks,omitempty"`
+	Health         []StackHealth   `json:"health,omitempty"`
 }
 
 // StackVolume is a dedicated EBS volume a stack wants, mounted on the host at

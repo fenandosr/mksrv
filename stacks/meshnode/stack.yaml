@@ -1,0 +1,17 @@
+name: meshnode
+title: Mesh node
+description: "One or more named Tailscale nodes on a tenant-owned local host (ADR 0034)"
+targets: [local]
+per_tenant: false
+multi_instance: true
+instance_key: name
+apps:
+  - name: tailscale
+    image: docker.io/tailscale/tailscale:v1.80.3
+resources:
+  min_ram_mb: 64
+  disk_gb: 1
+templates:
+  - src: templates/mesh.container.tmpl
+    dst: /etc/containers/systemd/mesh-{instance}.container
+    scope: per_instance

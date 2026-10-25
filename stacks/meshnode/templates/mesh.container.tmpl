@@ -1,0 +1,38 @@
+[Unit]
+Description=mksrv tenant-local mesh node ({{ .InstanceName }})
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=mesh-{{ .InstanceName }}
+Image={{ .Image "tailscale" }}
+AddCapability=NET_ADMIN
+AddCapability=NET_RAW
+AddDevice=/dev/net/tun
+# Same SELinux confinement issue documented for the cloud tailscale unit
+# (internal/deploy/scripts/tailscale.container.tmpl): container_t denies the
+# tun_socket class needed for a real kernel TUN device. Harmless on a
+# non-SELinux host (e.g. WSL2).
+SecurityLabelDisable=true
+Environment=TS_STATE_DIR=/var/lib/tailscale
+Environment=TS_USERSPACE=false
+Environment=TS_ACCEPT_DNS=false
+Environment=TS_HOSTNAME={{ .Env }}-{{ .LocalHostName }}-{{ .InstanceName }}
+Environment="TS_EXTRA_ARGS=--login-server={{ .Endpoints.Headscale }}"
+# Bare pass-through (no "=value"): podman forwards whatever value the
+# invoking process's own environment holds for this name into the
+# container. `mksrv mesh` sets it once via `systemctl set-environment
+# TS_AUTHKEY=...` (ADR 0034) — every unit systemd starts inherits the
+# manager's environment block unless it overrides the name itself, so this
+# never needs to be written into the unit file (a one-use Headscale
+# pre-auth key would otherwise sit in a world-readable Quadlet file).
+Environment=TS_AUTHKEY
+Volume=mksrv-mesh-{{ .InstanceName }}-state:/var/lib/tailscale
+
+[Service]
+DeviceAllow=/dev/net/tun rwm
+Restart=always
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

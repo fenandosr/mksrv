@@ -20,3 +20,6 @@ specific thing.
   and AppRoles, encrypting PII columns with Transit, and human OIDC login.
 - [Backup and restore](backup.md) — what's in a daily snapshot, running one
   on demand, and restoring a tenant database, OpenBao, or a Keycloak realm.
+- [Tenant local hosts](tenant-local-hosts.md) — run `meshnode`/`gitea`/
+  `codeserver` on a tenant's own laptop or workstation, no SSH, no cloud
+  provisioning.

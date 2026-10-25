@@ -26,9 +26,21 @@ A `storage:` block requests dedicated EBS volumes mounted at
 | `logs` | service | cloud/local | yes | monitor | implemented (opt-in) |
 | `security` | service | cloud/local | no | logs, monitor | implemented (opt-in) |
 | `backup` | service | cloud | no | — | implemented (opt-in) |
+| `meshnode` | service | local¹ | no² | — | implemented |
+| `gitea` | service | local¹ | yes² | meshnode | implemented |
+| `codeserver` | service | local¹ | yes² | meshnode | implemented |
 
 Templates and hooks are intentionally empty in M0. Their implementation belongs
 to M2–M5 and must be golden-tested.
+
+¹ `local` here, and only here, means a tenant's own machine (ADR 0034) — no
+SSH, no cloud provisioning, deployed in-process by `mksrv deploy <name>` run
+*on* that machine. Marked `local_hosts_only: true`: assigning one to a
+`deployment.yaml` host (today's other `local` — an `existing`, still
+SSH-reachable host) is a validation error.
+² Reached only through a tenant's `local_hosts: {<name>: {stacks: [...]}}`
+block, never `stacks:` — the "tenant scope" column's usual `per_tenant`
+meaning doesn't apply to this trio.
 
 `agent` is never listed by the operator: `mksrv validate` appends it to every
 host once any host carries `monitor`, so the fleet's central Prometheus always

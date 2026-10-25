@@ -82,6 +82,9 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 			if !contains(stack.Targets, target) {
 				semanticError(report, "deployment.yaml", stackPath, "stack.target", fmt.Sprintf("stack %q cannot run on %s host %q; allowed targets: %s", stackName, host.Provider, hostName, strings.Join(stack.Targets, ", ")))
 			}
+			if stack.LocalHostsOnly {
+				semanticError(report, "deployment.yaml", stackPath, "stack.local_hosts_only", fmt.Sprintf("stack %q is only usable via a tenant's local_hosts (ADR 0034), not deployment.yaml", stackName))
+			}
 			if stackName == "base" {
 				baseHosts = append(baseHosts, hostName)
 			}
@@ -121,6 +124,7 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 	checkCatalogCycles(data.Catalog, report)
 
 	realms := make(map[string]string)
+	seenLocalHostNames := make(map[string]string)
 	tenantIDs := make([]string, 0, len(data.Tenants))
 	for tenantID := range data.Tenants {
 		tenantIDs = append(tenantIDs, tenantID)
@@ -165,7 +169,9 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 		checkTenantWeb(report, tenantFile, tenant)
 		checkTenantDatabase(report, tenantFile, tenant)
 		checkTenantMail(report, tenantFile, tenant, len(assigned["mail"]) > 0)
+		checkTenantLocalHosts(report, tenantFile, tenant, data.Catalog, seenLocalHostNames)
 	}
+	checkMultiInstanceStacks(data.Catalog, report)
 
 	for tenantID, users := range data.Users {
 		usersFile := data.UsersFiles[tenantID]
@@ -421,6 +427,104 @@ func checkTenantDatabase(report *Report, file string, tenant model.Tenant) {
 	}
 	if !tenant.PostgRESTEnabled() && tenant.Database.Schema != "" {
 		semanticWarning(report, file, "$.database.schema", "tenant.database.schema_unused", "schema is set but postgrest is disabled — it only names the tenant's application schema")
+	}
+}
+
+// checkTenantLocalHosts validates a tenant's local_hosts (ADR 0034) — a
+// third host category alongside cloud and `existing` hosts: no SSH, no
+// cloud provisioning, reached only by name (`mksrv deploy <name>` / `mksrv
+// mesh`, run on that machine itself). seen is threaded across every
+// tenant's local_hosts, same shape as the realms map above: a local host's
+// name doubles as its real machine hostname, so it must be globally unique.
+func checkTenantLocalHosts(report *Report, file string, tenant model.Tenant, catalog map[string]model.Stack, seen map[string]string) {
+	names := make([]string, 0, len(tenant.LocalHosts))
+	for name := range tenant.LocalHosts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		entry := tenant.LocalHosts[name]
+		path := fmt.Sprintf("$.local_hosts.%s", name)
+		if owner, dup := seen[name]; dup {
+			semanticError(report, file, path, "tenant.local_host.duplicate", fmt.Sprintf("local host name %q is already used by tenant %q — it doubles as the machine's real hostname and must be globally unique", name, owner))
+		} else {
+			seen[name] = tenant.ID
+		}
+
+		var meshInstances []string
+		if entry.Meshnode != nil {
+			for _, inst := range entry.Meshnode.Instances {
+				meshInstances = append(meshInstances, inst.Name)
+			}
+		}
+
+		for i, stackName := range entry.Stacks {
+			stackPath := fmt.Sprintf("%s.stacks[%d]", path, i)
+			stack, exists := catalog[stackName]
+			if !exists {
+				semanticError(report, file, stackPath, "stack.unknown", fmt.Sprintf("stack %q is not present in the embedded catalog", stackName))
+				continue
+			}
+			if !contains(stack.Targets, "local") {
+				semanticError(report, file, stackPath, "stack.target", fmt.Sprintf("stack %q cannot run on a local host; allowed targets: %s", stackName, strings.Join(stack.Targets, ", ")))
+			}
+			for _, dep := range stack.DependsOn {
+				if !contains(entry.Stacks, dep) {
+					semanticError(report, file, stackPath, "tenant.local_host.dependency", fmt.Sprintf("stack %q depends on %q, but %q is not in this local host's own stacks", stackName, dep, dep))
+				}
+			}
+		}
+
+		if contains(entry.Stacks, "meshnode") && len(meshInstances) == 0 {
+			semanticError(report, file, path+".meshnode", "tenant.local_host.meshnode_missing", `stack "meshnode" requires a meshnode.instances block`)
+		}
+		if contains(entry.Stacks, "gitea") {
+			if entry.Gitea == nil {
+				semanticError(report, file, path+".gitea", "tenant.local_host.gitea_missing", `stack "gitea" requires a gitea.mesh block`)
+			} else if !contains(meshInstances, entry.Gitea.Mesh) {
+				semanticError(report, file, path+".gitea.mesh", "tenant.local_host.mesh", fmt.Sprintf("gitea.mesh %q does not match any meshnode.instances[].name", entry.Gitea.Mesh))
+			}
+		}
+		if contains(entry.Stacks, "codeserver") {
+			if entry.Codeserver == nil {
+				semanticError(report, file, path+".codeserver", "tenant.local_host.codeserver_missing", `stack "codeserver" requires a codeserver.mesh block`)
+			} else if !contains(meshInstances, entry.Codeserver.Mesh) {
+				semanticError(report, file, path+".codeserver.mesh", "tenant.local_host.mesh", fmt.Sprintf("codeserver.mesh %q does not match any meshnode.instances[].name", entry.Codeserver.Mesh))
+			}
+		}
+	}
+}
+
+// checkMultiInstanceStacks enforces the stack.v1.json cross-field rule that
+// isn't expressible as a JSON Schema conditional: multi_instance:true
+// requires instance_key and at least one scope:"per_instance" template.
+// Lives alongside checkCatalogCycles — the existing precedent for
+// catalog-level invariants validated in Go rather than schema if/then.
+func checkMultiInstanceStacks(catalog map[string]model.Stack, report *Report) {
+	names := make([]string, 0, len(catalog))
+	for name := range catalog {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		stack := catalog[name]
+		if !stack.MultiInstance {
+			continue
+		}
+		file := "stacks/" + name + "/stack.yaml"
+		if strings.TrimSpace(stack.InstanceKey) == "" {
+			semanticError(report, file, "$.instance_key", "stack.multi_instance.instance_key", fmt.Sprintf("stack %q sets multi_instance but no instance_key", name))
+		}
+		hasPerInstance := false
+		for _, t := range stack.Templates {
+			if t.Scope == "per_instance" {
+				hasPerInstance = true
+				break
+			}
+		}
+		if !hasPerInstance {
+			semanticError(report, file, "$.templates", "stack.multi_instance.no_template", fmt.Sprintf("stack %q sets multi_instance but has no scope:\"per_instance\" template", name))
+		}
 	}
 }
 

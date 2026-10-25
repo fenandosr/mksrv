@@ -1,0 +1,19 @@
+name: codeserver
+title: Code Server
+description: "Browser-based VS Code on a tenant-owned local host (ADR 0034)"
+targets: [local]
+local_hosts_only: true
+per_tenant: true
+depends_on: [meshnode]
+apps:
+  - name: codeserver
+    image: docker.io/codercom/code-server:4.96.4
+secrets:
+  - /mksrv/{env}/codeserver/tenant_{tenant}_password
+resources:
+  min_ram_mb: 512
+  disk_gb: 10
+templates:
+  - src: templates/codeserver.container.tmpl
+    dst: /etc/containers/systemd/codeserver.container
+    scope: shared

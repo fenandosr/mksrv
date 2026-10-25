@@ -885,6 +885,96 @@ func TestMonitorOmitsLogsJobWhenAbsent(t *testing.T) {
 	}
 }
 
+// TestStackRendersLocalHosts covers ADR 0034's tenant local_hosts: meshnode's
+// scope:"per_instance" template (skipped without InstanceName, {instance}
+// substituted in dst exactly like {tenant} is for per_tenant), and gitea/
+// codeserver reading LocalHost/LocalHostName/Tenant to join a meshnode
+// instance's network namespace.
+func TestStackRendersLocalHosts(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	stacksRoot := filepath.Clean(filepath.Join("..", "..", "stacks"))
+
+	localHost := &model.TenantLocalHost{
+		Stacks:     []string{"meshnode", "gitea", "codeserver"},
+		Meshnode:   &model.LocalMeshnodeParams{Instances: []model.MeshnodeInstance{{Name: "work"}}},
+		Gitea:      &model.LocalGiteaParams{Mesh: "work"},
+		Codeserver: &model.LocalCodeserverParams{Mesh: "work"},
+	}
+
+	ctx := baseContext()
+	ctx.Host = HostView{Name: "laptop", Role: "local", Stacks: localHost.Stacks}
+	ctx.Tenant = &model.Tenant{ID: "acme", BaseDomain: "acme.example.com"}
+	ctx.LocalHost = localHost
+	ctx.LocalHostName = "laptop"
+	ctx.Images = map[string]string{
+		"tailscale":  catalog["meshnode"].Apps[0].Image,
+		"gitea":      catalog["gitea"].Apps[0].Image,
+		"codeserver": catalog["codeserver"].Apps[0].Image,
+	}
+
+	mesh, err := Stack(stacksRoot, catalog["meshnode"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(meshnode) error = %v", err)
+	}
+	if len(mesh) != 0 {
+		t.Fatalf("meshnode should render nothing without InstanceName: %v", SortedPaths(mesh))
+	}
+
+	ctx.InstanceName = "work"
+	mesh, err = Stack(stacksRoot, catalog["meshnode"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(meshnode, instance) error = %v", err)
+	}
+	unit, ok := mesh["/etc/containers/systemd/mesh-work.container"]
+	if !ok {
+		t.Fatalf("no mesh-work.container rendered; got %v", SortedPaths(mesh))
+	}
+	for _, want := range []string{
+		"ContainerName=mesh-work",
+		"Environment=TS_HOSTNAME=prod-laptop-work",
+		"Environment=TS_AUTHKEY", // bare pass-through, never a literal key
+	} {
+		if !strings.Contains(string(unit), want) {
+			t.Fatalf("mesh-work.container missing %q:\n%s", want, unit)
+		}
+	}
+	ctx.InstanceName = ""
+
+	giteaFiles, err := Stack(stacksRoot, catalog["gitea"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(gitea) error = %v", err)
+	}
+	gu := string(giteaFiles["/etc/containers/systemd/gitea.container"])
+	for _, want := range []string{
+		"Network=container:mesh-work",
+		"Requires=mesh-work.service",
+		"Secret=mksrv-gitea-tenant_acme_secret_key,type=env,target=GITEA__security__SECRET_KEY",
+		"GITEA__server__DOMAIN=laptop.acme.example.com",
+	} {
+		if !strings.Contains(gu, want) {
+			t.Fatalf("gitea.container missing %q:\n%s", want, gu)
+		}
+	}
+
+	csFiles, err := Stack(stacksRoot, catalog["codeserver"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(codeserver) error = %v", err)
+	}
+	cs := string(csFiles["/etc/containers/systemd/codeserver.container"])
+	for _, want := range []string{
+		"Network=container:mesh-work",
+		"Secret=mksrv-codeserver-tenant_acme_password,type=env,target=PASSWORD",
+	} {
+		if !strings.Contains(cs, want) {
+			t.Fatalf("codeserver.container missing %q:\n%s", want, cs)
+		}
+	}
+}
+
 func TestContextHelpers(t *testing.T) {
 	t.Parallel()
 	ctx := baseContext()
