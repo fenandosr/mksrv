@@ -61,8 +61,10 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 	baseHosts := make([]string, 0)
 	identityHosts := make([]string, 0)
 	hostNames := make([]string, 0, len(deployment.Hosts))
+	deploymentHostNames := make(map[string]bool, len(deployment.Hosts))
 	for hostName := range deployment.Hosts {
 		hostNames = append(hostNames, hostName)
+		deploymentHostNames[strings.ToLower(hostName)] = true
 	}
 	sort.Strings(hostNames)
 	for _, hostName := range hostNames {
@@ -169,7 +171,7 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 		checkTenantWeb(report, tenantFile, tenant)
 		checkTenantDatabase(report, tenantFile, tenant)
 		checkTenantMail(report, tenantFile, tenant, len(assigned["mail"]) > 0)
-		checkTenantLocalHosts(report, tenantFile, tenant, data.Catalog, seenLocalHostNames)
+		checkTenantLocalHosts(report, tenantFile, tenant, data.Catalog, seenLocalHostNames, deploymentHostNames)
 	}
 	checkMultiInstanceStacks(data.Catalog, report)
 
@@ -435,8 +437,11 @@ func checkTenantDatabase(report *Report, file string, tenant model.Tenant) {
 // cloud provisioning, reached only by name (`mksrv deploy <name>` / `mksrv
 // mesh`, run on that machine itself). seen is threaded across every
 // tenant's local_hosts, same shape as the realms map above: a local host's
-// name doubles as its real machine hostname, so it must be globally unique.
-func checkTenantLocalHosts(report *Report, file string, tenant model.Tenant, catalog map[string]model.Stack, seen map[string]string) {
+// name doubles as its real machine hostname, so it must be globally unique
+// — including against deploymentHostNames (deployment.yaml's own host
+// names, lower-cased): the hostname guard compares case-insensitively, and
+// a collision would silently steal that cloud host's entry in fleet.byName.
+func checkTenantLocalHosts(report *Report, file string, tenant model.Tenant, catalog map[string]model.Stack, seen map[string]string, deploymentHostNames map[string]bool) {
 	names := make([]string, 0, len(tenant.LocalHosts))
 	for name := range tenant.LocalHosts {
 		names = append(names, name)
@@ -449,6 +454,9 @@ func checkTenantLocalHosts(report *Report, file string, tenant model.Tenant, cat
 			semanticError(report, file, path, "tenant.local_host.duplicate", fmt.Sprintf("local host name %q is already used by tenant %q — it doubles as the machine's real hostname and must be globally unique", name, owner))
 		} else {
 			seen[name] = tenant.ID
+		}
+		if deploymentHostNames[strings.ToLower(name)] {
+			semanticError(report, file, path, "tenant.local_host.collides_with_deployment_host", fmt.Sprintf("local host name %q collides with a deployment.yaml host of the same name", name))
 		}
 
 		var meshInstances []string
@@ -465,8 +473,15 @@ func checkTenantLocalHosts(report *Report, file string, tenant model.Tenant, cat
 				semanticError(report, file, stackPath, "stack.unknown", fmt.Sprintf("stack %q is not present in the embedded catalog", stackName))
 				continue
 			}
-			if !contains(stack.Targets, "local") {
-				semanticError(report, file, stackPath, "stack.target", fmt.Sprintf("stack %q cannot run on a local host; allowed targets: %s", stackName, strings.Join(stack.Targets, ", ")))
+			// Deliberately stricter than the cloud per-host check's
+			// `contains(stack.Targets, target)`: `local` in Targets alone
+			// also matches a cloud-fleet stack like `database`/`cache`
+			// (their Targets include "local" for deployment.yaml's
+			// `existing`-provider hosts, a different meaning of the same
+			// word). Only a stack actually built for Context.LocalHost
+			// (LocalHostsOnly) belongs here.
+			if !stack.LocalHostsOnly {
+				semanticError(report, file, stackPath, "stack.local_hosts_only", fmt.Sprintf("stack %q is not usable via local_hosts (missing local_hosts_only); allowed targets here: %s", stackName, strings.Join(stack.Targets, ", ")))
 			}
 			for _, dep := range stack.DependsOn {
 				if !contains(entry.Stacks, dep) {

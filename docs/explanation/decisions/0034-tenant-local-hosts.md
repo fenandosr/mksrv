@@ -33,14 +33,19 @@ already podman+systemd-ready). `mksrv deploy <name>` and `mksrv mesh`,
 *run on that machine*, render and apply its stacks in-process.
 
 `<name>` must equal the machine's own hostname and be globally unique across
-every tenant's `local_hosts` — both commands refuse to act (`"refusing to act
-on local host ... from ..."`) unless `os.Hostname()` (or `MKSRV_LOCAL_HOST`,
-for a renamed machine or testing) matches it. This is the one hard safety
-requirement: never silently no-op, and never act on the wrong machine.
-Because of this guard, and because a cascading guard failure for every
-tenant's laptop would make `mksrv deploy`/`mksrv mesh` with no arguments
-useless from any single machine, local hosts are **never** part of either
-command's default "all hosts" selection — only reachable by naming them.
+every tenant's `local_hosts` — checked against both every other tenant's
+entry and every `deployment.yaml` host name, since the same value doubles as
+`fleet.byName`'s lookup key. `mksrv deploy <name>` has a single named target
+and refuses to act (`"refusing to act on local host ... from ..."`) unless
+`os.Hostname()` (or `MKSRV_LOCAL_HOST`, for a renamed machine or testing)
+matches it — never a silent no-op. `mksrv mesh` has no single named target —
+it scans every declared local host and silently skips whichever ones don't
+match this machine (not a mistake, just not that instance's turn), joining
+only the ones that do. Because of the deploy-side guard, and because a
+cascading guard failure for every tenant's laptop would make an unqualified
+`mksrv deploy` useless from any single machine, local hosts are **never**
+part of that command's default "all hosts" selection — only reachable by
+naming them.
 
 ### Reusing the stack catalog, not inventing a parallel one
 
@@ -49,7 +54,15 @@ catalog entries, `targets: [local]`, marked `local_hosts_only: true` (a new
 field: their templates read `Context.LocalHost`, which is only ever set for
 a `local_hosts` entry — assigning one to `deployment.yaml` instead, where
 `LocalHost` is always nil, is now a validation error rather than a template
-execution crash). `gitea`/`codeserver` declare `depends_on: [meshnode]` —
+execution crash). `local_hosts_only` is deliberately a separate flag from
+`targets: [local]`: that value already means something else entirely for a
+`deployment.yaml` host (an `existing`, still SSH-reachable one) and several
+cloud-fleet stacks (`database`, `cache`, `monitor`, ...) declare it too for
+that reason — `checkTenantLocalHosts` requires `local_hosts_only`
+specifically, not just `local` in `Targets`, so a cloud stack can't be
+listed under a tenant's `local_hosts` by mistake and get rendered with none
+of the fleet context (`Peers`/`StackHosts`/a database connection) it expects.
+`gitea`/`codeserver` declare `depends_on: [meshnode]` —
 the existing dependency field and `orderedStacks()` already express "must
 come after"; validated with a dedicated check (a `local_hosts` entry's own
 dependencies must resolve within that same entry, not the fleet-wide
@@ -83,18 +96,40 @@ A `gitea`/`codeserver` secret ref may contain `{tenant}` (substituted by
 gets its own SSM-backed secret rather than sharing one across every tenant's
 instance that happens to deploy the same catalog stack.
 
-### Joining the mesh without a podman Secret
+### Joining the mesh: a podman Secret per instance, not per fleet
 
-The cloud mesh join (`mksrv mesh` / `deploy.JoinMesh`) pushes the Headscale
-pre-auth key as a podman Secret. A tenant's `meshnode` instance instead gets
-it via `systemctl set-environment TS_AUTHKEY=...` before a restart — the
-Quadlet file declares a bare `Environment=TS_AUTHKEY` (pass-through, no
-value), so podman forwards whatever the systemd manager's own environment
-holds for that name into the container, and the key never sits in a
-world-readable unit file. `mksrv mesh`, run on the tenant's own machine,
-joins any of its instances not already active, using the same per-tenant
-Headscale user it already creates for Cloud-IT VPN clients — then
-immediately `unset-environment`s the key, since it's single-use.
+The cloud mesh join (`mksrv mesh` / `deploy.JoinMesh`) pushes one shared
+Headscale pre-auth key as a single podman Secret (`mksrv-mesh-authkey`) used
+by every cloud host's tailscale sidecar. A tenant's `meshnode` instance needs
+its own: `mksrv-meshnode-<instance>-authkey`, since several instances can
+live on the same local host.
+
+The first design here tried a bare `Environment=TS_AUTHKEY` (no `=value`),
+on the theory that podman would pass through whatever the invoking process's
+own environment held for that name — letting `mksrv mesh` inject the key
+with a plain `systemctl set-environment` and never write it to the unit file
+at all. **Confirmed live against quadlet 4.9.3 that this does not work**:
+quadlet's `Environment=` parser only keeps assignments that already contain
+`=`; a bare name is silently dropped from the generated `ExecStart=`
+entirely — no `--env TS_AUTHKEY` of any kind reaches `podman run`. The key
+never got into the container under any circumstance.
+
+The working mechanism is the podman Secret the cloud join already uses, just
+scoped per instance: `mksrv deploy <name>` creates
+`mksrv-meshnode-<instance>-authkey` **empty** on first deploy (so the
+Quadlet's `Secret=...,type=env,target=TS_AUTHKEY` directive has something to
+mount and the container can start at all — tailscale just sits in
+`NeedsLogin`, not a crash). `mksrv mesh`, run later on the tenant's own
+machine, pushes the real pre-auth key with `--replace` and restarts the
+unit — using the same per-tenant Headscale user it already creates for
+Cloud-IT VPN clients. "Already joined" is checked against tailscale's own
+state (`podman exec mesh-<instance> tailscale ip -4`), not the systemd
+unit's active/inactive state: the container (and its unit) stay "active"
+indefinitely even stuck in `NeedsLogin` with an empty key, so unit state
+alone can't tell a real join from one that never happened. `mksrv deploy
+<name>` must run at least once, creating the unit, before `mksrv mesh` can
+join it — restarting a unit that doesn't exist yet fails with a clear
+systemd error naming the missing unit.
 
 ## Consequences
 
@@ -113,6 +148,12 @@ immediately `unset-environment`s the key, since it's single-use.
   reason; there is no host-level `health:` check for either (the stack-level
   check that exists for every other stack would curl a port the host can't
   see).
+- **A local host's name also has to be unique against `deployment.yaml`'s
+  own host names**, not just against other tenants' `local_hosts` — it's the
+  same `fleet.byName` lookup key, and a collision would silently steal a
+  real cloud host's entry out from under it (`mksrv deploy base` landing on
+  a tenant's laptop instead of the edge). Checked case-insensitively, same
+  as the hostname guard.
 - Touchpoints: `schemas/stack.v1.json` (`multi_instance`, `instance_key`,
   `local_hosts_only`, `scope: per_instance`), `schemas/tenant.v1.json`
   (`local_hosts`), `internal/model.go`, `internal/render/render.go`,

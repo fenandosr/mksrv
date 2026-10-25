@@ -2,6 +2,7 @@ name: meshnode
 title: Mesh node
 description: "One or more named Tailscale nodes on a tenant-owned local host (ADR 0034)"
 targets: [local]
+local_hosts_only: true
 per_tenant: false
 multi_instance: true
 instance_key: name

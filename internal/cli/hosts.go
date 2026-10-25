@@ -477,6 +477,16 @@ func (f *fleet) deployLocalHost(ctx context.Context, printer ui.Printer, ht host
 			}
 		}
 		for _, instance := range instances {
+			if stackName == "meshnode" {
+				// The unit's Secret= directive requires the podman secret to
+				// already exist before the container can start at all — on a
+				// first deploy nothing has called `mksrv mesh` yet, so create
+				// it empty (tailscale just stays in NeedsLogin state, not a
+				// crash) rather than let DeployStack fail outright.
+				if err := ensureMeshAuthKeySecret(ctx, runner, instance); err != nil {
+					return &ExitError{Code: 2, Err: fmt.Errorf("%s/meshnode[%s]: %w", ht.Name, instance, err)}
+				}
+			}
 			instCtx := rctx
 			instCtx.InstanceName = instance
 			label := stackName
@@ -498,6 +508,27 @@ func (f *fleet) deployLocalHost(ctx context.Context, printer ui.Printer, ht host
 		if !slices.Contains(rctx.Deployed, stackName) {
 			rctx.Deployed = append(rctx.Deployed, stackName)
 		}
+	}
+	return nil
+}
+
+// meshAuthKeySecretName is the podman secret mesh.container.tmpl's
+// `Secret=...,type=env,target=TS_AUTHKEY` names — one per instance, since
+// several instances can share a local host.
+func meshAuthKeySecretName(instance string) string {
+	return "mksrv-meshnode-" + instance + "-authkey"
+}
+
+// ensureMeshAuthKeySecret creates the named podman secret empty if it
+// doesn't exist yet. Never overwrites an existing value — only
+// joinLocalMeshNodes does that, with a real pre-auth key via --replace.
+func ensureMeshAuthKeySecret(ctx context.Context, runner *deploy.LocalRunner, instance string) error {
+	name := meshAuthKeySecretName(instance)
+	if _, err := runner.Run(ctx, "sudo podman secret inspect "+quoteArg(name)); err == nil {
+		return nil
+	}
+	if _, err := runner.RunInput(ctx, "sudo podman secret create "+quoteArg(name)+" -", nil); err != nil {
+		return fmt.Errorf("create empty %s: %w", name, err)
 	}
 	return nil
 }
@@ -732,9 +763,19 @@ func (f *fleet) bootstrapParams(ht hostTarget) deploy.BootstrapParams {
 	}
 	sort.Slice(vols, func(i, j int) bool { return vols[i].Name < vols[j].Name })
 	isEdge := slices.Contains(ht.Host.Stacks, "base")
+	// Count only cloud/SSH-reachable targets — a tenant's local_hosts (ADR
+	// 0034) are never bootstrapped or NAT'd through, and were wrongly
+	// inflating this count into a false NAT=true for a single-cloud-host
+	// fleet that happens to have any tenant local_hosts declared.
+	cloudTargets := 0
+	for _, t := range f.targets {
+		if !t.Local {
+			cloudTargets++
+		}
+	}
 	return deploy.BootstrapParams{
 		IsEdge:       isEdge,
-		NAT:          isEdge && ht.Host.Provider != "existing" && len(f.targets) > 1,
+		NAT:          isEdge && ht.Host.Provider != "existing" && cloudTargets > 1,
 		Timezone:     f.data.Deployment.Timezone,
 		SwapMB:       model.SwapForStacks(ht.Host.Stacks, f.catalog, itype),
 		DataVolumeID: out.DataVolumeID,
@@ -897,12 +938,14 @@ func (a *App) runMesh(ctx context.Context, printer ui.Printer, globals *globalOp
 }
 
 // joinLocalMeshNodes joins any meshnode instance declared on THIS machine
-// (ADR 0034) to the tailnet — one-time per instance, via `systemctl
-// set-environment TS_AUTHKEY=...` + restart rather than a podman Secret (see
-// stacks/meshnode/templates/mesh.container.tmpl). `mksrv mesh` has no single
-// named target the way `mksrv deploy <name>` does, so entries that don't
-// match this machine's hostname guard are silently skipped (not a mistake —
-// just not this instance's turn) rather than failing the whole command.
+// (ADR 0034) to the tailnet — one-time per instance. Requires `mksrv deploy
+// <name>` to have already created mesh-<instance>.service (its Secret=
+// directive needs the podman secret this pushes to already exist as a
+// container, even an empty one — see deployLocalHost's
+// ensureMeshAuthKeySecret). `mksrv mesh` has no single named target the way
+// `mksrv deploy <name>` does, so entries that don't match this machine's
+// hostname guard are silently skipped (not a mistake — just not this
+// instance's turn) rather than failing the whole command.
 func (f *fleet) joinLocalMeshNodes(ctx context.Context, printer ui.Printer, hs *headscale.Client) error {
 	guardName, err := localHostGuardName()
 	if err != nil {
@@ -919,28 +962,59 @@ func (f *fleet) joinLocalMeshNodes(ctx context.Context, printer ui.Printer, hs *
 		}
 		for _, inst := range ht.LocalHost.Meshnode.Instances {
 			unit := "mesh-" + inst.Name + ".service"
-			if res, err := runner.Run(ctx, "systemctl is-active --quiet "+quoteArg(unit)); err == nil && res.ExitCode == 0 {
-				printer.Info("%s/%s: already joined", ht.Name, inst.Name)
+			container := "mesh-" + inst.Name
+			// The real join state, not systemd's unit-active state: the
+			// container (and its systemd unit) comes up and stays "active"
+			// even with an empty/stale TS_AUTHKEY — it just sits in
+			// NeedsLogin forever. `tailscale ip -4` only ever returns an
+			// address once actually logged in and connected.
+			if res, err := runner.Run(ctx, "sudo podman exec "+quoteArg(container)+" tailscale ip -4 2>/dev/null"); err == nil && strings.TrimSpace(res.Stdout) != "" {
+				printer.Info("%s/%s: already joined (%s)", ht.Name, inst.Name, strings.TrimSpace(res.Stdout))
 				continue
 			}
 			key, err := hs.PreAuthKey(ctx, tenantUserID, time.Hour, false)
 			if err != nil {
 				return &ExitError{Code: 1, Err: fmt.Errorf("preauth key for %s/%s: %w", ht.Name, inst.Name, err)}
 			}
-			if _, err := runner.Run(ctx, "sudo systemctl set-environment TS_AUTHKEY="+quoteArg(key)); err != nil {
-				return &ExitError{Code: 1, Err: fmt.Errorf("%s/%s: set-environment: %w", ht.Name, inst.Name, err)}
+			if _, err := runner.RunInput(ctx,
+				"sudo podman secret create --replace "+quoteArg(meshAuthKeySecretName(inst.Name))+" -",
+				[]byte(key),
+			); err != nil {
+				return &ExitError{Code: 1, Err: fmt.Errorf("%s/%s: push auth key: %w — run `mksrv deploy %s` first if the unit doesn't exist yet", ht.Name, inst.Name, err, ht.Name)}
 			}
-			_, err = runner.Run(ctx, "sudo systemctl restart "+quoteArg(unit))
-			// The key is single-use; don't leave it sitting in the manager's
-			// global environment any longer than the restart needed it.
-			_, _ = runner.Run(ctx, "sudo systemctl unset-environment TS_AUTHKEY")
-			if err != nil {
+			if _, err := runner.Run(ctx, "sudo systemctl restart "+quoteArg(unit)); err != nil {
 				return &ExitError{Code: 1, Err: fmt.Errorf("%s/%s: restart: %w", ht.Name, inst.Name, err), Printed: false}
 			}
-			printer.Success("%s/%s: joined tailnet", ht.Name, inst.Name)
+			ip, err := waitForLocalMeshIP(ctx, runner, container)
+			if err != nil {
+				return &ExitError{Code: 1, Err: fmt.Errorf("%s/%s: %w", ht.Name, inst.Name, err), Printed: false}
+			}
+			printer.Success("%s/%s: joined tailnet as %s", ht.Name, inst.Name, ip)
 		}
 	}
 	return nil
+}
+
+// waitForLocalMeshIP polls a just-restarted meshnode container for its
+// tailnet address, mirroring deploy.JoinMesh's own cloud-side polling loop
+// (internal/deploy/mesh.go) — tailscaled needs a moment to authenticate and
+// register after a fresh pre-auth key lands.
+func waitForLocalMeshIP(ctx context.Context, runner *deploy.LocalRunner, container string) (string, error) {
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		res, err := runner.Run(ctx, "sudo podman exec "+quoteArg(container)+" tailscale ip -4 2>/dev/null")
+		if err == nil {
+			if ip := strings.TrimSpace(res.Stdout); ip != "" {
+				return ip, nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
+	return "", fmt.Errorf("tailnet node did not obtain an address within the timeout")
 }
 
 func (a *App) newStatusCommand(opts *globalOptions) *cobra.Command {

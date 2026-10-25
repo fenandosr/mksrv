@@ -442,19 +442,26 @@ reference.
   `fleet.addLocalHosts` (populated from every tenant's `local_hosts`, after
   `wireBastion` so it never sees them), `deployLocalHost` +
   `renderLocalContext`, a hostname safety guard
-  (`checkLocalHostGuard`/`MKSRV_LOCAL_HOST`) that `mksrv deploy`/`mksrv mesh`
-  both refuse to skip, and `stackSecrets` gains a `tenantID` parameter so a
-  `{tenant}`-scoped secret ref gets its own value per tenant. Local hosts are
-  excluded from every command's no-args "all hosts" selection, and from
-  `host trust`/`bootstrap`/fleet-wide `apply`/`status` entirely — reachable
-  only by name. `internal/workspace/semantic.go` gains
-  `checkTenantLocalHosts` (codes `tenant.local_host.duplicate`/`.dependency`/
+  (`checkLocalHostGuard`/`MKSRV_LOCAL_HOST`) `mksrv deploy <name>` refuses to
+  skip (`mksrv mesh` has no single named target, so it scans every declared
+  local host and silently joins whichever match this machine instead), and
+  `stackSecrets` gains a `tenantID` parameter so a `{tenant}`-scoped secret
+  ref gets its own value per tenant. Local hosts are excluded from `deploy`'s
+  no-args "all hosts" selection, and from `host trust`/`bootstrap`/fleet-wide
+  `apply`/`status` entirely — reachable only by name.
+  `internal/workspace/semantic.go` gains `checkTenantLocalHosts` (codes
+  `tenant.local_host.duplicate`/`.collides_with_deployment_host`/`.dependency`/
   `.mesh`/`.meshnode_missing`/`.gitea_missing`/`.codeserver_missing`,
-  `stack.target`, `stack.local_hosts_only`) and `checkMultiInstanceStacks`
-  (codes `stack.multi_instance.instance_key`/`.no_template`). Three new
-  catalog entries: `stacks/meshnode` (a Tailscale Quadlet per declared
-  instance, `TS_AUTHKEY` injected once via `systemctl set-environment`, never
-  written to the unit file), `stacks/gitea` (SQLite, no env-only admin
+  `stack.local_hosts_only` — deliberately stricter than the main per-host
+  loop's `contains(Targets, "local")`, which several cloud-fleet stacks also
+  satisfy) and `checkMultiInstanceStacks` (codes
+  `stack.multi_instance.instance_key`/`.no_template`). Three new catalog
+  entries: `stacks/meshnode` (a Tailscale Quadlet per declared instance,
+  `TS_AUTHKEY` delivered via a per-instance podman Secret — `mksrv deploy`
+  creates it empty so the container can start, `mksrv mesh` `--replace`s it
+  with a real pre-auth key and restarts; a bare `Environment=TS_AUTHKEY`
+  host-env pass-through was tried first and confirmed live, against quadlet
+  4.9.3, not to work at all), `stacks/gitea` (SQLite, no env-only admin
   bootstrap exists for the real image — seeded by a `post_deploy` hook
   running `gitea admin user create` inside the container), `stacks/codeserver`
   — both sharing their `meshnode` instance's network namespace

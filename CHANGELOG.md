@@ -5,16 +5,20 @@
 - Feat: tenant local hosts (ADR 0034) — `meshnode`, `gitea`, and `codeserver`
   stacks deployed in-process by `mksrv deploy <name>`/`mksrv mesh`, run on a
   tenant's own laptop or workstation. No SSH, no cloud provisioning, no
-  bootstrap: a third host category alongside cloud and `existing`. A
-  hostname safety guard (`MKSRV_LOCAL_HOST` to override) makes both commands
-  refuse to act from the wrong machine, and both exclude local hosts from
-  their no-args "all hosts" selection entirely. `deploy.DeployStack` now
-  takes a `Runner` interface instead of a concrete `*ssh.Client` (mirroring
-  the existing `headscale.Runner`), so the new no-SSH `LocalRunner` reuses
-  the same render/secret/write/restart/health machinery every cloud stack
-  already does. `gitea`/`codeserver` share their `meshnode` instance's
-  network namespace rather than publishing ports. See
-  `docs/how-to/tenant-local-hosts.md`.
+  bootstrap: a third host category alongside cloud and `existing`.
+  `mksrv deploy <name>` has a hostname safety guard (`MKSRV_LOCAL_HOST` to
+  override) and refuses to act from the wrong machine; it's never part of
+  its own no-args "all hosts" selection. `mksrv mesh` joins a local host's
+  `meshnode` instances with a per-instance podman Secret (the cloud join's
+  own mechanism, just scoped per instance instead of per fleet — a bare
+  `Environment=` host-env pass-through was tried first and confirmed, live,
+  not to work: quadlet silently drops any `Environment=` line without a
+  value). `deploy.DeployStack` now takes a `Runner` interface instead of a
+  concrete `*ssh.Client` (mirroring the existing `headscale.Runner`), so the
+  new no-SSH `LocalRunner` reuses the same render/secret/write/restart/
+  health machinery every cloud stack already does. `gitea`/`codeserver`
+  share their `meshnode` instance's network namespace rather than
+  publishing ports. See `docs/how-to/tenant-local-hosts.md`.
 - Docs: reorganized `docs/` into Diátaxis's four quadrants —
   `tutorials/` (the quickstarts), `how-to/` (task guides: mail, branding,
   secrets, backup, tenant web/mail, migration), `reference/` (workspace,

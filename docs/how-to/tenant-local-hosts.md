@@ -33,18 +33,27 @@ error, same as any other unmet catalog dependency.
 ## Running it
 
 On the machine itself (its `hostname` must match the key above, or set
-`MKSRV_LOCAL_HOST` to override):
+`MKSRV_LOCAL_HOST` to override), **in this order**:
 
 ```sh
-mksrv mesh              # joins this host's meshnode instance(s) to the tailnet
 mksrv deploy wsl-laptop # renders + starts meshnode, gitea, codeserver
+mksrv mesh              # joins this host's meshnode instance(s) to the tailnet
 ```
 
-Both commands refuse to act — with a clear error, never a silent no-op — if
-run from a machine whose hostname doesn't match. Neither is part of either
-command's default "all hosts" selection: an unqualified `mksrv deploy` or
-`mksrv mesh` (no arguments) only ever touches the cloud fleet, never a
-tenant's local hosts.
+`deploy` must run first: it creates the `mesh-<instance>.service` unit (and
+an empty placeholder for its auth-key secret, so the container can start at
+all — tailscale just sits unauthenticated until `mesh` runs). Running `mesh`
+before anything has ever been deployed fails trying to restart a unit that
+doesn't exist yet.
+
+`mksrv deploy <name>` refuses to act — with a clear error, never a silent
+no-op — if run from a machine whose hostname doesn't match `<name>`, and
+isn't part of its own default "all hosts" selection: an unqualified `mksrv
+deploy` (no arguments) only ever touches the cloud fleet, never a tenant's
+local hosts. `mksrv mesh` has no single named target the same way — it
+scans every tenant's `local_hosts` and silently joins whichever ones match
+*this* machine, skipping the rest (not an error, just not their turn); it's
+always safe to run on any machine, local host or not.
 
 A local host never bootstraps (`mksrv host bootstrap`), is never trusted for
 SSH (`mksrv host trust`), and never appears in `mksrv status` — all three are

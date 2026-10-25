@@ -936,10 +936,20 @@ func TestStackRendersLocalHosts(t *testing.T) {
 	for _, want := range []string{
 		"ContainerName=mesh-work",
 		"Environment=TS_HOSTNAME=prod-laptop-work",
-		"Environment=TS_AUTHKEY", // bare pass-through, never a literal key
+		"--login-server=https://vpn.example.com", // never bare, Tailscale cannot parse a control URL without a scheme
+		// A podman Secret, not a bare `Environment=TS_AUTHKEY` pass-through:
+		// confirmed live that quadlet 4.9.3 silently drops any Environment=
+		// line without "=value" from the generated ExecStart= — the key
+		// would never reach the container at all.
+		"Secret=mksrv-meshnode-work-authkey,type=env,target=TS_AUTHKEY",
 	} {
 		if !strings.Contains(string(unit), want) {
 			t.Fatalf("mesh-work.container missing %q:\n%s", want, unit)
+		}
+	}
+	for _, line := range strings.Split(string(unit), "\n") {
+		if strings.TrimSpace(line) == "Environment=TS_AUTHKEY" {
+			t.Fatalf("mesh-work.container must not use the broken bare Environment=TS_AUTHKEY pass-through (confirmed live: quadlet drops it entirely):\n%s", unit)
 		}
 	}
 	ctx.InstanceName = ""

@@ -18,15 +18,20 @@ Environment=TS_STATE_DIR=/var/lib/tailscale
 Environment=TS_USERSPACE=false
 Environment=TS_ACCEPT_DNS=false
 Environment=TS_HOSTNAME={{ .Env }}-{{ .LocalHostName }}-{{ .InstanceName }}
-Environment="TS_EXTRA_ARGS=--login-server={{ .Endpoints.Headscale }}"
-# Bare pass-through (no "=value"): podman forwards whatever value the
-# invoking process's own environment holds for this name into the
-# container. `mksrv mesh` sets it once via `systemctl set-environment
-# TS_AUTHKEY=...` (ADR 0034) — every unit systemd starts inherits the
-# manager's environment block unless it overrides the name itself, so this
-# never needs to be written into the unit file (a one-use Headscale
-# pre-auth key would otherwise sit in a world-readable Quadlet file).
-Environment=TS_AUTHKEY
+Environment="TS_EXTRA_ARGS=--login-server=https://{{ .Endpoints.Headscale }}"
+# A bare `Environment=TS_AUTHKEY` (no "=value", relying on podman passing
+# through whatever the invoking process's own environment holds for that
+# name) does NOT work: confirmed live against quadlet 4.9.3 — its generated
+# ExecStart= only ever emits `--env` for lines that already contain "=";
+# anything else is silently dropped, so the key never reaches the
+# container at all. A podman Secret is the one mechanism that actually
+# injects a value `mksrv mesh` sets later, after this unit already exists —
+# the same shape the cloud tailscale unit uses (internal/deploy/mesh.go),
+# just one secret per local instance instead of one shared by the whole
+# fleet. `mksrv deploy` creates it empty on first deploy (so the container
+# can start at all, unauthenticated); `mksrv mesh` --replaces it with a real
+# pre-auth key and restarts.
+Secret=mksrv-meshnode-{{ .InstanceName }}-authkey,type=env,target=TS_AUTHKEY
 Volume=mksrv-mesh-{{ .InstanceName }}-state:/var/lib/tailscale
 
 [Service]
