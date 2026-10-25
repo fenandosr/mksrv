@@ -138,6 +138,10 @@
           "codeserver": {
             "type": "object", "additionalProperties": false, "required": ["mesh"],
             "properties": {"mesh": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"}}
+          },
+          "vikunja": {
+            "type": "object", "additionalProperties": false, "required": ["mesh"],
+            "properties": {"mesh": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"}}
           }
         }
       }

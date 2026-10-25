@@ -29,6 +29,7 @@ A `storage:` block requests dedicated EBS volumes mounted at
 | `meshnode` | service | local¹ | no² | — | implemented |
 | `gitea` | service | local¹ | yes² | meshnode | implemented |
 | `codeserver` | service | local¹ | yes² | meshnode | implemented |
+| `vikunja` | service | local¹ | yes² | meshnode | implemented |
 
 Templates and hooks are intentionally empty in M0. Their implementation belongs
 to M2–M5 and must be golden-tested.

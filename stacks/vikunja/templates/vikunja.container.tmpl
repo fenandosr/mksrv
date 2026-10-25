@@ -1,0 +1,33 @@
+[Unit]
+Description=mksrv Vikunja ({{ .Tenant.ID }}, ADR 0034)
+After=mesh-{{ .LocalHost.Vikunja.Mesh }}.service
+Requires=mesh-{{ .LocalHost.Vikunja.Mesh }}.service
+
+[Container]
+ContainerName=vikunja
+Image={{ .Image "vikunja" }}
+Network=container:mesh-{{ .LocalHost.Vikunja.Mesh }}
+Environment=VIKUNJA_SERVICE_ENABLEREGISTRATION=false
+Environment=VIKUNJA_SERVICE_PUBLICURL=https://{{ .LocalHostName }}.{{ .Tenant.BaseDomain }}/
+# VIKUNJA_SERVICE_JWTSECRET is deprecated (confirmed live: the image logs a
+# warning and says to use this name instead).
+Secret=mksrv-vikunja-tenant_{{ .Tenant.ID }}_secret,type=env,target=VIKUNJA_SERVICE_SECRET
+Secret=mksrv-vikunja-tenant_{{ .Tenant.ID }}_admin_pass,type=env,target=VIKUNJA_ADMIN_PASS
+# Named volumes, not bind mounts: the image runs rootless as a mapped
+# uid/gid (1000 inside, a high uid on the host) and confirmed live that an
+# unmounted /app/vikunja/files is not writable by that user at all
+# ("permission denied... user namespace ACTIVE") -- a named volume is
+# owned correctly by podman automatically, a bind mount would not be.
+Volume=mksrv-vikunja-files:/app/vikunja/files
+Volume=mksrv-vikunja-db:/db
+HealthCmd=curl -fsS http://127.0.0.1:3456/api/v1/info
+HealthInterval=15s
+HealthRetries=10
+HealthStartPeriod=10s
+
+[Service]
+Restart=always
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

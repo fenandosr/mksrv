@@ -507,6 +507,13 @@ func checkTenantLocalHosts(report *Report, file string, tenant model.Tenant, cat
 				semanticError(report, file, path+".codeserver.mesh", "tenant.local_host.mesh", fmt.Sprintf("codeserver.mesh %q does not match any meshnode.instances[].name", entry.Codeserver.Mesh))
 			}
 		}
+		if contains(entry.Stacks, "vikunja") {
+			if entry.Vikunja == nil {
+				semanticError(report, file, path+".vikunja", "tenant.local_host.vikunja_missing", `stack "vikunja" requires a vikunja.mesh block`)
+			} else if !contains(meshInstances, entry.Vikunja.Mesh) {
+				semanticError(report, file, path+".vikunja.mesh", "tenant.local_host.mesh", fmt.Sprintf("vikunja.mesh %q does not match any meshnode.instances[].name", entry.Vikunja.Mesh))
+			}
+		}
 	}
 }
 

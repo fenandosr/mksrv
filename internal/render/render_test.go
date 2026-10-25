@@ -899,10 +899,11 @@ func TestStackRendersLocalHosts(t *testing.T) {
 	stacksRoot := filepath.Clean(filepath.Join("..", "..", "stacks"))
 
 	localHost := &model.TenantLocalHost{
-		Stacks:     []string{"meshnode", "gitea", "codeserver"},
+		Stacks:     []string{"meshnode", "gitea", "codeserver", "vikunja"},
 		Meshnode:   &model.LocalMeshnodeParams{Instances: []model.MeshnodeInstance{{Name: "work"}}},
 		Gitea:      &model.LocalGiteaParams{Mesh: "work"},
 		Codeserver: &model.LocalCodeserverParams{Mesh: "work"},
+		Vikunja:    &model.LocalVikunjaParams{Mesh: "work"},
 	}
 
 	ctx := baseContext()
@@ -914,6 +915,7 @@ func TestStackRendersLocalHosts(t *testing.T) {
 		"tailscale":  catalog["meshnode"].Apps[0].Image,
 		"gitea":      catalog["gitea"].Apps[0].Image,
 		"codeserver": catalog["codeserver"].Apps[0].Image,
+		"vikunja":    catalog["vikunja"].Apps[0].Image,
 	}
 
 	mesh, err := Stack(stacksRoot, catalog["meshnode"], ctx)
@@ -981,6 +983,21 @@ func TestStackRendersLocalHosts(t *testing.T) {
 	} {
 		if !strings.Contains(cs, want) {
 			t.Fatalf("codeserver.container missing %q:\n%s", want, cs)
+		}
+	}
+
+	vkFiles, err := Stack(stacksRoot, catalog["vikunja"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(vikunja) error = %v", err)
+	}
+	vk := string(vkFiles["/etc/containers/systemd/vikunja.container"])
+	for _, want := range []string{
+		"Network=container:mesh-work",
+		"Secret=mksrv-vikunja-tenant_acme_secret,type=env,target=VIKUNJA_SERVICE_SECRET",
+		"Secret=mksrv-vikunja-tenant_acme_admin_pass,type=env,target=VIKUNJA_ADMIN_PASS",
+	} {
+		if !strings.Contains(vk, want) {
+			t.Fatalf("vikunja.container missing %q:\n%s", want, vk)
 		}
 	}
 }

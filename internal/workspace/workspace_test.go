@@ -23,7 +23,7 @@ func TestValidateExampleWorkspace(t *testing.T) {
 	if !report.Valid {
 		t.Fatalf("report invalid: %#v", report.Issues)
 	}
-	if report.Hosts != 2 || report.Tenants != 1 || report.Users != 2 || report.CatalogStacks != 17 {
+	if report.Hosts != 2 || report.Tenants != 1 || report.Users != 2 || report.CatalogStacks != 18 {
 		t.Fatalf("counts = hosts:%d tenants:%d users:%d stacks:%d", report.Hosts, report.Tenants, report.Users, report.CatalogStacks)
 	}
 }
@@ -437,13 +437,15 @@ func TestCheckTenantLocalHostsValid(t *testing.T) {
 		"meshnode":   {Targets: []string{"local"}, LocalHostsOnly: true, MultiInstance: true},
 		"gitea":      {Targets: []string{"local"}, LocalHostsOnly: true, DependsOn: []string{"meshnode"}},
 		"codeserver": {Targets: []string{"local"}, LocalHostsOnly: true, DependsOn: []string{"meshnode"}},
+		"vikunja":    {Targets: []string{"local"}, LocalHostsOnly: true, DependsOn: []string{"meshnode"}},
 	}
 	tenant := model.Tenant{ID: "acme", LocalHosts: map[string]model.TenantLocalHost{
 		"laptop": {
-			Stacks:     []string{"meshnode", "gitea", "codeserver"},
+			Stacks:     []string{"meshnode", "gitea", "codeserver", "vikunja"},
 			Meshnode:   &model.LocalMeshnodeParams{Instances: []model.MeshnodeInstance{{Name: "work"}}},
 			Gitea:      &model.LocalGiteaParams{Mesh: "work"},
 			Codeserver: &model.LocalCodeserverParams{Mesh: "work"},
+			Vikunja:    &model.LocalVikunjaParams{Mesh: "work"},
 		},
 	}}
 	var report Report

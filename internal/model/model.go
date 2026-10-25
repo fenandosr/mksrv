@@ -171,6 +171,7 @@ type TenantLocalHost struct {
 	Meshnode    *LocalMeshnodeParams   `json:"meshnode,omitempty"`
 	Gitea       *LocalGiteaParams      `json:"gitea,omitempty"`
 	Codeserver  *LocalCodeserverParams `json:"codeserver,omitempty"`
+	Vikunja     *LocalVikunjaParams    `json:"vikunja,omitempty"`
 }
 
 // LocalMeshnodeParams configures the `meshnode` stack's instances (ADR 0034)
@@ -195,6 +196,12 @@ type LocalGiteaParams struct {
 // LocalCodeserverParams configures the `codeserver` stack — same Mesh
 // convention as LocalGiteaParams.
 type LocalCodeserverParams struct {
+	Mesh string `json:"mesh"`
+}
+
+// LocalVikunjaParams configures the `vikunja` stack — same Mesh convention
+// as LocalGiteaParams.
+type LocalVikunjaParams struct {
 	Mesh string `json:"mesh"`
 }
 

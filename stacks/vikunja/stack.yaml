@@ -1,0 +1,24 @@
+name: vikunja
+title: Vikunja
+description: "Self-hosted task manager (SQLite) on a tenant-owned local host (ADR 0034)"
+targets: [local]
+local_hosts_only: true
+per_tenant: true
+depends_on: [meshnode]
+apps:
+  - name: vikunja
+    image: docker.io/vikunja/vikunja:2.7.1
+secrets:
+  - /mksrv/{env}/vikunja/tenant_{tenant}_secret
+  - /mksrv/{env}/vikunja/tenant_{tenant}_admin_pass
+resources:
+  min_ram_mb: 256
+  disk_gb: 5
+templates:
+  - src: templates/vikunja.container.tmpl
+    dst: /etc/containers/systemd/vikunja.container
+    scope: shared
+hooks:
+  post_deploy:
+    - run: hooks/create-admin.sh
+      scope: shared

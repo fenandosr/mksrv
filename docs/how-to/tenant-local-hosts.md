@@ -1,7 +1,7 @@
 # Tenant local hosts (`local_hosts:`)
 
 A tenant's own laptop or workstation can run `meshnode`, `gitea`, and
-`codeserver` directly — mksrv never provisions or SSHes to it (ADR 0034).
+`codeserver`, and `vikunja` directly — mksrv never provisions or SSHes to it (ADR 0034).
 `mksrv deploy <name>` and `mksrv mesh`, run **on that machine itself**, render
 and apply its stacks in-process.
 
@@ -22,11 +22,11 @@ local_hosts:
 | field | |
 |---|---|
 | the map key (`wsl-laptop`) | must equal the machine's real hostname (`hostname` at a shell), and be unique across **every** tenant's `local_hosts` — it's what `mksrv deploy`/`mksrv mesh` check this machine's own identity against before touching anything. |
-| `stacks` | any catalog stack with `local_hosts_only: true` — today `meshnode`, `gitea`, `codeserver`. |
-| `meshnode.instances[].name` | one Tailscale identity per entry. `gitea`/`codeserver` each join exactly one instance's network namespace via `mesh`. |
-| `gitea.mesh` / `codeserver.mesh` | must name one of `meshnode.instances[].name` in this same `local_hosts` entry. |
+| `stacks` | any catalog stack with `local_hosts_only: true` — today `meshnode`, `gitea`, `codeserver`, `vikunja`. |
+| `meshnode.instances[].name` | one Tailscale identity per entry. `gitea`/`codeserver`/`vikunja` each join exactly one instance's network namespace via `mesh`. |
+| `gitea.mesh` / `codeserver.mesh` | must name one of `meshnode.instances[].name` in this same `local_hosts` entry (same for `vikunja.mesh`). |
 
-`gitea`/`codeserver` both declare `depends_on: [meshnode]` — leaving
+`gitea`/`codeserver`/`vikunja` all declare `depends_on: [meshnode]` — leaving
 `meshnode` out of `stacks` while listing either of them is a validation
 error, same as any other unmet catalog dependency.
 
@@ -36,7 +36,7 @@ On the machine itself (its `hostname` must match the key above, or set
 `MKSRV_LOCAL_HOST` to override), **in this order**:
 
 ```sh
-mksrv deploy wsl-laptop # renders + starts meshnode, gitea, codeserver
+mksrv deploy wsl-laptop # renders + starts meshnode, gitea, codeserver, vikunja
 mksrv mesh              # joins this host's meshnode instance(s) to the tailnet
 ```
 
@@ -61,18 +61,21 @@ no-ops or skips for it. It's assumed to already have Podman + systemd
 working, the same prerequisite a cloud host's bootstrap step would otherwise
 set up.
 
-## Reaching gitea/codeserver
+## Reaching gitea/codeserver/vikunja
 
-Neither publishes a port on the host: each shares its `meshnode` instance's
+None publishes a port on the host: each shares its `meshnode` instance's
 network namespace (`Network=container:mesh-<name>`), so they're reachable
 only via that instance's Tailscale IP — `https://<tailnet-ip>:3000` for
-Gitea, `:8080` for code-server — from any device joined to the tenant's
-Headscale user (the same one `forwards:`/`dns:` already use for
-Cloud-IT VPN clients and real Tailscale).
+Gitea, `:8080` for code-server, `:3456` for Vikunja — from any device joined
+to the tenant's Headscale user (the same one `forwards:`/`dns:` already use
+for Cloud-IT VPN clients and real Tailscale).
 
-Gitea's initial admin user (`admin`) is seeded automatically on first
-deploy, with a password mksrv generates and stores the same way as every
-other stack secret. code-server's password is generated the same way.
+Gitea's and Vikunja's initial admin/first user (`admin`) are seeded
+automatically on first deploy, with a password mksrv generates and stores
+the same way as every other stack secret — code-server's password the same
+way. Vikunja's free tier has no instance-admin concept to grant (confirmed
+live: `vikunja user set-admin` refuses without a Pro license), so its seeded
+user is just a normal account, not a promoted admin.
 
 ## Trade-offs
 
