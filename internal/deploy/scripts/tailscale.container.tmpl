@@ -2,6 +2,14 @@
 Description=mksrv tailnet node
 Wants=network-online.target
 After=network-online.target
+# A start-rate limit, not a behavior change: a restart storm here (bad
+# authkey, Headscale unreachable, whatever) would otherwise retry as fast as
+# systemd allows, hammering Headscale with a fresh RegisterReq per attempt —
+# confirmed as a real failure mode for the sibling tenant-local meshnode unit
+# (stacks/meshnode/templates/mesh.container.tmpl), which shares this same
+# Secret-based TS_AUTHKEY / TS_EXTRA_ARGS shape.
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Container]
 ContainerName=mksrv-tailscale
@@ -36,6 +44,7 @@ Volume=mksrv-tailscale-state:/var/lib/tailscale
 [Service]
 DeviceAllow=/dev/net/tun rwm
 Restart=always
+RestartSec=30s
 TimeoutStartSec=90
 
 [Install]

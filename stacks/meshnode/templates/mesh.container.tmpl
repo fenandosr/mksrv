@@ -2,6 +2,13 @@
 Description=mksrv tenant-local mesh node ({{ .InstanceName }})
 Wants=network-online.target
 After=network-online.target
+# See the TS_EXTRA_ARGS/RestartSec comment below: containerboot can exit
+# non-zero out of NeedsLogin well before `mksrv mesh` logs the node in.
+# Without a start-rate limit, that loop hammers Headscale with a fresh
+# RegisterReq per restart — confirmed live, thousands of them in under three
+# days in one PoC run.
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Container]
 ContainerName=mesh-{{ .InstanceName }}
@@ -19,24 +26,37 @@ Environment=TS_USERSPACE=false
 Environment=TS_ACCEPT_DNS=false
 Environment=TS_HOSTNAME={{ .Env }}-{{ .LocalHostName }}-{{ .InstanceName }}
 Environment="TS_EXTRA_ARGS=--login-server=https://{{ .Endpoints.Headscale }}"
-# A bare `Environment=TS_AUTHKEY` (no "=value", relying on podman passing
-# through whatever the invoking process's own environment holds for that
-# name) does NOT work: confirmed live against quadlet 4.9.3 — its generated
-# ExecStart= only ever emits `--env` for lines that already contain "=";
-# anything else is silently dropped, so the key never reaches the
-# container at all. A podman Secret is the one mechanism that actually
-# injects a value `mksrv mesh` sets later, after this unit already exists —
-# the same shape the cloud tailscale unit uses (internal/deploy/mesh.go),
-# just one secret per local instance instead of one shared by the whole
-# fleet. `mksrv deploy` creates it empty on first deploy (so the container
-# can start at all, unauthenticated); `mksrv mesh` --replaces it with a real
-# pre-auth key and restarts.
-Secret=mksrv-meshnode-{{ .InstanceName }}-authkey,type=env,target=TS_AUTHKEY
+# No TS_AUTHKEY here, ever — confirmed live (twice: first a bare
+# `Environment=TS_AUTHKEY` pass-through, which quadlet 4.9.3 silently drops
+# entirely from the generated ExecStart=; then a podman Secret holding a
+# placeholder value) that the tailscale image's own boot script treats a
+# FAILED authkey-based `tailscale up` — which an invalid/placeholder key
+# always is — as fatal and exits the whole container. Because gitea/
+# codeserver/vikunja share this container's network namespace
+# (Network=container:mesh-<name>), that crash cascades into tearing THEM
+# down too, and even blocks podman from cleanly restarting this one while
+# they're still attached ("has dependent containers which must be removed
+# before it") — a self-sustaining crash loop, confirmed live hitting the
+# real Headscale server hundreds of times before it was caught.
+#
+# Starting with no authkey at all is the documented tailscale-in-docker
+# pattern instead: `mksrv mesh` logs it in later via `podman exec ...
+# tailscale up --authkey=file:... --login-server=... --hostname=...
+# --accept-dns=false` directly — a one-shot CLI call into the already-running
+# daemon, never a restart (internal/cli/hosts.go, joinLocalMeshNodes). This
+# was believed to leave the daemon idle in NeedsLogin indefinitely; a later
+# restart-matrix PoC found that's not reliably true — containerboot can still
+# exit non-zero out of NeedsLogin (observed ~60s in, tailscale 1.80.3,
+# rootless, kernel mode) well before `mksrv mesh` gets a chance to log it in.
+# RestartSec/StartLimit below exist because of that: without them, a PoC
+# stuck in this state accumulated thousands of restarts — each a fresh
+# nodekey and a fresh RegisterReq against Headscale — in under three days.
 Volume=mksrv-mesh-{{ .InstanceName }}-state:/var/lib/tailscale
 
 [Service]
 DeviceAllow=/dev/net/tun rwm
 Restart=always
+RestartSec=30s
 TimeoutStartSec=90
 
 [Install]

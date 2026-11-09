@@ -1,0 +1,14 @@
+; SELinux type for Tailscale meshnodes in rootless podman.
+; base_container + net_container (vendored udica templates) + /dev/net/tun.
+;
+; Vendored instead of depending on the host having the `udica` package
+; installed (ADR 0035): base_container.cil and net_container.cil in this
+; directory are copied verbatim from /usr/share/udica/templates/ on a Rocky
+; 9.8 host with container-selinux 2.245. Load all three together:
+;   semodule -i base_container.cil net_container.cil mesh_tun.cil
+(block mesh_tun
+  (blockinherit container)
+  (blockinherit net_container)
+  (allow process tun_tap_device_t (chr_file (getattr open read write ioctl)))
+  (allow process self (tun_socket (create relabelfrom relabelto attach_queue)))
+)
