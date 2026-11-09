@@ -239,6 +239,15 @@ type TenantWebEndpoint struct {
 	// *unauthenticated* reach only to whatever that API itself already exposes
 	// without a token.
 	SSOBypassPaths []string `json:"sso_bypass_paths"`
+	// NoLogPaths exempts matching Caddy path patterns from the edge's access
+	// log entirely (`log_skip`) — for a hostname whose URL embeds a
+	// per-recipient secret (a personal survey link, a signed one-time
+	// download), where even the request path must never be written anywhere,
+	// not just its body. Unrelated to auth: the request is still proxied and
+	// served normally, only never logged. Evaluated before Caddy's handle
+	// dispatch, so it applies the same whether or not the hostname also has
+	// `sso: true`.
+	NoLogPaths []string `json:"no_log_paths"`
 }
 
 // WebSSO reports whether any web endpoint gates on Keycloak (ADR 0030).

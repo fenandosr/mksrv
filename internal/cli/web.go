@@ -76,8 +76,18 @@ func webFragment(w model.TenantWebEndpoint, ssoPort int) string {
 		flush_interval -1
 	}`, w.Target)
 
+	// no_log_paths (ADR 0028 addendum): log_skip is evaluated before Caddy's
+	// handle dispatch, so one matcher here covers the request whether it ends
+	// up in the plain reverse_proxy below or, for an SSO hostname, behind the
+	// oauth2-proxy gate — a URL carrying a per-recipient secret must never
+	// reach the access log, logged-in or not.
+	var noLog string
+	if len(w.NoLogPaths) > 0 {
+		noLog = fmt.Sprintf("\t@no_log path %s\n\tlog_skip @no_log\n\n", strings.Join(w.NoLogPaths, " "))
+	}
+
 	if !w.SSO {
-		return fmt.Sprintf("%s {\n\t%s\n}\n", w.Hostname, proxy)
+		return fmt.Sprintf("%s {\n%s\t%s\n}\n", w.Hostname, noLog, proxy)
 	}
 
 	// Gate on a Keycloak session (ADR 0030): oauth2-proxy on the edge answers
@@ -103,7 +113,7 @@ func webFragment(w model.TenantWebEndpoint, ssoPort int) string {
 	}
 
 	return fmt.Sprintf(`%s {
-%s	handle /oauth2/* {
+%s%s	handle /oauth2/* {
 		reverse_proxy 127.0.0.1:%d
 	}
 	handle {
@@ -118,7 +128,7 @@ func webFragment(w model.TenantWebEndpoint, ssoPort int) string {
 		%s
 	}
 }
-`, w.Hostname, bypass.String(), ssoPort, ssoPort, authURI, proxy)
+`, w.Hostname, noLog, bypass.String(), ssoPort, ssoPort, authURI, proxy)
 }
 
 // webSSOContainer renders the per-tenant oauth2-proxy Quadlet for the edge.

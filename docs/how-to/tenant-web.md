@@ -24,6 +24,7 @@ web:
 | `sso` | `false` (default). `true` gates the hostname behind a Keycloak session at the edge (ADR 0030) — see below. |
 | `sso_groups` | optional list of realm groups (`admin`/`dev`/`apps`/`vpn`); only members of one of them pass the gate. Requires `sso: true`. |
 | `sso_bypass_paths` | optional list of Caddy path patterns (e.g. `/api/*`) exempted from the gate entirely — for the origin's own token-authenticated API. Requires `sso: true`. |
+| `no_log_paths` | optional list of Caddy path patterns (e.g. `/p/*`) excluded from the edge's access log entirely (`log_skip`) — for a URL that carries a per-recipient secret (a personal survey link, a signed download) where even the path itself must never be written anywhere. Independent of `sso`; applies either way. |
 
 ## What `mksrv` does
 
@@ -107,6 +108,24 @@ Keycloak. `sso_bypass_paths` routes matching paths straight to the origin,
 skipping `forward_auth` entirely — the origin's own API auth still applies, so
 this only removes the *additional* Keycloak-session requirement in front of
 it. Scope it as narrowly as the app's real API surface (`/api/*`, not `/*`).
+
+## `no_log_paths` — keeping a secret out of the access log
+
+```yaml
+web:
+  - hostname: tiic-pruebas.mcps-epcm.org
+    target: 100.64.0.12:8080
+    no_log_paths: ["/p/*"]
+```
+
+Caddy's `log_skip` is evaluated before it decides which `handle` block serves
+the request, so one matcher covers the hostname whether or not it also has
+`sso: true` — a request to a `no_log_paths` pattern is proxied and served
+exactly as any other, it's just never written to the edge's JSON access log.
+There's no partial/redacted form: the request either is logged in full or not
+at all. A tenant that needs the path to stay out of *every* log the platform
+could ever produce should also avoid `sso: true` plus a shared oauth2-proxy
+for that hostname — unrelated concern, but worth checking at the same time.
 
 ## VPN-only web services
 
