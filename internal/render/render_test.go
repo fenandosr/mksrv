@@ -938,20 +938,26 @@ func TestStackRendersLocalHosts(t *testing.T) {
 	for _, want := range []string{
 		"ContainerName=mesh-work",
 		"Environment=TS_HOSTNAME=prod-laptop-work",
-		"--login-server=https://vpn.example.com", // never bare, Tailscale cannot parse a control URL without a scheme
-		// A podman Secret, not a bare `Environment=TS_AUTHKEY` pass-through:
-		// confirmed live that quadlet 4.9.3 silently drops any Environment=
-		// line without "=value" from the generated ExecStart= — the key
-		// would never reach the container at all.
-		"Secret=mksrv-meshnode-work-authkey,type=env,target=TS_AUTHKEY",
 	} {
 		if !strings.Contains(string(unit), want) {
 			t.Fatalf("mesh-work.container missing %q:\n%s", want, unit)
 		}
 	}
+	// No TS_AUTHKEY of any kind at boot — confirmed live (twice) that the
+	// image's own boot script exits the whole container on a failed
+	// authkey-based `tailscale up`, which an invalid/placeholder key always
+	// is, cascading into every container sharing its network namespace.
+	// `mksrv mesh` logs in later via a one-shot `podman exec ... tailscale
+	// up`, never anything baked into the unit file. Checked line-by-line,
+	// skipping comments: the explanation above necessarily mentions
+	// TS_AUTHKEY in prose.
 	for _, line := range strings.Split(string(unit), "\n") {
-		if strings.TrimSpace(line) == "Environment=TS_AUTHKEY" {
-			t.Fatalf("mesh-work.container must not use the broken bare Environment=TS_AUTHKEY pass-through (confirmed live: quadlet drops it entirely):\n%s", unit)
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.Contains(line, "TS_AUTHKEY") {
+			t.Fatalf("mesh-work.container must never set TS_AUTHKEY at boot (confirmed live: a failed authkey login is fatal to the whole container): %q\n%s", line, unit)
 		}
 	}
 	ctx.InstanceName = ""

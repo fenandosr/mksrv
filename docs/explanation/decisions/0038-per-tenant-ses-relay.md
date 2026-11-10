@@ -17,9 +17,9 @@ onboarding real tenants:
    `Resource`/`Condition` scoping means a leaked shared credential — or any
    tenant-facing service handed it — could send mail as *any* verified
    identity in the account, not just that tenant's own domain.
-2. **Three tenant domains (`mcps-epcm.org`, `huellagenica.com`,
-   `bit-a-bit.org`) already had their own verified SES domain identity and a
-   dedicated legacy IAM user, created by hand, entirely outside Terraform.**
+2. **Three tenants' own domains already had their own verified SES domain
+   identity and a dedicated legacy IAM user, created by hand, entirely
+   outside Terraform.**
    Found live via `aws sesv2 list-email-identities` / `aws iam list-users` —
    neither showed up in `terraform state list`. A real, untracked dependency:
    if anyone cleaned up "orphaned" SES identities in the console, three
@@ -77,8 +77,8 @@ one for the first time, same mechanism.
   shared `RELAY_HOST`/`RELAY_USER`/`RELAY_PASSWORD` env vars stay as the
   fallback for any sender domain not in these files.
 
-Validated live end-to-end (2026-11-09): a real message from
-`fernando@mcps-epcm.org` relayed through `email-smtp.us-east-1.amazonaws.com`
+Validated live end-to-end (2026-11-09): a real message from a mailbox on
+`mcps`'s own domain relayed through `email-smtp.us-east-1.amazonaws.com`
 using `mcps`'s own credential, SES returned `250 Ok`, delivered. First time
 this path — old or new — had ever actually been exercised; nothing was
 broken by replacing it, because nothing had used it before.
