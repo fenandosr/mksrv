@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 
+	awsclient "github.com/fenandosr/mksrv/internal/aws"
+	"github.com/fenandosr/mksrv/internal/infra"
 	"github.com/fenandosr/mksrv/internal/model"
 	secretsx "github.com/fenandosr/mksrv/internal/secrets"
 	sshx "github.com/fenandosr/mksrv/internal/ssh"
@@ -17,8 +19,10 @@ import (
 )
 
 const (
-	mailConfigPath = "/var/lib/mksrv/stacks/mail/config/postfix-accounts.cf"
-	mailTLSDir     = "/var/lib/mksrv/stacks/mail/tls"
+	mailConfigPath     = "/var/lib/mksrv/stacks/mail/config/postfix-accounts.cf"
+	mailTLSDir         = "/var/lib/mksrv/stacks/mail/tls"
+	mailRelayMapPath   = "/var/lib/mksrv/stacks/mail/config/postfix-relaymap.cf"
+	mailSASLPasswdPath = "/var/lib/mksrv/stacks/mail/config/postfix-sasl-password.cf"
 )
 
 var mailLocalPartRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -382,8 +386,79 @@ func (f *fleet) reconcileMailRelay(ctx context.Context, printer ui.Printer, clie
 			return fmt.Errorf("mail relay: push %s: %w", name, err)
 		}
 	}
+	if err := f.reconcileMailTenantRelay(ctx, client); err != nil {
+		return err
+	}
 	printer.Success("mail: outbound relay credentials ready (run `mksrv deploy --stack mail` to apply)")
 	return nil
+}
+
+// reconcileMailTenantRelay writes docker-mailserver's sender-dependent relay
+// config (Phase C, draft ADR: per-tenant SES relay) — one line per hosted-mail
+// tenant domain in each of postfix-relaymap.cf and postfix-sasl-password.cf,
+// keyed by "@domain" (confirmed against the docker-mailserver docs: relay.sh
+// turns the presence of these files into `sender_dependent_relayhost_maps` +
+// `smtp_sasl_password_maps` + `smtp_sender_dependent_authentication = yes`).
+// Every entry here points at the SAME relay host as the shared
+// RELAY_HOST/RELAY_USER/RELAY_PASSWORD env vars reconcileMailRelay above
+// already pushes — that combination (shared host, per-sender credential) is
+// not shown verbatim in the docs, only its two halves separately, so this is
+// additive on top of the existing default, never a replacement: a sender
+// whose domain isn't in these two files still falls through to the env-var
+// default exactly as before. Deliberately does not touch mailserver's Quadlet
+// unit or restart it — same deploy-after-this contract as reconcileMailRelay.
+func (f *fleet) reconcileMailTenantRelay(ctx context.Context, client *sshx.Client) error {
+	relayMap, saslPasswd := mailTenantRelayFiles(f.data.Tenants, f.outputs.TenantMailSMTP, f.data.Deployment.AWS.Region)
+	if err := client.WriteFileSudo(ctx, mailRelayMapPath, []byte(relayMap), 0o600); err != nil {
+		return fmt.Errorf("mail relay: write %s: %w", mailRelayMapPath, err)
+	}
+	if err := client.WriteFileSudo(ctx, mailSASLPasswdPath, []byte(saslPasswd), 0o600); err != nil {
+		return fmt.Errorf("mail relay: write %s: %w", mailSASLPasswdPath, err)
+	}
+	return nil
+}
+
+// mailTenantRelayFiles builds postfix-relaymap.cf and postfix-sasl-password.cf's
+// content: one "@domain\t..." line per domain of every hosted-mail tenant that
+// has a Phase B tenant SES identity (route53 dns_override). Sorted by domain
+// for a deterministic diff between runs. A tenant with no entry in
+// tenantSMTP (no route53 dns_override) is silently skipped — it has no
+// per-tenant SES identity to relay through (falls through to the shared
+// default relay instead, same as before this feature existed).
+func mailTenantRelayFiles(tenants map[string]model.Tenant, tenantSMTP map[string]infra.TenantMailSMTPOutput, region string) (relayMap, saslPasswd string) {
+	type entry struct{ domain, relayLine, saslLine string }
+	var entries []entry
+	relayHost := fmt.Sprintf("[email-smtp.%s.amazonaws.com]:587", region)
+	ids := make([]string, 0, len(tenants))
+	for id := range tenants {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		tenant := tenants[id]
+		if tenant.Mail == nil || !tenant.Mail.Hosted || len(tenant.Mail.Domains) == 0 {
+			continue
+		}
+		out, ok := tenantSMTP[id]
+		if !ok {
+			continue
+		}
+		password := awsclient.DeriveSESSMTPPassword(out.SecretAccessKey, region)
+		for _, d := range tenant.Mail.Domains {
+			entries = append(entries, entry{
+				domain:    d,
+				relayLine: fmt.Sprintf("@%s\t%s", d, relayHost),
+				saslLine:  fmt.Sprintf("@%s\t%s:%s", d, out.AccessKeyID, password),
+			})
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].domain < entries[j].domain })
+	var relayBuf, saslBuf strings.Builder
+	for _, e := range entries {
+		relayBuf.WriteString(e.relayLine + "\n")
+		saslBuf.WriteString(e.saslLine + "\n")
+	}
+	return relayBuf.String(), saslBuf.String()
 }
 
 // reconcileDKIM generates (once) and publishes the DKIM key for each of the

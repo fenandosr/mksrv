@@ -6,8 +6,47 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/fenandosr/mksrv/internal/infra"
 	"github.com/fenandosr/mksrv/internal/model"
 )
+
+// TestMailTenantRelayFiles guards the sender-dependent relay config (Phase C,
+// draft ADR: per-tenant SES relay): only a hosted-mail tenant with a Phase B
+// SES identity gets a line, every line carries the SAME relay host (the
+// per-sender piece is only the credential), and a tenant missing either
+// condition is silently skipped rather than erroring.
+func TestMailTenantRelayFiles(t *testing.T) {
+	t.Parallel()
+	tenants := map[string]model.Tenant{
+		"mcps": {Mail: &model.TenantMail{Hosted: true, Domains: []string{"mcps-epcm.org"}}},
+		// no mail.hosted -- must be skipped even though it has an SES identity.
+		"hg": {Mail: &model.TenantMail{Hosted: false, Domains: []string{"huellagenica.com"}}},
+		// hosted, but no Phase B identity (no route53 dns_override) -- skipped.
+		"nodns": {Mail: &model.TenantMail{Hosted: true, Domains: []string{"nodns.example.com"}}},
+		// no mail block at all.
+		"bare": {},
+	}
+	smtp := map[string]infra.TenantMailSMTPOutput{
+		"mcps": {AccessKeyID: "AKIAMCPS", SecretAccessKey: "secretmcps"},
+		"hg":   {AccessKeyID: "AKIAHG", SecretAccessKey: "secrethg"},
+	}
+	relayMap, saslPasswd := mailTenantRelayFiles(tenants, smtp, "us-east-1")
+
+	if strings.Count(relayMap, "\n") != 1 || strings.Count(saslPasswd, "\n") != 1 {
+		t.Fatalf("want exactly one line in each file, got:\nrelayMap=%q\nsaslPasswd=%q", relayMap, saslPasswd)
+	}
+	if !strings.Contains(relayMap, "@mcps-epcm.org\t[email-smtp.us-east-1.amazonaws.com]:587") {
+		t.Fatalf("relayMap missing mcps entry:\n%s", relayMap)
+	}
+	if !strings.Contains(saslPasswd, "@mcps-epcm.org\tAKIAMCPS:") {
+		t.Fatalf("saslPasswd missing mcps entry:\n%s", saslPasswd)
+	}
+	for _, unwanted := range []string{"huellagenica.com", "nodns.example.com"} {
+		if strings.Contains(relayMap, unwanted) || strings.Contains(saslPasswd, unwanted) {
+			t.Fatalf("unexpected domain %q in output:\nrelayMap=%s\nsaslPasswd=%s", unwanted, relayMap, saslPasswd)
+		}
+	}
+}
 
 func TestMailPasswordRef(t *testing.T) {
 	t.Parallel()

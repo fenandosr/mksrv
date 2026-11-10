@@ -61,6 +61,20 @@ output "mail_smtp" {
   }
 }
 
+output "tenant_mail_smtp" {
+  description = "Per-tenant SES sending identity + SMTP credential, keyed by tenant id (Phase B, draft ADR: per-tenant SES relay). One per tenant with a route53 dns_override, regardless of mail.outbound_smtp/mail.hosted."
+  sensitive   = true
+  value = {
+    for id, domain in local.tenant_ses_domains : id => {
+      access_key_id     = aws_iam_access_key.tenant_ses_smtp[id].id
+      secret_access_key = aws_iam_access_key.tenant_ses_smtp[id].secret
+      smtp_host         = "email-smtp.${local.region}.amazonaws.com"
+      smtp_port         = 587
+      from_address      = "noreply@${domain}"
+    }
+  }
+}
+
 output "network" {
   value = {
     vpc_id             = module.network.vpc_id

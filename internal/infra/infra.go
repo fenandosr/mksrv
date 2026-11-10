@@ -112,10 +112,24 @@ type MailSMTPOutput struct {
 	FromAddress     string `json:"from_address"`
 }
 
+// TenantMailSMTPOutput is one tenant's own SES sending identity + IAM
+// credential (Phase B, draft ADR: per-tenant SES relay) — scoped by
+// ses:FromAddress to that tenant's own domain, unlike the shared
+// MailSMTPOutput above. Present for every tenant with a route53
+// dns_override, regardless of mail.outbound_smtp/mail.hosted.
+type TenantMailSMTPOutput struct {
+	AccessKeyID     string `json:"access_key_id"`
+	SecretAccessKey string `json:"secret_access_key"`
+	SMTPHost        string `json:"smtp_host"`
+	SMTPPort        int    `json:"smtp_port"`
+	FromAddress     string `json:"from_address"`
+}
+
 // Outputs is the decoded outputs.json.
 type Outputs struct {
-	Hosts    map[string]HostOutput `json:"hosts"`
-	MailSMTP MailSMTPOutput        `json:"mail_smtp"`
+	Hosts          map[string]HostOutput           `json:"hosts"`
+	MailSMTP       MailSMTPOutput                  `json:"mail_smtp"`
+	TenantMailSMTP map[string]TenantMailSMTPOutput `json:"tenant_mail_smtp"`
 }
 
 // LoadOutputs reads and decodes <root>/.mksrv/infra/outputs.json.
