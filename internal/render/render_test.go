@@ -885,6 +885,129 @@ func TestMonitorOmitsLogsJobWhenAbsent(t *testing.T) {
 	}
 }
 
+// TestStackRendersLocalHosts covers ADR 0034's tenant local_hosts: meshnode's
+// scope:"per_instance" template (skipped without InstanceName, {instance}
+// substituted in dst exactly like {tenant} is for per_tenant), and gitea/
+// codeserver reading LocalHost/LocalHostName/Tenant to join a meshnode
+// instance's network namespace.
+func TestStackRendersLocalHosts(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	stacksRoot := filepath.Clean(filepath.Join("..", "..", "stacks"))
+
+	localHost := &model.TenantLocalHost{
+		Stacks:     []string{"meshnode", "gitea", "codeserver", "vikunja"},
+		Meshnode:   &model.LocalMeshnodeParams{Instances: []model.MeshnodeInstance{{Name: "work"}}},
+		Gitea:      &model.LocalGiteaParams{Mesh: "work"},
+		Codeserver: &model.LocalCodeserverParams{Mesh: "work"},
+		Vikunja:    &model.LocalVikunjaParams{Mesh: "work"},
+	}
+
+	ctx := baseContext()
+	ctx.Host = HostView{Name: "laptop", Role: "local", Stacks: localHost.Stacks}
+	ctx.Tenant = &model.Tenant{ID: "acme", BaseDomain: "acme.example.com"}
+	ctx.LocalHost = localHost
+	ctx.LocalHostName = "laptop"
+	ctx.Images = map[string]string{
+		"tailscale":  catalog["meshnode"].Apps[0].Image,
+		"gitea":      catalog["gitea"].Apps[0].Image,
+		"codeserver": catalog["codeserver"].Apps[0].Image,
+		"vikunja":    catalog["vikunja"].Apps[0].Image,
+	}
+
+	mesh, err := Stack(stacksRoot, catalog["meshnode"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(meshnode) error = %v", err)
+	}
+	if len(mesh) != 0 {
+		t.Fatalf("meshnode should render nothing without InstanceName: %v", SortedPaths(mesh))
+	}
+
+	ctx.InstanceName = "work"
+	mesh, err = Stack(stacksRoot, catalog["meshnode"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(meshnode, instance) error = %v", err)
+	}
+	unit, ok := mesh["/etc/containers/systemd/mesh-work.container"]
+	if !ok {
+		t.Fatalf("no mesh-work.container rendered; got %v", SortedPaths(mesh))
+	}
+	for _, want := range []string{
+		"ContainerName=mesh-work",
+		"Environment=TS_HOSTNAME=prod-laptop-work",
+	} {
+		if !strings.Contains(string(unit), want) {
+			t.Fatalf("mesh-work.container missing %q:\n%s", want, unit)
+		}
+	}
+	// No TS_AUTHKEY of any kind at boot — confirmed live (twice) that the
+	// image's own boot script exits the whole container on a failed
+	// authkey-based `tailscale up`, which an invalid/placeholder key always
+	// is, cascading into every container sharing its network namespace.
+	// `mksrv mesh` logs in later via a one-shot `podman exec ... tailscale
+	// up`, never anything baked into the unit file. Checked line-by-line,
+	// skipping comments: the explanation above necessarily mentions
+	// TS_AUTHKEY in prose.
+	for _, line := range strings.Split(string(unit), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.Contains(line, "TS_AUTHKEY") {
+			t.Fatalf("mesh-work.container must never set TS_AUTHKEY at boot (confirmed live: a failed authkey login is fatal to the whole container): %q\n%s", line, unit)
+		}
+	}
+	ctx.InstanceName = ""
+
+	giteaFiles, err := Stack(stacksRoot, catalog["gitea"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(gitea) error = %v", err)
+	}
+	gu := string(giteaFiles["/etc/containers/systemd/gitea.container"])
+	for _, want := range []string{
+		"Network=container:mesh-work",
+		"Requires=mesh-work.service",
+		"Secret=mksrv-gitea-tenant_acme_secret_key,type=env,target=GITEA__security__SECRET_KEY",
+		"GITEA__server__DOMAIN=laptop.acme.example.com",
+	} {
+		if !strings.Contains(gu, want) {
+			t.Fatalf("gitea.container missing %q:\n%s", want, gu)
+		}
+	}
+
+	csFiles, err := Stack(stacksRoot, catalog["codeserver"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(codeserver) error = %v", err)
+	}
+	cs := string(csFiles["/etc/containers/systemd/codeserver.container"])
+	for _, want := range []string{
+		"Network=container:mesh-work",
+		"Secret=mksrv-codeserver-tenant_acme_password,type=env,target=PASSWORD",
+	} {
+		if !strings.Contains(cs, want) {
+			t.Fatalf("codeserver.container missing %q:\n%s", want, cs)
+		}
+	}
+
+	vkFiles, err := Stack(stacksRoot, catalog["vikunja"], ctx)
+	if err != nil {
+		t.Fatalf("Stack(vikunja) error = %v", err)
+	}
+	vk := string(vkFiles["/etc/containers/systemd/vikunja.container"])
+	for _, want := range []string{
+		"Network=container:mesh-work",
+		"Secret=mksrv-vikunja-tenant_acme_secret,type=env,target=VIKUNJA_SERVICE_SECRET",
+		"Secret=mksrv-vikunja-tenant_acme_admin_pass,type=env,target=VIKUNJA_ADMIN_PASS",
+	} {
+		if !strings.Contains(vk, want) {
+			t.Fatalf("vikunja.container missing %q:\n%s", want, vk)
+		}
+	}
+}
+
 func TestContextHelpers(t *testing.T) {
 	t.Parallel()
 	ctx := baseContext()

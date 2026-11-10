@@ -106,7 +106,44 @@
           "cdn": {"type": "boolean", "default": false},
           "sso": {"type": "boolean", "default": false},
           "sso_groups": {"type": "array", "uniqueItems": true, "maxItems": 8, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$"}},
-          "sso_bypass_paths": {"type": "array", "uniqueItems": true, "maxItems": 8, "items": {"type": "string", "maxLength": 128, "pattern": "^/\\S*$"}}
+          "sso_bypass_paths": {"type": "array", "uniqueItems": true, "maxItems": 8, "items": {"type": "string", "maxLength": 128, "pattern": "^/\\S*$"}},
+          "no_log_paths": {"type": "array", "uniqueItems": true, "maxItems": 8, "items": {"type": "string", "maxLength": 128, "pattern": "^/\\S*$"}}
+        }
+      }
+    },
+    "local_hosts": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9-]{0,31}$"},
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false,
+        "required": ["stacks"],
+        "properties": {
+          "description": {"type": "string", "maxLength": 256},
+          "stacks": {"type": "array", "uniqueItems": true, "minItems": 1, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"}},
+          "meshnode": {
+            "type": "object", "additionalProperties": false, "required": ["instances"],
+            "properties": {
+              "instances": {
+                "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true,
+                "items": {
+                  "type": "object", "additionalProperties": false, "required": ["name"],
+                  "properties": {"name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"}}
+                }
+              }
+            }
+          },
+          "gitea": {
+            "type": "object", "additionalProperties": false, "required": ["mesh"],
+            "properties": {"mesh": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"}}
+          },
+          "codeserver": {
+            "type": "object", "additionalProperties": false, "required": ["mesh"],
+            "properties": {"mesh": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"}}
+          },
+          "vikunja": {
+            "type": "object", "additionalProperties": false, "required": ["mesh"],
+            "properties": {"mesh": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"}}
+          }
         }
       }
     },

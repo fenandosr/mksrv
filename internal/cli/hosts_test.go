@@ -12,6 +12,47 @@ import (
 	"github.com/fenandosr/mksrv/internal/workspace"
 )
 
+// TestLocalMeshJoinCmd guards two properties found live in a restart-matrix
+// PoC: (1) the key never appears in the `tailscale up` command text itself
+// (it reaches the container only via localMeshStageKeyCmd's stdin, staged to
+// a file referenced here by path), and (2) every non-default pref
+// containerboot already set at container boot — hostname, accept-dns,
+// login-server — is restated. Omitting any of them makes tailscale reject
+// the call outright ("requires mentioning all non-default flags"), which
+// with Restart=always recurs on every future restart of an
+// already-deployed instance, not just a fresh one.
+func TestLocalMeshJoinCmd(t *testing.T) {
+	t.Parallel()
+	const key = "tskey-auth-supersecretvalue"
+	cmd := localMeshJoinCmd("mesh-hg-web", "/tmp/mksrv-ts-authkey", "https://vpn.cloud-it.click", "prod-ome-hg-web")
+	if strings.Contains(cmd, key) {
+		t.Fatalf("join command must never contain the raw key:\n%s", cmd)
+	}
+	for _, want := range []string{
+		"--authkey=file:/tmp/mksrv-ts-authkey",
+		"--login-server='https://vpn.cloud-it.click'",
+		"--hostname='prod-ome-hg-web'",
+		"--accept-dns=false",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("join command missing %q:\n%s", want, cmd)
+		}
+	}
+}
+
+// TestLocalMeshStageKeyCmd guards that the staging command carries the key
+// by path reference only — the caller feeds the actual key as stdin
+// (RunInput), never baked into this command string.
+func TestLocalMeshStageKeyCmd(t *testing.T) {
+	t.Parallel()
+	cmd := localMeshStageKeyCmd("mesh-hg-web", "/tmp/mksrv-ts-authkey")
+	for _, want := range []string{"podman exec -i", "mesh-hg-web", "umask 177", "/tmp/mksrv-ts-authkey"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("stage command missing %q:\n%s", want, cmd)
+		}
+	}
+}
+
 // TestRenderContextPopulatesFleet checks the fleet-wide roster (M23) a
 // cross-host template like prometheus.yml ranges over: every host, sorted by
 // name, with the right role and private IP.

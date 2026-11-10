@@ -19,6 +19,7 @@ func TestWebFragment(t *testing.T) {
 	frag := webFragment(w, 4180)
 	for _, want := range []string{
 		"files.mcps-epcm.org {",
+		"\tlog\n", // confirmed live (2026-11-09): without this, Caddy writes no access log at all for the site
 		"reverse_proxy mcps-nextcloud.prod.mksrv:80 {",
 		"header_up Host {host}",
 		"header_up X-Forwarded-Proto {scheme}",
@@ -97,6 +98,59 @@ func TestWebFragmentSSOBypassPaths(t *testing.T) {
 	bypassBlock := frag[bypassIdx:gatedIdx]
 	if strings.Contains(bypassBlock, "forward_auth") {
 		t.Fatalf("bypass path block must not be gated:\n%s", bypassBlock)
+	}
+}
+
+// TestWebFragmentNoLogPaths guards no_log_paths: a hostname carrying a
+// per-recipient secret in the URL (a personal survey link) must never write
+// that path to the edge's access log — log_skip has to be emitted before the
+// reverse_proxy, unconditionally of SSO.
+func TestWebFragmentNoLogPaths(t *testing.T) {
+	t.Parallel()
+	w := model.TenantWebEndpoint{
+		Hostname:   "tiic-pruebas.mcps-epcm.org",
+		Target:     "100.64.0.12:8080",
+		NoLogPaths: []string{"/p/*"},
+	}
+	frag := webFragment(w, 4180)
+	if !strings.Contains(frag, "@no_log path /p/*\n\tlog_skip @no_log") {
+		t.Fatalf("fragment missing log_skip matcher:\n%s", frag)
+	}
+	if strings.Index(frag, "log_skip") > strings.Index(frag, "reverse_proxy") {
+		t.Fatalf("log_skip must precede reverse_proxy:\n%s", frag)
+	}
+	// log_skip only has something to skip once a bare `log` has actually
+	// turned access logging on for this hostname — confirmed live
+	// (2026-11-09) that a hostname with no `log` directive at all produces
+	// no access log entries, making log_skip alone look like it "worked"
+	// for the wrong reason.
+	if !strings.Contains(frag, "\tlog\n") {
+		t.Fatalf("fragment with no_log_paths must still enable logging via a bare log directive:\n%s", frag)
+	}
+
+	// No no_log_paths set -> still gets the bare `log` (logging stays on by
+	// default), just no log_skip matcher.
+	plain := webFragment(model.TenantWebEndpoint{Hostname: "files.mcps-epcm.org", Target: "n:80"}, 4180)
+	if strings.Contains(plain, "log_skip") {
+		t.Fatalf("fragment without no_log_paths should have no log_skip:\n%s", plain)
+	}
+	if !strings.Contains(plain, "\tlog\n") {
+		t.Fatalf("fragment without no_log_paths should still enable logging:\n%s", plain)
+	}
+
+	// Combines with an SSO gate: log_skip still applies regardless of which
+	// handle (gated or oauth2 callback) ends up serving the request.
+	gated := webFragment(model.TenantWebEndpoint{
+		Hostname:   "tasks.bit-a-bit.org",
+		Target:     "100.64.0.14:3456",
+		SSO:        true,
+		NoLogPaths: []string{"/p/*"},
+	}, 4180)
+	if !strings.Contains(gated, "@no_log path /p/*\n\tlog_skip @no_log") {
+		t.Fatalf("SSO fragment missing log_skip matcher:\n%s", gated)
+	}
+	if strings.Index(gated, "log_skip") > strings.Index(gated, "handle /oauth2/*") {
+		t.Fatalf("log_skip must precede the SSO handle blocks:\n%s", gated)
 	}
 }
 

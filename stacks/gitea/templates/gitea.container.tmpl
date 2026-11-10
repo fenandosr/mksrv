@@ -1,0 +1,36 @@
+[Unit]
+Description=mksrv Gitea ({{ .Tenant.ID }}, ADR 0034)
+After=mesh-{{ .LocalHost.Gitea.Mesh }}.service
+Requires=mesh-{{ .LocalHost.Gitea.Mesh }}.service
+
+[Container]
+ContainerName=gitea
+Image={{ .Image "gitea" }}
+Network=container:mesh-{{ .LocalHost.Gitea.Mesh }}
+Environment=USER_UID=1000
+Environment=USER_GID=1000
+Environment=GITEA__database__DB_TYPE=sqlite3
+Environment=GITEA__server__DOMAIN={{ .LocalHostName }}.{{ .Tenant.BaseDomain }}
+Environment=GITEA__server__ROOT_URL=https://{{ .LocalHostName }}.{{ .Tenant.BaseDomain }}/
+Environment=GITEA__server__HTTP_PORT=3000
+# Only disables Gitea's own built-in git-over-SSH server. The gitea/gitea
+# image always runs a separate system sshd (s6 service) regardless of this
+# setting (confirmed live) -- harmless here since port 22 is never
+# published; only 3000 reaches the mesh namespace this container shares.
+Environment=GITEA__server__DISABLE_SSH=true
+Environment=GITEA__security__INSTALL_LOCK=true
+Environment=GITEA__service__DISABLE_REGISTRATION=true
+Secret=mksrv-gitea-tenant_{{ .Tenant.ID }}_secret_key,type=env,target=GITEA__security__SECRET_KEY
+Secret=mksrv-gitea-tenant_{{ .Tenant.ID }}_admin_pass,type=env,target=GITEA_ADMIN_PASS
+Volume=mksrv-gitea-data:/data
+HealthCmd=curl -fsS http://127.0.0.1:3000/api/healthz
+HealthInterval=15s
+HealthRetries=10
+HealthStartPeriod=10s
+
+[Service]
+Restart=always
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

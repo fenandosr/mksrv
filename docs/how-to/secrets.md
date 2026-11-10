@@ -124,6 +124,19 @@ does not expire (`--ttl` / `--num-uses` override that); `--cidr 100.64.0.0/10`
 binds it to the mesh. `--list` shows the named accessors, `--revoke <accessor>`
 kills one without touching the others.
 
+**`--cidr` does not work for a client reaching OpenBao's published `:8200`
+over the mesh from outside the podman network OpenBao itself runs in.**
+Confirmed live: OpenBao sees the login request's source address as the
+container's own podman bridge gateway (e.g. `10.89.1.1`), not the client's
+real tailnet IP — published-port traffic gets SNAT'd to the bridge gateway
+before it reaches the process inside the container. Same root cause as the
+`samenet` line in Patroni's `pg_hba.conf` (ADR 0026): a CIDR check anywhere
+behind a podman-published port can only ever see the bridge, never the
+client. A SecretID that needs `--cidr` to mean anything over the mesh will
+always fail to authenticate; use `--num-uses 1` (plus a short `--wrap-ttl`)
+instead — single-use is the restriction that actually holds in this
+topology.
+
 Bump `--wrap-ttl` for anything that won't be unwrapped immediately — the
 wrapping token (not the SecretID) is what expires, and once it does the value
 is gone for good, with no way to recover it short of minting a new one. The

@@ -161,11 +161,6 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 		return &ExitError{Code: 1, Err: err}
 	}
 
-	smtp, err := f.tenantSMTPSpec(ctx)
-	if err != nil {
-		return &ExitError{Code: 1, Err: err}
-	}
-
 	selected, err := f.selectedTenants(args)
 	if err != nil {
 		return &ExitError{Code: 2, Err: err}
@@ -173,6 +168,10 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 	for _, id := range selected {
 		tenant := f.data.Tenants[id]
 		realm := tenantRealm(tenant)
+		smtp, err := f.tenantSMTPSpecFor(ctx, id, tenant)
+		if err != nil {
+			return &ExitError{Code: 1, Err: err}
+		}
 		clients := []keycloak.ClientSpec{
 			{
 				ClientID:        vpnClientID,

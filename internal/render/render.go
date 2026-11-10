@@ -72,6 +72,15 @@ type Context struct {
 	Retention         model.RetentionConfig
 	Tenant            *model.Tenant
 	Secrets           map[string]string
+	// LocalHost/LocalHostName are set instead of the usual cloud Host
+	// fields when rendering for a tenant's local_hosts entry (ADR 0034).
+	LocalHost     *model.TenantLocalHost
+	LocalHostName string
+	// InstanceName selects which instance of a multi_instance stack this
+	// render pass is for — makes `scope: per_instance` templates render
+	// (skipped when empty) and substitutes "{instance}" in `dst`, exactly
+	// like Tenant/{tenant} does for `scope: per_tenant`.
+	InstanceName string
 }
 
 // Peer returns the private VPC IP of another fleet host, or "" if unknown.
@@ -146,6 +155,9 @@ func Stack(stacksRoot string, stack model.Stack, ctx Context) (map[string][]byte
 		if tmplSpec.Scope == "per_tenant" && ctx.Tenant == nil {
 			continue
 		}
+		if tmplSpec.Scope == "per_instance" && ctx.InstanceName == "" {
+			continue
+		}
 		srcPath := filepath.Join(stacksRoot, stack.Name, filepath.FromSlash(tmplSpec.Src))
 		raw, err := os.ReadFile(srcPath)
 		if err != nil {
@@ -158,6 +170,9 @@ func Stack(stacksRoot string, stack model.Stack, ctx Context) (map[string][]byte
 		dst := tmplSpec.Dst
 		if ctx.Tenant != nil {
 			dst = strings.ReplaceAll(dst, "{tenant}", ctx.Tenant.ID)
+		}
+		if ctx.InstanceName != "" {
+			dst = strings.ReplaceAll(dst, "{instance}", ctx.InstanceName)
 		}
 		out[dst] = rendered
 	}

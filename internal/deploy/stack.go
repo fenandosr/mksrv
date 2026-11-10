@@ -20,6 +20,17 @@ import (
 	"github.com/fenandosr/mksrv/internal/ssh"
 )
 
+// Runner executes commands and writes root-owned files against one host —
+// either over SSH (*ssh.Client, which already satisfies this structurally)
+// or in-process on the local machine (LocalRunner, for a tenant's own
+// local_hosts entry, ADR 0034). Mirrors the narrower headscale.Runner
+// precedent (internal/headscale/headscale.go).
+type Runner interface {
+	Run(ctx context.Context, command string) (ssh.Result, error)
+	RunInput(ctx context.Context, command string, input []byte) (ssh.Result, error)
+	WriteFileSudo(ctx context.Context, path string, content []byte, mode fs.FileMode) error
+}
+
 // Options configures one stack deploy.
 type Options struct {
 	StacksRoot string            // engine cache stacks directory
@@ -55,7 +66,7 @@ func DeployedMarker(stack string) string {
 }
 
 // DeployedStacks lists the stacks that have a deployed marker on the host.
-func DeployedStacks(ctx context.Context, client *ssh.Client) ([]string, error) {
+func DeployedStacks(ctx context.Context, client Runner) ([]string, error) {
 	res, err := client.Run(ctx, "ls -1 /var/lib/mksrv/stacks/*/.deployed 2>/dev/null | awk -F/ '{print $(NF-1)}'")
 	if err != nil {
 		return nil, nil
@@ -73,7 +84,7 @@ func DeployedStacks(ctx context.Context, client *ssh.Client) ([]string, error) {
 // DeployStack renders opts.Stack, pushes its podman secrets, writes only the
 // files whose content changed, reloads systemd and (re)starts the affected
 // Quadlet units, runs post-deploy hooks, and executes the health checks.
-func DeployStack(ctx context.Context, client *ssh.Client, opts Options) (StackResult, error) {
+func DeployStack(ctx context.Context, client Runner, opts Options) (StackResult, error) {
 	stack := opts.Stack
 	result := StackResult{Stack: stack.Name}
 
@@ -174,7 +185,7 @@ func DeployStack(ctx context.Context, client *ssh.Client, opts Options) (StackRe
 	return result, nil
 }
 
-func pushSecrets(ctx context.Context, client *ssh.Client, stackName string, values map[string]string) error {
+func pushSecrets(ctx context.Context, client Runner, stackName string, values map[string]string) error {
 	names := make([]string, 0, len(values))
 	for name := range values {
 		names = append(names, name)
@@ -192,7 +203,7 @@ func pushSecrets(ctx context.Context, client *ssh.Client, stackName string, valu
 	return nil
 }
 
-func runHooks(ctx context.Context, client *ssh.Client, opts Options) ([]string, error) {
+func runHooks(ctx context.Context, client Runner, opts Options) ([]string, error) {
 	var ran []string
 	for _, hook := range opts.Stack.Hooks.PostDeploy {
 		if hook.Scope == "per_tenant" && opts.Context.Tenant == nil {
@@ -220,7 +231,7 @@ func runHooks(ctx context.Context, client *ssh.Client, opts Options) ([]string, 
 	return ran, nil
 }
 
-func remoteMatches(ctx context.Context, client *ssh.Client, remotePath string, want []byte) (bool, error) {
+func remoteMatches(ctx context.Context, client Runner, remotePath string, want []byte) (bool, error) {
 	sum := sha256.Sum256(want)
 	res, err := client.Run(ctx, fmt.Sprintf("sudo sha256sum %s 2>/dev/null | awk '{print $1}'", shellQuote(remotePath)))
 	if err != nil {
@@ -232,7 +243,7 @@ func remoteMatches(ctx context.Context, client *ssh.Client, remotePath string, w
 // prePull fetches every image a stack declares before its units are (re)started.
 // Best-effort: a pull failure here is logged by the caller only if the unit then
 // fails to start. Retries a few times to ride out transient registry throttling.
-func prePull(ctx context.Context, client *ssh.Client, stack model.Stack) {
+func prePull(ctx context.Context, client Runner, stack model.Stack) {
 	for _, app := range stack.Apps {
 		if strings.TrimSpace(app.Image) == "" {
 			continue
@@ -274,7 +285,7 @@ func fileMode(dst string) fs.FileMode {
 	return 0o644
 }
 
-func runHealthCheck(ctx context.Context, client *ssh.Client, check model.StackHealth) error {
+func runHealthCheck(ctx context.Context, client Runner, check model.StackHealth) error {
 	var cmd string
 	switch check.Type {
 	case "http":

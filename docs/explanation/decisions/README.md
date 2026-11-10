@@ -36,3 +36,4 @@ unanswered.
 - [ADR 0030: `web[].sso` — a Keycloak SSO gate at the edge](0030-web-sso-gate.md)
 - [ADR 0032: Tenant mail hosting — the `mail` stack, for real](0032-tenant-mail-hosting.md)
 - [ADR 0033: The shared mail server's certificate comes from acme.sh (DNS-01), not Caddy](0033-mail-cert-dns01-acme-sh.md)
+- [ADR 0034: Tenant local hosts — `meshnode`/`gitea`/`codeserver` deployed in-process, no SSH](0034-tenant-local-hosts.md)

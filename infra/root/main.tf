@@ -44,6 +44,19 @@ locals {
     for id, t in var.tenants : id => {
       zone_id = try(coalesce(t.dns_override.zone_id, ""), "")
       records = concat(
+        # Phase B (per-tenant SES relay, draft ADR): the verification TXT
+        # SES checks before it will let anything send as this domain.
+        # Independent of mail.hosted/mail.outbound_smtp -- every tenant with
+        # a route53 zone gets one, the same gate aws_ses_domain_identity.tenant
+        # itself uses, so this always has a matching identity to reference.
+        try(t.dns_override.provider, "") == "route53" ? [
+          {
+            fqdn  = "_amazonses.${t.base_domain}"
+            type  = "TXT"
+            value = aws_ses_domain_identity.tenant[id].verification_token
+            ttl   = 300
+          }
+        ] : [],
         [
           for r in coalesce(t.dns, []) : {
             fqdn  = r.name == "@" ? t.base_domain : "${r.name}.${t.base_domain}"
@@ -150,11 +163,12 @@ locals {
         ]),
       )
     }
-    if try(t.dns_override.provider, "") == "route53" && (
-      length(coalesce(t.dns, [])) > 0 ||
-      length(coalesce(t.web, [])) > 0 ||
-      (try(coalesce(t.mail.hosted, false), false) && length(try(coalesce(t.mail.domains, []), [])) > 0)
-    )
+    if try(t.dns_override.provider, "") == "route53"
+    # Note: the `||` chain below used to gate this map's membership entirely;
+    # Phase B's SES verification TXT (above) now applies to every route53
+    # tenant unconditionally, so this entry always exists for one -- the
+    # remaining conditions only matter for whether dns:/web:/mail records are
+    # ALSO present, not for inclusion itself anymore.
   }
 
   # ADR 0032: the shared mail server's own hostname lives on the operator
@@ -453,6 +467,72 @@ resource "aws_route53_record" "ses_dkim" {
   allow_overwrite = true
 }
 
+locals {
+  # Flattened "<tenant id>-<token index>" keys: a DKIM CNAME's own name
+  # embeds the (unknown-until-apply) token, so — same reason the operator's
+  # ses_dkim above is count-based, not folded into the generic records list —
+  # this can't go through module.dns_tenant's "type fqdn" for_each either.
+  # Written into each tenant's OWN zone, never the operator's.
+  tenant_ses_dkim = merge([
+    for id, domain in local.tenant_ses_domains : {
+      for i in range(3) : "${id}-${i}" => {
+        tenant_id = id
+        zone_id   = var.tenants[id].dns_override.zone_id
+        domain    = domain
+        index     = i
+      }
+    }
+  ]...)
+}
+
+resource "aws_route53_record" "tenant_ses_dkim" {
+  for_each = local.tenant_ses_dkim
+  zone_id  = each.value.zone_id
+  name     = "${aws_ses_domain_dkim.tenant[each.value.tenant_id].dkim_tokens[each.value.index]}._domainkey.${each.value.domain}"
+  type     = "CNAME"
+  ttl      = 300
+  records  = ["${aws_ses_domain_dkim.tenant[each.value.tenant_id].dkim_tokens[each.value.index]}.dkim.amazonses.com"]
+  # true, not the tenant-zone default elsewhere: for the 3 already-verified
+  # tenants (Phase A) this record already exists in their zone with this
+  # exact value (the token itself came from the same already-imported
+  # aws_ses_domain_dkim.tenant resource) -- allow_overwrite adopts it
+  # in place instead of needing nine more one-off `terraform import`s.
+  allow_overwrite = true
+}
+
+# Phase B (per-tenant SES relay, draft ADR): one IAM user per tenant, scoped
+# by ses:FromAddress to exactly that tenant's own domain -- unlike the shared
+# operator credential below, a leaked tenant credential can only send as that
+# tenant, never impersonate another verified identity in this account. Added
+# alongside the shared credential, not replacing it yet; the cutover (which
+# tenant actually uses which credential) is Phase C/D, in mksrv's own code,
+# not here.
+resource "aws_iam_user" "tenant_ses_smtp" {
+  for_each = local.tenant_ses_domains
+  name     = "mksrv-${local.env}-${each.key}-ses-smtp"
+  tags     = { "mksrv:env" = local.env, "mksrv:tenant" = each.key }
+}
+
+resource "aws_iam_user_policy" "tenant_ses_smtp" {
+  for_each = local.tenant_ses_domains
+  name     = "ses-send"
+  user     = aws_iam_user.tenant_ses_smtp[each.key].name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Action    = "ses:SendRawEmail"
+      Resource  = "*"
+      Condition = { StringLike = { "ses:FromAddress" = "*@${each.value}" } }
+    }]
+  })
+}
+
+resource "aws_iam_access_key" "tenant_ses_smtp" {
+  for_each = local.tenant_ses_domains
+  user     = aws_iam_user.tenant_ses_smtp[each.key].name
+}
+
 # A dedicated IAM user scoped to ses:SendRawEmail only — no console access, no
 # other permissions. Its access key is converted to an SMTP username/password
 # (internal/aws.DeriveSESSMTPPassword) and pushed to SSM, same as every other
@@ -481,6 +561,45 @@ resource "aws_iam_user_policy" "ses_smtp" {
 resource "aws_iam_access_key" "ses_smtp" {
   count = local.outbound_smtp ? 1 : 0
   user  = aws_iam_user.ses_smtp[0].name
+}
+
+# Phase A (per-tenant SES relay, draft ADR): a domain identity per tenant
+# mksrv can write DNS into -- the same gate web:/dns: already use
+# (dns_override.provider == "route53"), deliberately NOT gated on
+# mail.outbound_smtp or mail.hosted: a tenant's own sending identity is
+# independent of both. Three of these (mcps, hg, bitabit's base_domain) are
+# imports of identities already live and verified in the account, created by
+# hand before this resource existed -- `terraform import` them, don't let
+# plan try to recreate what's already there.
+locals {
+  tenant_ses_domains = {
+    for id, t in var.tenants : id => t.base_domain
+    if try(t.dns_override.provider, "") == "route53"
+  }
+}
+
+resource "aws_ses_domain_identity" "tenant" {
+  for_each = local.tenant_ses_domains
+  domain   = each.value
+}
+
+resource "aws_ses_domain_dkim" "tenant" {
+  for_each = local.tenant_ses_domains
+  domain   = aws_ses_domain_identity.tenant[each.key].domain
+}
+
+# Only mcps has a live custom MAIL FROM today (bounce.mcps-epcm.org, set up
+# before this resource existed) -- this for_each lands on exactly that one
+# tenant because it's still gated on mail.hosted, same as the DNS-writing
+# locals above. hg/bitabit have no MAIL FROM configured in SES today; adding
+# one for them is a real change, deferred to a later phase, not an import.
+resource "aws_ses_domain_mail_from" "tenant" {
+  for_each = {
+    for id, t in var.tenants : id => t.base_domain
+    if try(t.dns_override.provider, "") == "route53" && try(coalesce(t.mail.hosted, false), false)
+  }
+  domain           = aws_ses_domain_identity.tenant[each.key].domain
+  mail_from_domain = "bounce.${each.value}"
 }
 
 module "dns_operator" {
