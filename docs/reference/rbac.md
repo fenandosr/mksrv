@@ -24,7 +24,7 @@ users:
 |---|:--:|:--:|:--:|:--:|
 | App SSO (web) | ✅ | ✅ | ✅ | — |
 | Cloud-IT VPN device | ✅ | ✅ | — | ✅ |
-| Reach tenant mesh nodes (SSH/mosh to login nodes, internal APIs) | ✅ | ✅ | — | ✅¹ |
+| Reach tenant mesh nodes (SSH/mosh to login nodes, internal APIs) | ✅ | ✅ | — | ✅ ¹ *(same as `admin`/`dev` today — see note)* |
 | Postgres `db_<id>` — DDL + read/write | ✅ | ✅ | — | — |
 | Postgres `db_<id>` — read + granted writes | ✅ | ✅ | ✅² | — |
 | OpenBao — read `kv/tenants/<id>/*`, write `kv/…/dev/*`, transit enc/dec/hmac/datakey | ✅ | ✅ | — | — |
@@ -32,7 +32,18 @@ users:
 | Manage the tenant's Keycloak users | ✅ | — | — | — |
 | Change what's published (`forwards`, `dns`, mesh nodes, `stacks`) | ✅³ | — | — | — |
 
-¹ subject to the tenant's Headscale ACL.
+¹ Not enforced anywhere today — this cell should not be read as a real
+restriction. `vpn`'s limit to the Cloud-IT VPN app (forward-only) is a
+property of that *client*, not of the key it's given: `configd`
+(`internal/configd/server.go`) mints the exact same tenant-scoped Headscale
+pre-auth key for `vpn`, `dev`, and `admin` alike — it only checks
+`claims.VPNEntitled()` (true for any of the three groups), never which one.
+That key works in any real Tailscale client, not just the Cloud-IT VPN app;
+nothing stops a `vpn`-only member from using it directly and getting the
+same `<id>@ → <id>@:*` reach `admin`/`dev` get. Today, every group with VPN
+access has full mesh reach, full stop. Tracked in ADR 0037 (draft), whose
+proposed fix is for `configd` to mint the key with a tag reflecting the
+person's actual group at issue time.
 ² `apps` requests land on the `mksrv_app` Postgres role, which has `SELECT` on
 the tenant's application schema by default; the dev opens `INSERT`/`UPDATE`/
 `DELETE` per-table with `GRANT` / RLS. PostgREST picks the role from the token's
