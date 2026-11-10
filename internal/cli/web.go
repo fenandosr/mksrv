@@ -76,18 +76,27 @@ func webFragment(w model.TenantWebEndpoint, ssoPort int) string {
 		flush_interval -1
 	}`, w.Target)
 
-	// no_log_paths (ADR 0028 addendum): log_skip is evaluated before Caddy's
+	// A bare `log` enables access logging for this hostname to the global
+	// default logger (Caddyfile.tmpl's unnamed `log { output stdout; format
+	// json }` block) — confirmed live (2026-11-09) that without this, Caddy
+	// writes NO access log for a site at all: the global `log` block alone
+	// only configures where a logger would write if something used it, it
+	// does not turn per-request logging on. no_log_paths (ADR 0028 addendum)
+	// is pointless without this — log_skip only has something to skip once
+	// logging is actually happening. log_skip is evaluated before Caddy's
 	// handle dispatch, so one matcher here covers the request whether it ends
 	// up in the plain reverse_proxy below or, for an SSO hostname, behind the
 	// oauth2-proxy gate — a URL carrying a per-recipient secret must never
 	// reach the access log, logged-in or not.
-	var noLog string
+	var noLog strings.Builder
+	noLog.WriteString("\tlog\n")
 	if len(w.NoLogPaths) > 0 {
-		noLog = fmt.Sprintf("\t@no_log path %s\n\tlog_skip @no_log\n\n", strings.Join(w.NoLogPaths, " "))
+		fmt.Fprintf(&noLog, "\t@no_log path %s\n\tlog_skip @no_log\n", strings.Join(w.NoLogPaths, " "))
 	}
+	noLog.WriteString("\n")
 
 	if !w.SSO {
-		return fmt.Sprintf("%s {\n%s\t%s\n}\n", w.Hostname, noLog, proxy)
+		return fmt.Sprintf("%s {\n%s\t%s\n}\n", w.Hostname, noLog.String(), proxy)
 	}
 
 	// Gate on a Keycloak session (ADR 0030): oauth2-proxy on the edge answers
@@ -128,7 +137,7 @@ func webFragment(w model.TenantWebEndpoint, ssoPort int) string {
 		%s
 	}
 }
-`, w.Hostname, noLog, bypass.String(), ssoPort, ssoPort, authURI, proxy)
+`, w.Hostname, noLog.String(), bypass.String(), ssoPort, ssoPort, authURI, proxy)
 }
 
 // webSSOContainer renders the per-tenant oauth2-proxy Quadlet for the edge.

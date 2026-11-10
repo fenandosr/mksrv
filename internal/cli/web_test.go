@@ -19,6 +19,7 @@ func TestWebFragment(t *testing.T) {
 	frag := webFragment(w, 4180)
 	for _, want := range []string{
 		"files.mcps-epcm.org {",
+		"\tlog\n", // confirmed live (2026-11-09): without this, Caddy writes no access log at all for the site
 		"reverse_proxy mcps-nextcloud.prod.mksrv:80 {",
 		"header_up Host {host}",
 		"header_up X-Forwarded-Proto {scheme}",
@@ -118,11 +119,23 @@ func TestWebFragmentNoLogPaths(t *testing.T) {
 	if strings.Index(frag, "log_skip") > strings.Index(frag, "reverse_proxy") {
 		t.Fatalf("log_skip must precede reverse_proxy:\n%s", frag)
 	}
+	// log_skip only has something to skip once a bare `log` has actually
+	// turned access logging on for this hostname — confirmed live
+	// (2026-11-09) that a hostname with no `log` directive at all produces
+	// no access log entries, making log_skip alone look like it "worked"
+	// for the wrong reason.
+	if !strings.Contains(frag, "\tlog\n") {
+		t.Fatalf("fragment with no_log_paths must still enable logging via a bare log directive:\n%s", frag)
+	}
 
-	// No no_log_paths set -> unchanged from before this field existed.
+	// No no_log_paths set -> still gets the bare `log` (logging stays on by
+	// default), just no log_skip matcher.
 	plain := webFragment(model.TenantWebEndpoint{Hostname: "files.mcps-epcm.org", Target: "n:80"}, 4180)
 	if strings.Contains(plain, "log_skip") {
 		t.Fatalf("fragment without no_log_paths should have no log_skip:\n%s", plain)
+	}
+	if !strings.Contains(plain, "\tlog\n") {
+		t.Fatalf("fragment without no_log_paths should still enable logging:\n%s", plain)
 	}
 
 	// Combines with an SSO gate: log_skip still applies regardless of which
