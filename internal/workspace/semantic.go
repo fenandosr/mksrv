@@ -427,6 +427,24 @@ func checkTenantDatabase(report *Report, file string, tenant model.Tenant) {
 			semanticError(report, file, fmt.Sprintf("$.database.extensions[%d]", i), "tenant.database.extension", fmt.Sprintf("extension %q is not in the allow-list", ext))
 		}
 	}
+	pg := tenant.PostgRESTSettings()
+	for i, s := range pg.Schemas {
+		if reservedSchemas[s] || strings.HasPrefix(s, "pg_") || s == "mksrv" {
+			semanticError(report, file, fmt.Sprintf("$.database.postgrest.schemas[%d]", i), "tenant.database.schema", fmt.Sprintf("schema %q is reserved", s))
+		}
+	}
+	if hook := pg.PreRequestHook; hook != "" {
+		sch, _, _ := strings.Cut(hook, ".")
+		if reservedSchemas[sch] || strings.HasPrefix(sch, "pg_") || sch == "mksrv" {
+			semanticError(report, file, "$.database.postgrest.pre_request_hook", "tenant.database.hook_name", fmt.Sprintf("hook schema %q is reserved", sch))
+		}
+	}
+	for name, r := range tenant.Database.Roles {
+		if len(r.When) > 0 {
+			semanticWarning(report, file, "$.database.roles."+name+".when", "tenant.database.rbac_shadow", "roles with `when` are declared: the admin/dev -> mksrv_owner shortcut is disabled for PostgREST (declare it explicitly if needed)")
+			break
+		}
+	}
 	if !tenant.PostgRESTEnabled() && tenant.Database.Schema != "" {
 		semanticWarning(report, file, "$.database.schema", "tenant.database.schema_unused", "schema is set but postgrest is disabled — it only names the tenant's application schema")
 	}

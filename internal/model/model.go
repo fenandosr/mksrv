@@ -3,7 +3,10 @@
 // Package model defines the public workspace and stack data contracts.
 package model
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Deployment is the decoded deployment.yaml document.
 type Deployment struct {
@@ -265,7 +268,14 @@ func (t Tenant) WebSSO() bool {
 type TenantDatabase struct {
 	// PostgREST — deploy the auto-generated REST API for this tenant. Nil or
 	// true means deploy; false means no container, no public *.rest FQDN.
-	PostgREST *bool `json:"postgrest,omitempty"`
+	// ADR 0039: also accepts an object (see PostgRESTConfig).
+	PostgREST *PostgRESTConfig `json:"postgrest,omitempty"`
+	// Roles are tenant-declared NOLOGIN privilege buckets (ADR 0039 §3), keyed
+	// by role name. Each may carry a `when` group list used by the generated
+	// pre-request function (§2).
+	Roles map[string]DBRole `json:"roles,omitempty"`
+	// RBAC tunes the generated pre-request mapping (ADR 0039 §2).
+	RBAC *DBRBAC `json:"rbac,omitempty"`
 	// Schema is the tenant's application schema (and, when PostgREST runs, the
 	// only schema it exposes). Default "app".
 	Schema string `json:"schema,omitempty"`
@@ -288,6 +298,95 @@ type TenantDatabase struct {
 	PublicSchemaCreate bool `json:"public_schema_create,omitempty"`
 }
 
+// PostgRESTConfig is `database.postgrest`: a boolean (the ADR 0029 form) or an
+// object (ADR 0039 §1). Every field is optional; unset means today's behaviour.
+type PostgRESTConfig struct {
+	Enabled *bool `json:"enabled,omitempty"`
+	// Schemas are exposed via PGRST_DB_SCHEMAS; the first is the default
+	// profile. Default: [database.schema].
+	Schemas []string `json:"schemas,omitempty"`
+	// PreRequestHook is a `schema.function` PERFORMed after SET LOCAL ROLE.
+	PreRequestHook string `json:"pre_request_hook,omitempty"`
+	// JWTAudience -> PGRST_JWT_AUD.
+	JWTAudience string `json:"jwt_audience,omitempty"`
+	// CORSOrigins -> PGRST_SERVER_CORS_ALLOWED_ORIGINS.
+	CORSOrigins []string `json:"cors_origins,omitempty"`
+	// MaxRows -> PGRST_DB_MAX_ROWS.
+	MaxRows int `json:"max_rows,omitempty"`
+}
+
+// UnmarshalJSON accepts `true`/`false` or an object.
+func (p *PostgRESTConfig) UnmarshalJSON(b []byte) error {
+	var enabled bool
+	if err := json.Unmarshal(b, &enabled); err == nil {
+		*p = PostgRESTConfig{Enabled: &enabled}
+		return nil
+	}
+	type plain PostgRESTConfig
+	var v plain
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	*p = PostgRESTConfig(v)
+	return nil
+}
+
+// MarshalJSON emits the boolean form when nothing but Enabled is set, so the
+// Terraform tenants variable (postgrest = optional(bool)) keeps working for
+// every tenant that does not use the object form.
+func (p PostgRESTConfig) MarshalJSON() ([]byte, error) {
+	if p.simple() {
+		return json.Marshal(p.Enabled == nil || *p.Enabled)
+	}
+	type plain PostgRESTConfig
+	return json.Marshal(plain(p))
+}
+
+func (p PostgRESTConfig) simple() bool {
+	return len(p.Schemas) == 0 && p.PreRequestHook == "" && p.JWTAudience == "" &&
+		len(p.CORSOrigins) == 0 && p.MaxRows == 0
+}
+
+// DBRole is one tenant-declared role (ADR 0039 §3).
+type DBRole struct {
+	MemberOf []string `json:"member_of,omitempty"`
+	// When lists Keycloak groups that must ALL be present for the generated
+	// pre-request to select this role (ADR 0039 §2).
+	When []string `json:"when,omitempty"`
+}
+
+// DBRBAC tunes the generated pre-request function.
+type DBRBAC struct {
+	// Unmapped: "deny" (default once any role declares `when`) or "anon".
+	Unmapped string `json:"unmapped,omitempty"`
+}
+
+// PostgRESTExtended reports whether the tenant uses any ADR 0039 PostgREST /
+// RBAC feature. Existing tenants are byte-identical when this is false.
+func (t Tenant) PostgRESTExtended() bool {
+	d := t.Database
+	if d == nil {
+		return false
+	}
+	return (d.PostgREST != nil && !d.PostgREST.simple()) || len(d.Roles) > 0 || d.RBAC != nil
+}
+
+// PostgRESTSchemas returns the schemas PostgREST exposes (default: DBSchema).
+func (t Tenant) PostgRESTSchemas() []string {
+	if t.Database != nil && t.Database.PostgREST != nil && len(t.Database.PostgREST.Schemas) > 0 {
+		return t.Database.PostgREST.Schemas
+	}
+	return []string{t.DBSchema()}
+}
+
+// PostgRESTSettings returns the object-form settings (zero value otherwise).
+func (t Tenant) PostgRESTSettings() PostgRESTConfig {
+	if t.Database != nil && t.Database.PostgREST != nil {
+		return *t.Database.PostgREST
+	}
+	return PostgRESTConfig{}
+}
+
 // DBSchema returns the tenant's application schema — "app" unless overridden.
 func (t Tenant) DBSchema() string {
 	if t.Database != nil && t.Database.Schema != "" {
@@ -299,7 +398,7 @@ func (t Tenant) DBSchema() string {
 // PostgRESTEnabled reports whether PostgREST is deployed for this tenant (the
 // default when it consumes the `database` stack).
 func (t Tenant) PostgRESTEnabled() bool {
-	return t.Database == nil || t.Database.PostgREST == nil || *t.Database.PostgREST
+	return t.Database == nil || t.Database.PostgREST == nil || t.Database.PostgREST.Enabled == nil || *t.Database.PostgREST.Enabled
 }
 
 // DBExtensions returns the Postgres extensions to install in db_<id>.

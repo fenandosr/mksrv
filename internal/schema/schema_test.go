@@ -213,3 +213,27 @@ users:
 		t.Fatalf("expected an email format issue, got %#v", issues)
 	}
 }
+
+func TestValidateTenantPostgRESTForms(t *testing.T) {
+	t.Parallel()
+	validator := New()
+	base := "version: 1\nid: acme\ndisplay_name: ACME\nbase_domain: acme.example.com\nstacks: [database]\n"
+	for name, tc := range map[string]struct {
+		body string
+		ok   bool
+	}{
+		"bool":     {"database:\n  postgrest: false\n", true},
+		"object":   {"database:\n  schema: api\n  postgrest:\n    schemas: [api]\n    pre_request_hook: private.check_request\n    jwt_audience: x\n    max_rows: 100\n    cors_origins: [\"https://a.example.com\"]\n  roles:\n    acme_r: {when: [reception]}\n  rbac: {unmapped: deny}\n", true},
+		"typo":     {"database:\n  postgrest:\n    schema: [api]\n", false},
+		"bad hook": {"database:\n  postgrest:\n    pre_request_hook: nodot\n", false},
+		"bad rbac": {"database:\n  rbac: {unmapped: maybe}\n", false},
+	} {
+		_, issues, err := validator.ValidateYAML("tenant.v1.json", []byte(base+tc.body))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if (len(issues) == 0) != tc.ok {
+			t.Fatalf("%s: ok=%v issues=%#v", name, tc.ok, issues)
+		}
+	}
+}

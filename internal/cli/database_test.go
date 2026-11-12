@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -193,7 +194,7 @@ func TestTenantDatabaseSQLWithOverrides(t *testing.T) {
 	sql := tenantDatabaseSQL("hg", "pw", "apw", model.Tenant{
 		ID: "hg",
 		Database: &model.TenantDatabase{
-			PostgREST:       &pt,
+			PostgREST:       &model.PostgRESTConfig{Enabled: &pt},
 			Schema:          "appdata",
 			Extensions:      []string{"pgcrypto", "uuid-ossp"},
 			ConnectionLimit: 40,
@@ -213,5 +214,59 @@ func TestTenantDatabaseSQLWithOverrides(t *testing.T) {
 	}
 	if strings.Contains(sql, `SCHEMA "app" `) || strings.Contains(sql, `"app".pgrst_pre_request`) {
 		t.Fatalf("SQL still references the default `app` schema:\n%s", sql)
+	}
+}
+
+func TestPostgRESTConfigJSON(t *testing.T) {
+	t.Parallel()
+	var d model.TenantDatabase
+	if err := json.Unmarshal([]byte(`{"postgrest": false}`), &d); err != nil || d.PostgREST == nil || *d.PostgREST.Enabled {
+		t.Fatalf("bool form: %v %+v", err, d.PostgREST)
+	}
+	if out, _ := json.Marshal(d); !strings.Contains(string(out), `"postgrest":false`) {
+		t.Fatalf("bool form must round-trip as a bool for Terraform: %s", out)
+	}
+	d = model.TenantDatabase{}
+	if err := json.Unmarshal([]byte(`{"postgrest": {"schemas": ["api"], "max_rows": 10}}`), &d); err != nil || d.PostgREST.MaxRows != 10 {
+		t.Fatalf("object form: %v %+v", err, d.PostgREST)
+	}
+	if !(model.Tenant{Database: &d}).PostgRESTEnabled() {
+		t.Fatal("object form without enabled must default to enabled")
+	}
+}
+
+func TestExtendedPreRequestSQL(t *testing.T) {
+	t.Parallel()
+	tenant := model.Tenant{ID: "hg", Database: &model.TenantDatabase{
+		Schema:    "api",
+		PostgREST: &model.PostgRESTConfig{Schemas: []string{"api", "reports"}, PreRequestHook: "private.check_request"},
+		Roles: map[string]model.DBRole{
+			"hg_reception":         {When: []string{"reception"}},
+			"hg_reception_finance": {When: []string{"finance", "reception"}},
+		},
+	}}
+	sql := tenantDatabaseSQL("hg", "pw", "apw", tenant)
+	for _, want := range []string{
+		`CREATE SCHEMA IF NOT EXISTS "reports" AUTHORIZATION mksrv_owner;`,
+		`DROP FUNCTION IF EXISTS "api".pgrst_pre_request();`,
+		`CREATE OR REPLACE FUNCTION mksrv.pgrst_pre_request()`,
+		`PERFORM "private"."check_request"();`,
+		`ERRCODE = '42501'`,
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("SQL missing %q:\n%s", want, sql)
+		}
+	}
+	// Most specific rule first, and no admin/dev shortcut.
+	i, j := strings.Index(sql, `'finance', 'reception'`), strings.Index(sql, `ARRAY['reception']`)
+	if i < 0 || j < 0 || i > j {
+		t.Fatalf("rules not ordered most-specific first:\n%s", sql)
+	}
+	if strings.Contains(sql, `grps ? 'admin'`) {
+		t.Fatalf("admin shortcut must be gone once `when` is declared:\n%s", sql)
+	}
+	// Legacy tenants are untouched.
+	if legacy := tenantDatabaseSQL("bitabit", "pw", "apw", model.Tenant{ID: "bitabit"}); strings.Contains(legacy, "mksrv.pgrst_pre_request") {
+		t.Fatalf("legacy tenant must keep <schema>.pgrst_pre_request")
 	}
 }

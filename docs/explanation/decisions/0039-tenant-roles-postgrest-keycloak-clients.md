@@ -1,6 +1,6 @@
 # ADR 0039: Tenant-declared database roles, configurable PostgREST, and declarative Keycloak clients
 
-- Status: Proposed
+- Status: Accepted (§1, §2 implemented; §3-§6 pending)
 - Date: 2026-11-12
 - Refines: ADR 0016 (tenant Keycloak RBAC), ADR 0026 (global Postgres RBAC roles), ADR 0029 (tenant `database:` block)
 
@@ -66,8 +66,10 @@ database:
 ```
 
 - `when` is a list of Keycloak groups that must **all** be present (AND).
-  Entries are evaluated in declaration order; the first match wins, so more
-  specific roles go first. No explicit priorities.
+  The first match wins. Rules are ordered deterministically, **most specific
+  first** (more required groups, then role name): the YAML loader goes through
+  JSON, so map declaration order is not preserved and cannot be the rule. No
+  explicit priorities.
 - If at least one `when` is declared, the `admin`/`dev` → `mksrv_owner`
   shortcut **is removed** for PostgREST unless the tenant declares it
   (`when: [admin]` → `mksrv_owner`). `unmapped` defaults to `deny`

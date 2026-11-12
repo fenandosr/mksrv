@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -377,11 +378,119 @@ func tenantDatabaseSQL(id, password, authPassword string, t model.Tenant) string
 		// granted anon).
 		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %s IN SCHEMA %q REVOKE SELECT ON TABLES FROM %s;`, dbOwnerRole, schema, dbAnonRole),
 		fmt.Sprintf(`REVOKE SELECT ON ALL TABLES IN SCHEMA %q FROM %s;`, schema, dbAnonRole),
-
-		pgrstPreRequestSQL(schema),
-		fmt.Sprintf(`ALTER FUNCTION %q.pgrst_pre_request() OWNER TO %s;`, schema, dbOwnerRole),
-		fmt.Sprintf(`GRANT EXECUTE ON FUNCTION %q.pgrst_pre_request() TO %s, %s;`, schema, dbWebRole, dbAnonRole),
-		"",
 	)
+	if t.PostgRESTExtended() {
+		stmts = append(stmts, extendedPostgRESTSQL(t)...)
+	} else {
+		stmts = append(stmts,
+			pgrstPreRequestSQL(schema),
+			fmt.Sprintf(`ALTER FUNCTION %q.pgrst_pre_request() OWNER TO %s;`, schema, dbOwnerRole),
+			fmt.Sprintf(`GRANT EXECUTE ON FUNCTION %q.pgrst_pre_request() TO %s, %s;`, schema, dbWebRole, dbAnonRole),
+		)
+	}
+	stmts = append(stmts, "")
 	return strings.Join(stmts, "\n")
+}
+
+// extendedPostgRESTSQL is the ADR 0039 variant: extra exposed schemas, and the
+// generated pre-request in the non-exposed `mksrv` schema (so it is neither an
+// RPC nor in the OpenAPI document). The legacy <schema>.pgrst_pre_request is
+// dropped for opted-in tenants.
+func extendedPostgRESTSQL(t model.Tenant) []string {
+	schema := t.DBSchema()
+	out := []string{}
+	for _, s := range t.PostgRESTSchemas() {
+		if s == schema {
+			continue
+		}
+		out = append(out,
+			fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS %q AUTHORIZATION %s;`, s, dbOwnerRole),
+			fmt.Sprintf(`ALTER SCHEMA %q OWNER TO %s;`, s, dbOwnerRole),
+			fmt.Sprintf(`GRANT USAGE ON SCHEMA %q TO %s, %s, %s;`, s, dbAppRole, dbAnonRole, dbWebRole),
+			fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %s IN SCHEMA %q GRANT ALL ON TABLES TO %s;`, dbOwnerRole, s, dbOwnerRole),
+		)
+	}
+	out = append(out,
+		fmt.Sprintf(`DROP FUNCTION IF EXISTS %q.pgrst_pre_request();`, schema),
+		fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS mksrv AUTHORIZATION %s;`, dbOwnerRole),
+		fmt.Sprintf(`GRANT USAGE ON SCHEMA mksrv TO %s, %s;`, dbWebRole, dbAnonRole),
+		generatedPreRequestSQL(t),
+		fmt.Sprintf(`ALTER FUNCTION mksrv.pgrst_pre_request() OWNER TO %s;`, dbOwnerRole),
+		fmt.Sprintf(`GRANT EXECUTE ON FUNCTION mksrv.pgrst_pre_request() TO %s, %s;`, dbWebRole, dbAnonRole),
+	)
+	return out
+}
+
+// roleRule is one `when` mapping, ordered most-specific first.
+type roleRule struct {
+	role   string
+	groups []string
+}
+
+// roleRules returns the tenant's `when` mappings. YAML maps carry no order
+// (the loader goes through JSON), so rules are ordered deterministically: more
+// required groups first, then by role name. First match wins.
+func roleRules(t model.Tenant) []roleRule {
+	if t.Database == nil {
+		return nil
+	}
+	var rules []roleRule
+	for name, r := range t.Database.Roles {
+		if len(r.When) > 0 {
+			g := append([]string(nil), r.When...)
+			sort.Strings(g)
+			rules = append(rules, roleRule{role: name, groups: g})
+		}
+	}
+	sort.Slice(rules, func(i, j int) bool {
+		if len(rules[i].groups) != len(rules[j].groups) {
+			return len(rules[i].groups) > len(rules[j].groups)
+		}
+		return rules[i].role < rules[j].role
+	})
+	return rules
+}
+
+// generatedPreRequestSQL builds mksrv.pgrst_pre_request() (ADR 0039 §2). With
+// at least one `when` rule the admin/dev -> mksrv_owner shortcut is gone and
+// unmatched tokens are denied (42501 -> HTTP 403) unless rbac.unmapped is
+// "anon". Without rules the legacy mapping is kept. The optional hook runs
+// after SET LOCAL ROLE, i.e. under the business role.
+func generatedPreRequestSQL(t model.Tenant) string {
+	lit := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	rules := roleRules(t)
+	var b strings.Builder
+	b.WriteString("CREATE OR REPLACE FUNCTION mksrv.pgrst_pre_request() RETURNS void LANGUAGE plpgsql AS $mksrv$\n")
+	b.WriteString("DECLARE claims text := current_setting('request.jwt.claims', true); grps jsonb;\nBEGIN\n")
+	b.WriteString("  IF claims IS NULL OR claims = '' THEN RETURN; END IF;\n")
+	b.WriteString("  grps := coalesce((claims::jsonb) -> 'groups', '[]'::jsonb);\n")
+	if len(rules) == 0 {
+		b.WriteString("  IF grps ? 'admin' OR grps ? 'dev' THEN SET LOCAL ROLE mksrv_owner;\n")
+		b.WriteString("  ELSIF grps ? 'apps' THEN SET LOCAL ROLE mksrv_app;\n")
+		b.WriteString("  ELSE SET LOCAL ROLE mksrv_anon;\n  END IF;\n")
+	} else {
+		for i, r := range rules {
+			kw := "ELSIF"
+			if i == 0 {
+				kw = "IF"
+			}
+			lits := make([]string, len(r.groups))
+			for k, g := range r.groups {
+				lits[k] = lit(g)
+			}
+			fmt.Fprintf(&b, "  %s grps ?& ARRAY[%s] THEN SET LOCAL ROLE %q;\n", kw, strings.Join(lits, ", "), r.role)
+		}
+		if t.Database.RBAC != nil && t.Database.RBAC.Unmapped == "anon" {
+			b.WriteString("  ELSE SET LOCAL ROLE mksrv_anon;\n")
+		} else {
+			b.WriteString("  ELSE RAISE EXCEPTION 'no role mapped for token groups' USING ERRCODE = '42501';\n")
+		}
+		b.WriteString("  END IF;\n")
+	}
+	if hook := t.PostgRESTSettings().PreRequestHook; hook != "" {
+		sch, fn, _ := strings.Cut(hook, ".")
+		fmt.Fprintf(&b, "  PERFORM %q.%q();\n", sch, fn)
+	}
+	b.WriteString("END;\n$mksrv$;")
+	return b.String()
 }

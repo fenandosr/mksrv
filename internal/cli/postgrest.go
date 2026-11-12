@@ -156,6 +156,9 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 		rctx.Secrets = map[string]string{
 			"listen_port": strconv.Itoa(port),
 			"rest_fqdn":   restFQDN,
+			// ADR 0039: issuer for hooks that validate `iss`; only rendered
+			// for tenants that use the extended PostgREST/RBAC config.
+			"oidc_issuer": "https://" + dep.Identity.KeycloakDomain + "/realms/" + tenantRealm(tenant),
 		}
 		unit, err := render.One(
 			filepath.Join(f.stacksRoot, "database", "templates", "postgrest.container.tmpl"),
