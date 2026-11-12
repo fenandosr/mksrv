@@ -54,7 +54,7 @@ the tenant's application schema by default; the dev opens `INSERT`/`UPDATE`/
 by default** (ADR 0029): the PostgREST URL is public, so anything reachable
 without a token is opt-in — the dev runs `GRANT SELECT ON <schema>.<table> TO
 mksrv_anon` for exactly what should be world-readable. A tenant that exposes
-nothing publicly sets `database.postgrest: false` and no container is deployed.
+nothing publicly simply does not enable PostgREST (`database.postgrest` is opt-in, off by default) and no container is deployed.
 ³ via a reviewed PR to `tenants/<id>.yaml` — the admin is the CODEOWNER; there is
 no runtime "publish" API.
 
@@ -105,7 +105,7 @@ clients, protocol mappers, or realm settings.
   mapping are unchanged. *Done.*
 - **M29** — `mksrv_anon` no longer gets a blanket `SELECT` on the application
   schema; anonymous read access is opt-in per table (ADR 0029). The optional
-  `database:` block adds `postgrest` (default on), `schema`, `extensions`, and
+  `database:` block adds `postgrest` (opt-in), `schema`, `extensions`, and
   `connection_limit`. *Done.*
 
 The RBAC model is fully enforced across Keycloak, the VPN, OpenBao, and Postgres.

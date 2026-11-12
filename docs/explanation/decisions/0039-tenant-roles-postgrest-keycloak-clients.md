@@ -28,11 +28,20 @@ isolation or changing behaviour for existing tenants.
 
 ## Decision
 
-Everything below is **optional**. A tenant that declares none of it produces
-byte-identical SQL, container units and realm configuration (enforced by golden
-tests on `bitabit`, `mcps`, `gtex`).
+The role, group, client and setting features below are **optional**: a tenant
+that declares none of them gets the same realm and base roles as before.
 
-### 1. `database.postgrest` becomes an object (the boolean still works)
+**Breaking change (no PostgREST consumer existed when this landed):**
+PostgREST itself is now **opt-in**. A tenant without `database.postgrest: true`
+(or the object form) gets no container, no `<id>_auth` role, no
+`mksrv.pgrst_pre_request` and no `<id>.rest.<root_domain>` DNS record, and
+`mksrv deploy` / `tenant apply` remove any left over from before (container,
+podman secrets, Caddy fragment, `<id>_auth` role + its CONNECT grant, the
+pre-request function; the only residue is the unused `_authpw` SSM parameter). Every PostgREST tenant now uses
+the generated pre-request in the `mksrv` schema; the old
+`<schema>.pgrst_pre_request` is dropped.
+
+### 1. `database.postgrest` becomes an opt-in object (`true` still works)
 
 ```yaml
 database:
@@ -49,8 +58,7 @@ database:
   `PGRST_SERVER_CORS_ALLOWED_ORIGINS`, `PGRST_DB_MAX_ROWS`. Variables are
   emitted only when declared.
 - Listed schemas are created if missing, owned by `mksrv_owner`.
-- `PGRST_APP_SETTINGS_OIDC_ISSUER` is injected only when the object form is
-  used (so existing containers do not change).
+- `PGRST_APP_SETTINGS_OIDC_ISSUER` is always injected.
 - One PostgREST instance per tenant stays. Several instances per tenant
   (`postgrest.instances[]`) are deferred; several projects = several schemas.
 
@@ -183,10 +191,10 @@ tenants (found while preparing `hgstg`: it would have pushed `mcps` from 3012 to
 3013). Pin the live ports in `mksrv.lock` (or run one apply with the new binary
 before adding the tenant) first.
 
-Terraform types `database.postgrest` as `optional(bool)`; the object form is
-collapsed to its enabled flag before reaching Terraform
-(`normalizeTenantsForTerraform`). Must
-land before adding a staging tenant.
+Terraform types `database.postgrest` as `object({enabled})`; the settings are
+reduced to the enabled flag before reaching Terraform
+(`normalizeTenantsForTerraform`), and only enabled tenants get a
+`<id>.rest.<root_domain>` record.
 
 ### Deferred
 

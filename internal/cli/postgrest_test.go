@@ -22,15 +22,17 @@ import (
 func TestPostgrestConsumerIDsExcludesNonConsumers(t *testing.T) {
 	t.Parallel()
 	pf := false
+	pt := true
+	on := &model.TenantDatabase{PostgREST: &model.PostgRESTConfig{Enabled: &pt}}
 	tenants := map[string]model.Tenant{
-		"bitabit": {ID: "bitabit", Stacks: []string{"database"}},
-		"gtex":    {ID: "gtex", Stacks: []string{}}, // web:-only, no database stack
-		"hg":      {ID: "hg", Stacks: []string{"database"}},
-		"mcps":    {ID: "mcps", Stacks: []string{"database"}},
+		"bitabit": {ID: "bitabit", Stacks: []string{"database"}, Database: on},
+		"gtex":    {ID: "gtex", Stacks: []string{}, Database: on}, // no database stack
+		"hg":      {ID: "hg", Stacks: []string{"database"}, Database: on},
+		"mcps":    {ID: "mcps", Stacks: []string{"database"}}, // PostgREST is opt-in
 		"nopgrst": {ID: "nopgrst", Stacks: []string{"database"}, Database: &model.TenantDatabase{PostgREST: &model.PostgRESTConfig{Enabled: &pf}}},
 	}
 	got := postgrestConsumerIDs(tenants)
-	want := []string{"bitabit", "hg", "mcps"}
+	want := []string{"bitabit", "hg"}
 	if len(got) != len(want) {
 		t.Fatalf("postgrestConsumerIDs() = %v, want %v", got, want)
 	}
@@ -46,7 +48,8 @@ func TestAssignPostgRESTPorts(t *testing.T) {
 	db := func(ids ...string) map[string]model.Tenant {
 		m := map[string]model.Tenant{}
 		for _, id := range ids {
-			m[id] = model.Tenant{ID: id, Stacks: []string{"database"}}
+			pt := true
+			m[id] = model.Tenant{ID: id, Stacks: []string{"database"}, Database: &model.TenantDatabase{PostgREST: &model.PostgRESTConfig{Enabled: &pt}}}
 		}
 		return m
 	}
@@ -85,14 +88,14 @@ func TestPostgrestTemplateExtendedEnv(t *testing.T) {
 		}
 		return string(out)
 	}
-	legacy := renderUnit(model.Tenant{ID: "bitabit"})
-	for _, no := range []string{"PGRST_JWT_AUD", "PGRST_APP_SETTINGS", "PGRST_DB_MAX_ROWS", "mksrv.pgrst_pre_request"} {
-		if strings.Contains(legacy, no) {
-			t.Fatalf("legacy unit must not contain %s:\n%s", no, legacy)
+	base := renderUnit(model.Tenant{ID: "bitabit"})
+	for _, no := range []string{"PGRST_JWT_AUD", "PGRST_DB_MAX_ROWS", "PGRST_SERVER_CORS"} {
+		if strings.Contains(base, no) {
+			t.Fatalf("unit without settings must not contain %s:\n%s", no, base)
 		}
 	}
-	if !strings.Contains(legacy, "PGRST_DB_PRE_REQUEST=app.pgrst_pre_request") || !strings.Contains(legacy, "PGRST_DB_SCHEMAS=app\n") {
-		t.Fatalf("legacy unit changed:\n%s", legacy)
+	if !strings.Contains(base, "PGRST_DB_PRE_REQUEST=mksrv.pgrst_pre_request") || !strings.Contains(base, "PGRST_DB_SCHEMAS=app\n") {
+		t.Fatalf("base unit changed:\n%s", base)
 	}
 	ext := renderUnit(model.Tenant{ID: "hg", Database: &model.TenantDatabase{Schema: "api", PostgREST: &model.PostgRESTConfig{
 		Schemas: []string{"api", "reports"}, JWTAudience: "hg-lims-api", CORSOrigins: []string{"https://a.example.com", "https://b.example.com"}, MaxRows: 1000}}})

@@ -456,9 +456,6 @@ func checkTenantDatabase(report *Report, file string, tenant model.Tenant) {
 			break
 		}
 	}
-	if !tenant.PostgRESTEnabled() && tenant.Database.Schema != "" {
-		semanticWarning(report, file, "$.database.schema", "tenant.database.schema_unused", "schema is set but postgrest is disabled — it only names the tenant's application schema")
-	}
 }
 
 // checkTenantLocalHosts validates a tenant's local_hosts (ADR 0034) — a

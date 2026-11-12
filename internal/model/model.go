@@ -341,22 +341,6 @@ func (p *PostgRESTConfig) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON emits the boolean form when nothing but Enabled is set, so the
-// Terraform tenants variable (postgrest = optional(bool)) keeps working for
-// every tenant that does not use the object form.
-func (p PostgRESTConfig) MarshalJSON() ([]byte, error) {
-	if p.simple() {
-		return json.Marshal(p.Enabled == nil || *p.Enabled)
-	}
-	type plain PostgRESTConfig
-	return json.Marshal(plain(p))
-}
-
-func (p PostgRESTConfig) simple() bool {
-	return len(p.Schemas) == 0 && p.PreRequestHook == "" && p.JWTAudience == "" &&
-		len(p.CORSOrigins) == 0 && p.MaxRows == 0
-}
-
 // DBRole is one tenant-declared role (ADR 0039 §3).
 type DBRole struct {
 	MemberOf []string `json:"member_of,omitempty"`
@@ -393,16 +377,6 @@ type DBRBAC struct {
 	Unmapped string `json:"unmapped,omitempty"`
 }
 
-// PostgRESTExtended reports whether the tenant uses any ADR 0039 PostgREST /
-// RBAC feature. Existing tenants are byte-identical when this is false.
-func (t Tenant) PostgRESTExtended() bool {
-	d := t.Database
-	if d == nil {
-		return false
-	}
-	return (d.PostgREST != nil && !d.PostgREST.simple()) || len(d.Roles) > 0 || d.RBAC != nil
-}
-
 // PostgRESTSchemas returns the schemas PostgREST exposes (default: DBSchema).
 func (t Tenant) PostgRESTSchemas() []string {
 	if t.Database != nil && t.Database.PostgREST != nil && len(t.Database.PostgREST.Schemas) > 0 {
@@ -427,10 +401,12 @@ func (t Tenant) DBSchema() string {
 	return "app"
 }
 
-// PostgRESTEnabled reports whether PostgREST is deployed for this tenant (the
-// default when it consumes the `database` stack).
+// PostgRESTEnabled reports whether PostgREST is deployed for this tenant. It is
+// opt-in: `database.postgrest: true` or an object (unless `enabled: false`).
+// Tenants without it get no container, no <id>_auth role and no DNS record.
 func (t Tenant) PostgRESTEnabled() bool {
-	return t.Database == nil || t.Database.PostgREST == nil || t.Database.PostgREST.Enabled == nil || *t.Database.PostgREST.Enabled
+	d := t.Database
+	return d != nil && d.PostgREST != nil && (d.PostgREST.Enabled == nil || *d.PostgREST.Enabled)
 }
 
 // DBExtensions returns the Postgres extensions to install in db_<id>.

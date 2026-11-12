@@ -185,9 +185,11 @@ func (f *fleet) provisionDatabases(ctx context.Context, printer ui.Printer, tena
 		if err != nil {
 			return err
 		}
-		authPass, err := f.resolver.EnsureRandom(ctx, "/mksrv/{env}/database/tenant_"+id+"_authpw", 24)
-		if err != nil {
-			return err
+		authPass := ""
+		if f.data.Tenants[id].PostgRESTEnabled() {
+			if authPass, err = f.resolver.EnsureRandom(ctx, "/mksrv/{env}/database/tenant_"+id+"_authpw", 24); err != nil {
+				return err
+			}
 		}
 		svcPass := map[string]string{}
 		for role := range f.data.Tenants[id].DBServiceRoles() {
@@ -266,24 +268,6 @@ const (
 	dbWebRole   = "mksrv_web"   // PostgREST impersonation landing role
 )
 
-// pgrstPreRequestSQL builds the db-pre-request function in the tenant's schema.
-// It targets the global buckets (ADR 0026); token-less requests early-return
-// (PostgREST already set the anon role), otherwise SET LOCAL ROLE by the
-// `groups` claim.
-func pgrstPreRequestSQL(schema string) string {
-	return fmt.Sprintf(`CREATE OR REPLACE FUNCTION %q.pgrst_pre_request() RETURNS void LANGUAGE plpgsql AS $mksrv$
-DECLARE claims text := current_setting('request.jwt.claims', true); grps jsonb;
-BEGIN
-  IF claims IS NULL OR claims = '' THEN RETURN; END IF;
-  grps := coalesce((claims::jsonb) -> 'groups', '[]'::jsonb);
-  IF grps ? 'admin' OR grps ? 'dev' THEN SET LOCAL ROLE mksrv_owner;
-  ELSIF grps ? 'apps' THEN SET LOCAL ROLE mksrv_app;
-  ELSE SET LOCAL ROLE mksrv_anon;
-  END IF;
-END;
-$mksrv$;`, schema)
-}
-
 // globalRBACRolesSQL creates the four cluster-global buckets and their
 // membership graph. Idempotent; run once per `mksrv tenant apply`, before any
 // tenant database. Fixed role names — no user input, so a plain \gexec guard is
@@ -325,7 +309,6 @@ func tenantDatabaseSQL(id, password, authPassword string, t model.Tenant) string
 func tenantDatabaseSQLWith(id, password, authPassword string, servicePasswords map[string]string, t model.Tenant) string {
 	db := "db_" + id
 	login := id + "_login" // humans (admin/dev) over the VPN; member of mksrv_owner
-	auth := id + "_auth"   // PostgREST authenticator; member of mksrv_web
 	schema := t.DBSchema()
 	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
@@ -346,17 +329,13 @@ func tenantDatabaseSQLWith(id, password, authPassword string, servicePasswords m
 		// tenant); only current_user reads mksrv_owner.
 		fmt.Sprintf(`ALTER ROLE %q SET role TO %s;`, login, dbOwnerRole),
 
-		fmt.Sprintf(`SELECT format('CREATE ROLE %%I LOGIN NOINHERIT PASSWORD %%L', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(auth), q(authPassword), q(auth)),
-		fmt.Sprintf(`ALTER ROLE %q WITH LOGIN NOINHERIT PASSWORD %s;`, auth, q(authPassword)),
-		fmt.Sprintf(`GRANT %s TO %q;`, dbWebRole, auth),
-
 		// db_<id> owner stays the per-tenant role: a global database owner could
 		// ALTER DATABASE db_<other> from any session.
 		fmt.Sprintf(`SELECT format('CREATE DATABASE %%I OWNER %%I', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = %s)\gexec`, q(db), q(login), q(db)),
 		fmt.Sprintf(`REVOKE ALL ON DATABASE %q FROM PUBLIC;`, db),
 		fmt.Sprintf(`GRANT CONNECT, CREATE ON DATABASE %q TO %q;`, db, login),
-		fmt.Sprintf(`GRANT CONNECT ON DATABASE %q TO %q;`, db, auth),
 	}
+	stmts = append(stmts, authenticatorSQL(id, authPassword, t)...)
 	stmts = append(stmts, tenantRolesSQL(id, t, servicePasswords)...)
 	stmts = append(stmts, fmt.Sprintf(`\connect %q`, db))
 
@@ -393,25 +372,46 @@ func tenantDatabaseSQLWith(id, password, authPassword string, servicePasswords m
 		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %s IN SCHEMA %q REVOKE SELECT ON TABLES FROM %s;`, dbOwnerRole, schema, dbAnonRole),
 		fmt.Sprintf(`REVOKE SELECT ON ALL TABLES IN SCHEMA %q FROM %s;`, schema, dbAnonRole),
 	)
-	if t.PostgRESTExtended() {
-		stmts = append(stmts, extendedPostgRESTSQL(t)...)
-	} else {
-		stmts = append(stmts,
-			pgrstPreRequestSQL(schema),
-			fmt.Sprintf(`ALTER FUNCTION %q.pgrst_pre_request() OWNER TO %s;`, schema, dbOwnerRole),
-			fmt.Sprintf(`GRANT EXECUTE ON FUNCTION %q.pgrst_pre_request() TO %s, %s;`, schema, dbWebRole, dbAnonRole),
-		)
-	}
+	stmts = append(stmts, postgrestSQL(t)...)
 	stmts = append(stmts, "")
 	return strings.Join(stmts, "\n")
 }
 
-// extendedPostgRESTSQL is the ADR 0039 variant: extra exposed schemas, and the
-// generated pre-request in the non-exposed `mksrv` schema (so it is neither an
-// RPC nor in the OpenAPI document). The legacy <schema>.pgrst_pre_request is
-// dropped for opted-in tenants.
-func extendedPostgRESTSQL(t model.Tenant) []string {
+// authenticatorSQL creates the PostgREST authenticator (<id>_auth) for tenants
+// that opted in, and removes it (with its CONNECT grant) for tenants that did
+// not, so turning PostgREST off leaves no role behind. Runs before \connect.
+func authenticatorSQL(id, authPassword string, t model.Tenant) []string {
+	db, auth := "db_"+id, id+"_auth"
+	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	if !t.PostgRESTEnabled() {
+		return []string{
+			// DROP ROLE fails while the role still holds privileges; the only
+			// ones mksrv ever grants it are CONNECT and the mksrv_web membership.
+			fmt.Sprintf(`SELECT format('REVOKE ALL ON DATABASE %%I FROM %%I', %s, %s) WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = %s) AND EXISTS (SELECT FROM pg_database WHERE datname = %s)\gexec`, q(db), q(auth), q(auth), q(db)),
+			fmt.Sprintf(`SELECT format('DROP ROLE %%I', %s) WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(auth), q(auth)),
+		}
+	}
+	return []string{
+		fmt.Sprintf(`SELECT format('CREATE ROLE %%I LOGIN NOINHERIT PASSWORD %%L', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, q(auth), q(authPassword), q(auth)),
+		fmt.Sprintf(`ALTER ROLE %q WITH LOGIN NOINHERIT PASSWORD %s;`, auth, q(authPassword)),
+		fmt.Sprintf(`GRANT %s TO %q;`, dbWebRole, auth),
+		fmt.Sprintf(`GRANT CONNECT ON DATABASE %q TO %q;`, db, auth),
+	}
+}
+
+// postgrestSQL is the in-database half of PostgREST (ADR 0039): extra exposed
+// schemas and the generated pre-request in the non-exposed `mksrv` schema (so it
+// is neither an RPC nor in the OpenAPI document). Tenants without PostgREST get
+// the function dropped instead.
+func postgrestSQL(t model.Tenant) []string {
 	schema := t.DBSchema()
+	if !t.PostgRESTEnabled() {
+		return []string{
+			`DROP FUNCTION IF EXISTS mksrv.pgrst_pre_request();`,
+			`DROP SCHEMA IF EXISTS mksrv;`,
+			fmt.Sprintf(`DROP FUNCTION IF EXISTS %q.pgrst_pre_request();`, schema),
+		}
+	}
 	out := []string{}
 	for _, s := range t.PostgRESTSchemas() {
 		if s == schema {
@@ -425,6 +425,8 @@ func extendedPostgRESTSQL(t model.Tenant) []string {
 		)
 	}
 	out = append(out,
+		// Heal tenants provisioned before ADR 0039: the old function lived in
+		// the exposed application schema (and so showed up as an RPC).
 		fmt.Sprintf(`DROP FUNCTION IF EXISTS %q.pgrst_pre_request();`, schema),
 		fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS mksrv AUTHORIZATION %s;`, dbOwnerRole),
 		fmt.Sprintf(`GRANT USAGE ON SCHEMA mksrv TO %s, %s;`, dbWebRole, dbAnonRole),
@@ -573,7 +575,9 @@ func tenantRolesSQL(id string, t model.Tenant, servicePasswords map[string]strin
 		for _, m := range t.Database.Roles[n].MemberOf {
 			out = append(out, fmt.Sprintf(`GRANT %q TO %q;`, m, n))
 		}
-		out = append(out, fmt.Sprintf(`GRANT %q TO %q;`, n, auth))
+		if t.PostgRESTEnabled() {
+			out = append(out, fmt.Sprintf(`GRANT %q TO %q;`, n, auth))
+		}
 	}
 	for _, n := range svc {
 		for _, m := range t.Database.ServiceRoles[n].MemberOf {

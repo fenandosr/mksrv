@@ -372,7 +372,7 @@ func TestStackRendersDataPlane(t *testing.T) {
 	}
 	// ...and named + wired per tenant when Tenant is set.
 	ctx.Tenant = &model.Tenant{ID: "bitabit"}
-	ctx.Secrets = map[string]string{"listen_port": "3010", "rest_fqdn": "bitabit.rest.example.com"}
+	ctx.Secrets = map[string]string{"listen_port": "3010", "rest_fqdn": "bitabit.rest.example.com", "oidc_issuer": "https://kc.example.com/realms/bitabit"}
 	tFiles, err := Stack(stacksRoot, catalog["database"], ctx)
 	if err != nil {
 		t.Fatalf("Stack(database, tenant) error = %v", err)
@@ -384,7 +384,7 @@ func TestStackRendersDataPlane(t *testing.T) {
 		"PublishPort=100.64.0.1:3010:3000",
 		"PGRST_DB_SCHEMAS=app",
 		"PGRST_DB_ANON_ROLE=mksrv_anon",
-		"PGRST_DB_PRE_REQUEST=app.pgrst_pre_request",
+		"PGRST_DB_PRE_REQUEST=mksrv.pgrst_pre_request",
 		"mksrv-database-postgrest-bitabit-jwt,type=env,target=PGRST_JWT_SECRET",
 	} {
 		if !strings.Contains(pgrst, want) {
@@ -399,7 +399,7 @@ func TestStackRendersDataPlane(t *testing.T) {
 		t.Fatalf("Stack(database, schema override) error = %v", err)
 	}
 	spg := string(sFiles["/etc/containers/systemd/mksrv-postgrest-bitabit.container"])
-	if !strings.Contains(spg, "PGRST_DB_SCHEMAS=appdata") || !strings.Contains(spg, "PGRST_DB_PRE_REQUEST=appdata.pgrst_pre_request") {
+	if !strings.Contains(spg, "PGRST_DB_SCHEMAS=appdata") || !strings.Contains(spg, "PGRST_DB_PRE_REQUEST=mksrv.pgrst_pre_request") {
 		t.Fatalf("schema override not reflected in postgrest env:\n%s", spg)
 	}
 

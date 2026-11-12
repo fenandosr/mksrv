@@ -173,6 +173,11 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 		printer.Success("tenant %s: postgrest disabled (torn down)", id)
 	}
 	if len(consumers) == 0 {
+		if len(postgrestConsumerIDs(f.data.Tenants)) == 0 {
+			// Last PostgREST consumer gone: remove the JWKS refresh machinery too.
+			_, _ = client.Run(ctx, "sudo systemctl disable --now mksrv-postgrest-jwks-refresh.timer 2>/dev/null || true")
+			_, _ = client.Run(ctx, "sudo rm -f /etc/systemd/system/mksrv-postgrest-jwks-refresh.service /etc/systemd/system/mksrv-postgrest-jwks-refresh.timer "+jwksRefreshScriptPath+" "+jwksRefreshListPath)
+		}
 		_, _ = client.Run(ctx, "sudo systemctl daemon-reload")
 		_, _ = edgeClient.Run(ctx, "sudo podman exec mksrv-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile || sudo systemctl restart mksrv-caddy.service")
 		return nil
@@ -243,7 +248,7 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 		}
 	}
 
-	if err := installJWKSRefresh(ctx, client, jwksRefreshList(consumers, f.data.Tenants, dep.Identity.KeycloakDomain)); err != nil {
+	if err := installJWKSRefresh(ctx, client, jwksRefreshList(postgrestConsumerIDs(f.data.Tenants), f.data.Tenants, dep.Identity.KeycloakDomain)); err != nil {
 		return fmt.Errorf("install postgrest JWKS refresh: %w", err)
 	}
 	if _, err := client.Run(ctx, "sudo systemctl daemon-reload"); err != nil {

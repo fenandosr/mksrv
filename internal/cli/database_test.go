@@ -121,7 +121,8 @@ func TestGlobalRBACRolesSQL(t *testing.T) {
 
 func TestTenantDatabaseSQL(t *testing.T) {
 	t.Parallel()
-	sql := tenantDatabaseSQL("bitabit", "s3cr3t'value", "auth'pw", model.Tenant{ID: "bitabit"})
+	pt := true
+	sql := tenantDatabaseSQL("bitabit", "s3cr3t'value", "auth'pw", model.Tenant{ID: "bitabit", Database: &model.TenantDatabase{PostgREST: &model.PostgRESTConfig{Enabled: &pt}}})
 	for _, want := range []string{
 		// two per-tenant login roles only
 		`CREATE ROLE %I LOGIN PASSWORD %L`,
@@ -148,7 +149,7 @@ func TestTenantDatabaseSQL(t *testing.T) {
 		`ALTER DEFAULT PRIVILEGES FOR ROLE mksrv_owner IN SCHEMA "app" REVOKE SELECT ON TABLES FROM mksrv_anon;`,
 		`REVOKE SELECT ON ALL TABLES IN SCHEMA "app" FROM mksrv_anon;`,
 		`IF grps ? 'admin' OR grps ? 'dev' THEN SET LOCAL ROLE mksrv_owner;`,
-		`GRANT EXECUTE ON FUNCTION "app".pgrst_pre_request() TO mksrv_web, mksrv_anon;`,
+		`GRANT EXECUTE ON FUNCTION mksrv.pgrst_pre_request() TO mksrv_web, mksrv_anon;`,
 	} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("SQL missing %q:\n%s", want, sql)
@@ -206,13 +207,13 @@ func TestTenantDatabaseSQLWithOverrides(t *testing.T) {
 		`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`,
 		`CREATE SCHEMA IF NOT EXISTS "appdata" AUTHORIZATION mksrv_owner;`,
 		`ALTER DATABASE "db_hg" SET search_path TO "appdata", public;`,
-		`CREATE OR REPLACE FUNCTION "appdata".pgrst_pre_request()`,
+		`CREATE OR REPLACE FUNCTION mksrv.pgrst_pre_request()`,
 	} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("SQL missing %q:\n%s", want, sql)
 		}
 	}
-	if strings.Contains(sql, `SCHEMA "app" `) || strings.Contains(sql, `"app".pgrst_pre_request`) {
+	if strings.Contains(sql, `SCHEMA "app" `) {
 		t.Fatalf("SQL still references the default `app` schema:\n%s", sql)
 	}
 }
@@ -222,9 +223,6 @@ func TestPostgRESTConfigJSON(t *testing.T) {
 	var d model.TenantDatabase
 	if err := json.Unmarshal([]byte(`{"postgrest": false}`), &d); err != nil || d.PostgREST == nil || *d.PostgREST.Enabled {
 		t.Fatalf("bool form: %v %+v", err, d.PostgREST)
-	}
-	if out, _ := json.Marshal(d); !strings.Contains(string(out), `"postgrest":false`) {
-		t.Fatalf("bool form must round-trip as a bool for Terraform: %s", out)
 	}
 	d = model.TenantDatabase{}
 	if err := json.Unmarshal([]byte(`{"postgrest": {"schemas": ["api"], "max_rows": 10}}`), &d); err != nil || d.PostgREST.MaxRows != 10 {
@@ -265,15 +263,26 @@ func TestExtendedPreRequestSQL(t *testing.T) {
 	if strings.Contains(sql, `grps ? 'admin'`) {
 		t.Fatalf("admin shortcut must be gone once `when` is declared:\n%s", sql)
 	}
-	// Legacy tenants are untouched.
-	if legacy := tenantDatabaseSQL("bitabit", "pw", "apw", model.Tenant{ID: "bitabit"}); strings.Contains(legacy, "mksrv.pgrst_pre_request") {
-		t.Fatalf("legacy tenant must keep <schema>.pgrst_pre_request")
+	// A tenant without PostgREST gets no authenticator or pre-request, and any
+	// leftovers are removed.
+	off := tenantDatabaseSQL("mcps", "pw", "", model.Tenant{ID: "mcps"})
+	for _, want := range []string{`DROP ROLE %I`, `REVOKE ALL ON DATABASE %I FROM %I`, `DROP FUNCTION IF EXISTS mksrv.pgrst_pre_request();`} {
+		if !strings.Contains(off, want) {
+			t.Fatalf("PostgREST-less SQL missing %q:\n%s", want, off)
+		}
+	}
+	for _, no := range []string{`CREATE ROLE %I LOGIN NOINHERIT`, `GRANT mksrv_web TO`, `CREATE OR REPLACE FUNCTION`} {
+		if strings.Contains(off, no) {
+			t.Fatalf("PostgREST-less SQL must not contain %q:\n%s", no, off)
+		}
 	}
 }
 
 func TestTenantRolesSQL(t *testing.T) {
 	t.Parallel()
+	pt := true
 	tenant := model.Tenant{ID: "hg", Database: &model.TenantDatabase{
+		PostgREST:         &model.PostgRESTConfig{Enabled: &pt},
 		DefaultPrivileges: "none",
 		Roles: map[string]model.DBRole{
 			"hg_authenticated": {},

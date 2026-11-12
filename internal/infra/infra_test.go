@@ -182,7 +182,7 @@ func copyExampleWorkspace(t *testing.T) string {
 	return destination
 }
 
-func TestNormalizeTenantsCollapsesPostgRESTObjectForTerraform(t *testing.T) {
+func TestNormalizeTenantsReducesPostgRESTToEnabledForTerraform(t *testing.T) {
 	t.Parallel()
 	enabled := true
 	in := map[string]model.Tenant{"hgstg": {ID: "hgstg", Database: &model.TenantDatabase{
@@ -190,8 +190,8 @@ func TestNormalizeTenantsCollapsesPostgRESTObjectForTerraform(t *testing.T) {
 	}}}
 	out := normalizeTenantsForTerraform(in)
 	blob, err := json.Marshal(out["hgstg"].Database)
-	if err != nil || !strings.Contains(string(blob), `"postgrest":true`) {
-		t.Fatalf("postgrest must reach Terraform as a bool: %s %v", blob, err)
+	if err != nil || !strings.Contains(string(blob), `"postgrest":{"enabled":true}`) {
+		t.Fatalf("postgrest must reach Terraform as {enabled}: %s %v", blob, err)
 	}
 	if in["hgstg"].Database.PostgREST.MaxRows != 10 {
 		t.Fatal("normalization must not mutate the caller's tenant")

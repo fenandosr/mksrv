@@ -16,7 +16,6 @@ mail:
       name: "Team Lead"
 stacks: [database, files, analytics, monitor]
 database:
-  postgrest: false
   extensions: [pgcrypto, uuid-ossp]
   connection_limit: 40
 forwards:
