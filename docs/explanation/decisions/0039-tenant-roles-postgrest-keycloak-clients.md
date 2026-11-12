@@ -115,9 +115,11 @@ database:
   `mksrv_*` are reserved. Never `SUPERUSER`, `CREATEROLE`, `BYPASSRLS` or
   `REPLICATION`. Service roles get `CONNECT` only on `db_<id>`; passwords come
   from `EnsureRandom` like the others.
-- Service-role passwords are generated into SSM (`tenant_<id>_svc_<role>_password`);
-  mirroring them into OpenBao is not implemented yet. Membership is additive:
-  removing a `member_of` entry from the YAML does not revoke it.
+- Service-role passwords are generated into SSM (`tenant_<id>_svc_<role>_password`)
+  and, for tenants with the `openbao` stack, mirrored to
+  `kv/tenants/<id>/database-<role>` (same write-if-missing-or-drifted rule as the
+  tenant's own database secret). Membership is additive: removing a
+  `member_of` entry from the YAML does not revoke it.
 - mksrv manages existence, membership and `CONNECT` only. Object privileges
   belong to the app's migrations inside `db_<id>`.
 - `default_privileges: none` stops the default grants to `mksrv_app` on the
