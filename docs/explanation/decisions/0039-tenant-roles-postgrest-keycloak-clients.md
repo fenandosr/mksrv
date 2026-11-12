@@ -1,6 +1,6 @@
 # ADR 0039: Tenant-declared database roles, configurable PostgREST, and declarative Keycloak clients
 
-- Status: Accepted (§1, §2, §3, §6 implemented; §4-§5 pending)
+- Status: Accepted (§1, §2, §3, §5, §6 implemented; §4 pending)
 - Date: 2026-11-12
 - Refines: ADR 0016 (tenant Keycloak RBAC), ADR 0026 (global Postgres RBAC roles), ADR 0029 (tenant `database:` block)
 
@@ -148,11 +148,16 @@ keycloak:
 ```
 
 - Validation: client id carries the tenant prefix; redirects are `https`,
-  inside `base_domain`, no wildcards. `localhost` is allowed only in a tenant
-  explicitly marked `environment: non-production`, never by default.
-  `settings` is an allow-list with ranges.
-- `mksrv-`-prefixed mappers reconcile **to desired state** (create, update,
-  delete stale ones); foreign mappers are never touched. This closes the ADR
+  inside `base_domain`, no wildcards. `localhost` is allowed only with the
+  explicit `keycloak.allow_localhost: true` on the tenant (non-production), never
+  by default. `settings` is an allow-list whose ranges are enforced by the JSON
+  Schema (so a violation reports as a schema issue, not
+  `tenant.keycloak.setting`). Ranges: `access_token_lifespan` 60-3600 s,
+  `sso_session_idle` 300-86400 s.
+- `mksrv-`-prefixed mappers reconcile **to desired state** (create, update
+  drifted values in place on every client; delete stale ones only on
+  tenant-declared clients, since other code paths add their own `mksrv-*`
+  mappers such as `mksrv-audience`); foreign mappers are never touched. This closes the ADR
   0016 limitation.
 - `tenantGroups` becomes `base ∪ keycloak.groups`; `*.users.yaml` validates
   against the union.

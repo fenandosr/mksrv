@@ -5,6 +5,7 @@ package workspace
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -172,6 +173,7 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 		checkTenantWeb(report, tenantFile, tenant)
 		checkTenantDatabase(report, tenantFile, tenant)
 		checkTenantRoles(report, tenantFile, tenant, data.Tenants)
+		checkTenantKeycloak(report, tenantFile, tenant)
 		checkTenantMail(report, tenantFile, tenant, len(assigned["mail"]) > 0)
 		checkTenantLocalHosts(report, tenantFile, tenant, data.Catalog, seenLocalHostNames, deploymentHostNames)
 	}
@@ -193,6 +195,13 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 				semanticError(report, usersFile, fmt.Sprintf("$.users[%d].email", index), "users.email.duplicate", fmt.Sprintf("email duplicates users[%d]", first))
 			} else {
 				seenEmails[normalized] = index
+			}
+			if t, ok := data.Tenants[tenantID]; ok {
+				for _, g := range user.Groups {
+					if !contains(t.KeycloakGroups(), g) {
+						semanticError(report, usersFile, fmt.Sprintf("$.users[%d].groups", index), "users.group.unknown", fmt.Sprintf("group %q is not a realm group of tenant %q (%s)", g, tenantID, strings.Join(t.KeycloakGroups(), "|")))
+					}
+				}
 			}
 		}
 	}
@@ -344,8 +353,8 @@ func checkTenantWeb(report *Report, file string, tenant model.Tenant) {
 			semanticError(report, file, path+".sso_groups", "tenant.web.sso_groups", "sso_groups requires sso: true")
 		}
 		for _, g := range w.SSOGroups {
-			if g != "admin" && g != "dev" && g != "apps" && g != "vpn" {
-				semanticError(report, file, path+".sso_groups", "tenant.web.sso_groups", fmt.Sprintf("unknown realm group %q (admin|dev|apps|vpn)", g))
+			if !contains(tenant.KeycloakGroups(), g) {
+				semanticError(report, file, path+".sso_groups", "tenant.web.sso_groups", fmt.Sprintf("unknown realm group %q (%s)", g, strings.Join(tenant.KeycloakGroups(), "|")))
 			}
 		}
 		if len(w.SSOBypassPaths) > 0 && !w.SSO {
@@ -815,4 +824,69 @@ func sameRole(a, b model.DBRole) bool {
 	sort.Strings(x)
 	sort.Strings(y)
 	return slices.Equal(x, y)
+}
+
+// checkTenantKeycloak validates declared Keycloak clients and the `when` groups
+// of database roles (ADR 0039 §5).
+func checkTenantKeycloak(report *Report, file string, tenant model.Tenant) {
+	groups := tenant.KeycloakGroups()
+	if tenant.Database != nil {
+		for name, r := range tenant.Database.Roles {
+			for _, g := range r.When {
+				if !contains(groups, g) {
+					semanticError(report, file, "$.database.roles."+name+".when", "tenant.database.when_group", fmt.Sprintf("group %q is not a realm group of the tenant (%s); declare it under keycloak.groups", g, strings.Join(groups, "|")))
+				}
+			}
+		}
+	}
+	seen := map[string]bool{}
+	for i, c := range tenant.Keycloak.Clients {
+		path := fmt.Sprintf("$.keycloak.clients[%d]", i)
+		switch {
+		case !strings.HasPrefix(c.ID, tenant.ID+"-"):
+			semanticError(report, file, path+".id", "tenant.keycloak.client_id", fmt.Sprintf("client id %q must start with %q", c.ID, tenant.ID+"-"))
+		case c.ID == tenant.ID+"-websso":
+			semanticError(report, file, path+".id", "tenant.keycloak.client_id", fmt.Sprintf("client id %q is reserved for the web SSO gate", c.ID))
+		}
+		if seen[c.ID] {
+			semanticError(report, file, path+".id", "tenant.keycloak.client_id", fmt.Sprintf("duplicate client id %q", c.ID))
+		}
+		seen[c.ID] = true
+		for j, u := range c.RedirectURIs {
+			checkClientRedirect(report, file, fmt.Sprintf("%s.redirect_uris[%d]", path, j), u, tenant)
+		}
+		for j, u := range c.PostLogoutRedirectURIs {
+			checkClientRedirect(report, file, fmt.Sprintf("%s.post_logout_redirect_uris[%d]", path, j), u, tenant)
+		}
+		if c.DirectGrants && c.Public {
+			semanticError(report, file, path+".direct_grants", "tenant.keycloak.client_id", "a public client must not enable direct_grants (password grant)")
+		}
+	}
+}
+
+func checkClientRedirect(report *Report, file, path, raw string, tenant model.Tenant) {
+	bad := func(msg string) {
+		semanticError(report, file, path, "tenant.keycloak.redirect", fmt.Sprintf("redirect %q %s", raw, msg))
+	}
+	if strings.Contains(raw, "*") {
+		bad("must not contain a wildcard")
+		return
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		bad("is not a valid absolute URL")
+		return
+	}
+	host := u.Hostname()
+	if tenant.Keycloak.AllowLocalhost && (host == "localhost" || host == "127.0.0.1") && (u.Scheme == "http" || u.Scheme == "https") {
+		return
+	}
+	if u.Scheme != "https" {
+		bad("must use https")
+		return
+	}
+	base := tenant.BaseDomain
+	if base == "" || (host != base && !strings.HasSuffix(host, "."+base)) {
+		bad(fmt.Sprintf("must be inside the tenant base_domain %q", base))
+	}
 }

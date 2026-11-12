@@ -556,8 +556,63 @@ type DNSOverride struct {
 	Server   string `json:"server,omitempty"`
 }
 
+// BaseTenantGroups is the per-tenant RBAC group set every realm gets (ADR 0016).
+// admin manages the team and owns the tenant boundary; dev builds inside it;
+// apps is app SSO; vpn is a standalone mesh-device capability.
+var BaseTenantGroups = []string{"admin", "dev", "apps", "vpn"}
+
 type TenantKeycloak struct {
 	Realm string `json:"realm,omitempty"`
+	// Groups are additional realm groups, additive to BaseTenantGroups (ADR 0039 §5).
+	Groups []string `json:"groups,omitempty"`
+	// Settings is an allow-listed subset of realm settings.
+	Settings *KeycloakSettings `json:"settings,omitempty"`
+	// Clients are tenant-declared OIDC clients, reconciled to desired state.
+	Clients []KeycloakClient `json:"clients,omitempty"`
+	// AllowLocalhost permits http://localhost redirect URIs on declared clients.
+	// Only for a non-production tenant (ADR 0039 §5).
+	AllowLocalhost bool `json:"allow_localhost,omitempty"`
+}
+
+// KeycloakSettings is the allow-list of realm settings a tenant may declare.
+type KeycloakSettings struct {
+	AccessTokenLifespan  int   `json:"access_token_lifespan,omitempty"` // seconds
+	RefreshTokenRotation *bool `json:"refresh_token_rotation,omitempty"`
+	SSOSessionIdle       int   `json:"sso_session_idle,omitempty"` // seconds
+}
+
+// KeycloakClient is one tenant-declared OIDC client (ADR 0039 §5).
+type KeycloakClient struct {
+	ID                     string   `json:"id"`
+	Public                 bool     `json:"public"`
+	RedirectURIs           []string `json:"redirect_uris"`
+	PostLogoutRedirectURIs []string `json:"post_logout_redirect_uris,omitempty"`
+	PKCE                   string   `json:"pkce,omitempty"`
+	DirectGrants           bool     `json:"direct_grants,omitempty"`
+	Audience               []string `json:"audience,omitempty"`
+	Claims                 struct {
+		Groups        bool `json:"groups,omitempty"`
+		PostgRESTRole bool `json:"postgrest_role,omitempty"`
+	} `json:"claims,omitempty"`
+}
+
+// KeycloakGroups returns the tenant's full realm group set: base groups plus
+// declared ones, de-duplicated, base first.
+func (t Tenant) KeycloakGroups() []string {
+	out := append([]string(nil), BaseTenantGroups...)
+	for _, g := range t.Keycloak.Groups {
+		dup := false
+		for _, e := range out {
+			if e == g {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 type Branding struct {

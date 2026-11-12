@@ -20,7 +20,39 @@
     },
     "keycloak": {
       "type": "object", "additionalProperties": false,
-      "properties": {"realm": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"}}
+      "properties": {
+        "realm": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"},
+        "groups": {"type": "array", "uniqueItems": true, "maxItems": 32, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}},
+        "allow_localhost": {"type": "boolean", "default": false},
+        "settings": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "access_token_lifespan": {"type": "integer", "minimum": 60, "maximum": 3600},
+            "refresh_token_rotation": {"type": "boolean"},
+            "sso_session_idle": {"type": "integer", "minimum": 300, "maximum": 86400}
+          }
+        },
+        "clients": {
+          "type": "array", "maxItems": 16,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["id", "redirect_uris"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"},
+              "public": {"type": "boolean", "default": false},
+              "redirect_uris": {"type": "array", "minItems": 1, "uniqueItems": true, "maxItems": 16, "items": {"type": "string", "maxLength": 2048}},
+              "post_logout_redirect_uris": {"type": "array", "uniqueItems": true, "maxItems": 16, "items": {"type": "string", "maxLength": 2048}},
+              "pkce": {"type": "string", "enum": ["S256"]},
+              "direct_grants": {"type": "boolean", "default": false},
+              "audience": {"type": "array", "uniqueItems": true, "maxItems": 8, "items": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"}},
+              "claims": {
+                "type": "object", "additionalProperties": false,
+                "properties": {"groups": {"type": "boolean"}, "postgrest_role": {"type": "boolean"}}
+              }
+            }
+          }
+        }
+      }
     },
     "mail": {
       "type": "object", "additionalProperties": false,

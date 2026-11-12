@@ -568,7 +568,7 @@ func TestValidateTenantRoles(t *testing.T) {
 		body string
 		code string // "" = must be valid
 	}{
-		"valid":      {"\n  roles:\n    acme_reader: {}\n    acme_editor: {member_of: [acme_reader], when: [editors]}\n  service_roles:\n    acme_worker: {member_of: [acme_reader]}", ""},
+		"valid":      {"\n  roles:\n    acme_reader: {}\n    acme_editor: {member_of: [acme_reader], when: [apps]}\n  service_roles:\n    acme_worker: {member_of: [acme_reader]}", ""},
 		"bad prefix": {"\n  roles:\n    other_reader: {}", "tenant.database.role_name"},
 		"reserved":   {"\n  roles:\n    acme_auth: {}", "tenant.database.role_name"},
 		"undeclared": {"\n  roles:\n    acme_a: {member_of: [acme_missing]}", "tenant.database.role_member"},
@@ -589,4 +589,48 @@ func TestValidateTenantRoles(t *testing.T) {
 		}
 		assertIssueCode(t, report, tc.code)
 	}
+}
+
+func TestValidateTenantKeycloakClients(t *testing.T) {
+	t.Parallel()
+	const anchor = "stacks: [database, files, analytics, monitor]"
+	for name, tc := range map[string]struct {
+		body string
+		code string
+	}{
+		"valid":             {"\nkeycloak:\n  groups: [reception]\n  clients:\n    - id: acme-web\n      public: true\n      redirect_uris: [https://app.acme.example.com/cb]\n      audience: [acme-api]\n      claims: {groups: true, postgrest_role: true}", ""},
+		"prefix":            {"\nkeycloak:\n  clients:\n    - id: web\n      redirect_uris: [https://app.acme.example.com/cb]", "tenant.keycloak.client_id"},
+		"websso":            {"\nkeycloak:\n  clients:\n    - id: acme-websso\n      redirect_uris: [https://app.acme.example.com/cb]", "tenant.keycloak.client_id"},
+		"http":              {"\nkeycloak:\n  clients:\n    - id: acme-web\n      redirect_uris: [http://app.acme.example.com/cb]", "tenant.keycloak.redirect"},
+		"outside":           {"\nkeycloak:\n  clients:\n    - id: acme-web\n      redirect_uris: [https://evil.example.org/cb]", "tenant.keycloak.redirect"},
+		"wildcard":          {"\nkeycloak:\n  clients:\n    - id: acme-web\n      redirect_uris: [https://app.acme.example.com/*]", "tenant.keycloak.redirect"},
+		"localhost":         {"\nkeycloak:\n  clients:\n    - id: acme-web\n      redirect_uris: [http://localhost:5173/cb]", "tenant.keycloak.redirect"},
+		"localhost allowed": {"\nkeycloak:\n  allow_localhost: true\n  clients:\n    - id: acme-web\n      redirect_uris: [http://localhost:5173/cb]", ""},
+	} {
+		root := copyExample(t)
+		patchTenant(t, root, anchor, anchor+tc.body)
+		report := revalidate(t, root)
+		if tc.code == "" {
+			if !report.Valid {
+				t.Fatalf("%s: unexpected issues %#v", name, report.Issues)
+			}
+			continue
+		}
+		if report.Valid {
+			t.Fatalf("%s: expected invalid report", name)
+		}
+		assertIssueCode(t, report, tc.code)
+	}
+}
+
+func TestValidateWhenGroupMustExistInRealm(t *testing.T) {
+	t.Parallel()
+	const anchor = "extensions: [pgcrypto, uuid-ossp]"
+	root := copyExample(t)
+	patchTenant(t, root, anchor, anchor+"\n  roles:\n    acme_r: {when: [ghost]}")
+	report := revalidate(t, root)
+	if report.Valid {
+		t.Fatal("expected invalid report")
+	}
+	assertIssueCode(t, report, "tenant.database.when_group")
 }
