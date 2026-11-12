@@ -189,7 +189,15 @@ func (f *fleet) provisionDatabases(ctx context.Context, printer ui.Printer, tena
 		if err != nil {
 			return err
 		}
-		if err := psql("postgres", tenantDatabaseSQL(id, dbPass, authPass, f.data.Tenants[id])); err != nil {
+		svcPass := map[string]string{}
+		for role := range f.data.Tenants[id].DBServiceRoles() {
+			pw, err := f.resolver.EnsureRandom(ctx, "/mksrv/{env}/database/tenant_"+id+"_svc_"+role+"_password", 24)
+			if err != nil {
+				return err
+			}
+			svcPass[role] = pw
+		}
+		if err := psql("postgres", tenantDatabaseSQLWith(id, dbPass, authPass, svcPass, f.data.Tenants[id])); err != nil {
 			return fmt.Errorf("provision database for %s: %w", id, err)
 		}
 		pgTenants = append(pgTenants, id)
@@ -309,6 +317,12 @@ func globalRBACRolesSQL() string {
 // requested extensions, and the application schema wired to the global buckets
 // (ADR 0026 + ADR 0029). Idempotent.
 func tenantDatabaseSQL(id, password, authPassword string, t model.Tenant) string {
+	return tenantDatabaseSQLWith(id, password, authPassword, nil, t)
+}
+
+// tenantDatabaseSQLWith is tenantDatabaseSQL plus the generated passwords of the
+// tenant's declared service roles (ADR 0039 §3), keyed by role name.
+func tenantDatabaseSQLWith(id, password, authPassword string, servicePasswords map[string]string, t model.Tenant) string {
 	db := "db_" + id
 	login := id + "_login" // humans (admin/dev) over the VPN; member of mksrv_owner
 	auth := id + "_auth"   // PostgREST authenticator; member of mksrv_web
@@ -342,9 +356,9 @@ func tenantDatabaseSQL(id, password, authPassword string, t model.Tenant) string
 		fmt.Sprintf(`REVOKE ALL ON DATABASE %q FROM PUBLIC;`, db),
 		fmt.Sprintf(`GRANT CONNECT, CREATE ON DATABASE %q TO %q;`, db, login),
 		fmt.Sprintf(`GRANT CONNECT ON DATABASE %q TO %q;`, db, auth),
-
-		fmt.Sprintf(`\connect %q`, db),
 	}
+	stmts = append(stmts, tenantRolesSQL(id, t, servicePasswords)...)
+	stmts = append(stmts, fmt.Sprintf(`\connect %q`, db))
 
 	for _, ext := range t.DBExtensions() {
 		stmts = append(stmts, fmt.Sprintf(`CREATE EXTENSION IF NOT EXISTS %q;`, ext))
@@ -372,8 +386,8 @@ func tenantDatabaseSQL(id, password, authPassword string, t model.Tenant) string
 		// (ADR 0029) — PostgREST's URL is public, so a tenant grants anon
 		// access per table for exactly what it wants public. mksrv_app is
 		// authenticated + group-gated, so it keeps the default.
-		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %s IN SCHEMA %q GRANT SELECT ON TABLES TO %s;`, dbOwnerRole, schema, dbAppRole),
-		fmt.Sprintf(`GRANT SELECT ON ALL TABLES IN SCHEMA %q TO %s;`, schema, dbAppRole),
+		appSelectSQL(t, schema)[0],
+		appSelectSQL(t, schema)[1],
 		// Heal a database provisioned before ADR 0029 (the old SQL blanket-
 		// granted anon).
 		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %s IN SCHEMA %q REVOKE SELECT ON TABLES FROM %s;`, dbOwnerRole, schema, dbAnonRole),
@@ -493,4 +507,78 @@ func generatedPreRequestSQL(t model.Tenant) string {
 	}
 	b.WriteString("END;\n$mksrv$;")
 	return b.String()
+}
+
+// appSelectSQL returns the two statements that control mksrv_app's SELECT on
+// the tenant schema: default grant (ADR 0026/0029), or with
+// default_privileges: none the explicit revoke (ADR 0039 §3).
+func appSelectSQL(t model.Tenant, schema string) [2]string {
+	if t.Database != nil && t.Database.DefaultPrivileges == "none" {
+		return [2]string{
+			fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %s IN SCHEMA %q REVOKE SELECT ON TABLES FROM %s;`, dbOwnerRole, schema, dbAppRole),
+			fmt.Sprintf(`REVOKE SELECT ON ALL TABLES IN SCHEMA %q FROM %s;`, schema, dbAppRole),
+		}
+	}
+	return [2]string{
+		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %s IN SCHEMA %q GRANT SELECT ON TABLES TO %s;`, dbOwnerRole, schema, dbAppRole),
+		fmt.Sprintf(`GRANT SELECT ON ALL TABLES IN SCHEMA %q TO %s;`, schema, dbAppRole),
+	}
+}
+
+// tenantRolesSQL creates the tenant-declared roles (ADR 0039 §3). Roles are
+// cluster-global, so creation is idempotent and attributes are pinned; the
+// tenant's authenticator <id>_auth (never mksrv_web) is the only role granted
+// membership in the NOLOGIN roles, so it can assume only its own tenant's
+// roles. Service roles are LOGIN, get CONNECT on db_<id> only, and are not
+// reachable through the authenticator. Object privileges are the app's
+// migrations' job.
+func tenantRolesSQL(id string, t model.Tenant, servicePasswords map[string]string) []string {
+	if t.Database == nil || (len(t.Database.Roles) == 0 && len(t.Database.ServiceRoles) == 0) {
+		return nil
+	}
+	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	const safe = "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+	auth, db := id+"_auth", "db_"+id
+
+	names := make([]string, 0, len(t.Database.Roles))
+	for n := range t.Database.Roles {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	svc := make([]string, 0, len(t.Database.ServiceRoles))
+	for n := range t.Database.ServiceRoles {
+		svc = append(svc, n)
+	}
+	sort.Strings(svc)
+
+	var out []string
+	for _, n := range names {
+		out = append(out,
+			fmt.Sprintf(`SELECT format('CREATE ROLE %%I NOLOGIN %s', %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, safe, q(n), q(n)),
+			fmt.Sprintf(`ALTER ROLE %q NOLOGIN %s;`, n, safe),
+		)
+	}
+	for _, n := range svc {
+		limit := "-1"
+		if cl := t.Database.ServiceRoles[n].ConnectionLimit; cl > 0 {
+			limit = strconv.Itoa(cl)
+		}
+		out = append(out,
+			fmt.Sprintf(`SELECT format('CREATE ROLE %%I LOGIN %s PASSWORD %%L', %s, %s) WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s)\gexec`, safe, q(n), q(servicePasswords[n]), q(n)),
+			fmt.Sprintf(`ALTER ROLE %q WITH LOGIN %s PASSWORD %s CONNECTION LIMIT %s;`, n, safe, q(servicePasswords[n]), limit),
+			fmt.Sprintf(`GRANT CONNECT ON DATABASE %q TO %q;`, db, n),
+		)
+	}
+	for _, n := range names {
+		for _, m := range t.Database.Roles[n].MemberOf {
+			out = append(out, fmt.Sprintf(`GRANT %q TO %q;`, m, n))
+		}
+		out = append(out, fmt.Sprintf(`GRANT %q TO %q;`, n, auth))
+	}
+	for _, n := range svc {
+		for _, m := range t.Database.ServiceRoles[n].MemberOf {
+			out = append(out, fmt.Sprintf(`GRANT %q TO %q;`, m, n))
+		}
+	}
+	return out
 }

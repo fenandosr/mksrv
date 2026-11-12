@@ -81,6 +81,19 @@
             }
           }
         },
+        "role_prefix": {"type": "string", "pattern": "^[a-z][a-z0-9]{0,30}$"},
+        "default_privileges": {"type": "string", "enum": ["mksrv", "none"], "default": "mksrv"},
+        "service_roles": {
+          "type": "object", "maxProperties": 16,
+          "propertyNames": {"pattern": "^[a-z_][a-z0-9_]{0,62}$"},
+          "additionalProperties": {
+            "type": "object", "additionalProperties": false,
+            "properties": {
+              "member_of": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$"}},
+              "connection_limit": {"type": "integer", "minimum": 1, "maximum": 500}
+            }
+          }
+        },
         "rbac": {
           "type": "object", "additionalProperties": false,
           "properties": {"unmapped": {"type": "string", "enum": ["deny", "anon"]}}

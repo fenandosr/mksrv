@@ -1,6 +1,6 @@
 # ADR 0039: Tenant-declared database roles, configurable PostgREST, and declarative Keycloak clients
 
-- Status: Accepted (§1, §2, §6 implemented; §3-§5 pending)
+- Status: Accepted (§1, §2, §3, §6 implemented; §4-§5 pending)
 - Date: 2026-11-12
 - Refines: ADR 0016 (tenant Keycloak RBAC), ADR 0026 (global Postgres RBAC roles), ADR 0029 (tenant `database:` block)
 
@@ -107,6 +107,9 @@ database:
   `mksrv_*` are reserved. Never `SUPERUSER`, `CREATEROLE`, `BYPASSRLS` or
   `REPLICATION`. Service roles get `CONNECT` only on `db_<id>`; passwords come
   from `EnsureRandom` like the others.
+- Service-role passwords are generated into SSM (`tenant_<id>_svc_<role>_password`);
+  mirroring them into OpenBao is not implemented yet. Membership is additive:
+  removing a `member_of` entry from the YAML does not revoke it.
 - mksrv manages existence, membership and `CONNECT` only. Object privileges
   belong to the app's migrations inside `db_<id>`.
 - `default_privileges: none` stops the default grants to `mksrv_app` on the

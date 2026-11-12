@@ -276,6 +276,16 @@ type TenantDatabase struct {
 	Roles map[string]DBRole `json:"roles,omitempty"`
 	// RBAC tunes the generated pre-request mapping (ADR 0039 §2).
 	RBAC *DBRBAC `json:"rbac,omitempty"`
+	// RolePrefix names the tenant's role namespace: every declared role must
+	// start with "<prefix>_". Default: the tenant id (ADR 0039 §3).
+	RolePrefix string `json:"role_prefix,omitempty"`
+	// ServiceRoles are LOGIN roles (e.g. a worker needing LISTEN/NOTIFY over a
+	// direct connection); passwords are generated and kept in SSM.
+	ServiceRoles map[string]DBServiceRole `json:"service_roles,omitempty"`
+	// DefaultPrivileges: "mksrv" (default, ADR 0026/0029 behaviour: mksrv_app
+	// gets SELECT on the tenant schema) or "none" (deny-by-default; the app's
+	// migrations grant everything).
+	DefaultPrivileges string `json:"default_privileges,omitempty"`
 	// Schema is the tenant's application schema (and, when PostgREST runs, the
 	// only schema it exposes). Default "app".
 	Schema string `json:"schema,omitempty"`
@@ -353,6 +363,28 @@ type DBRole struct {
 	// When lists Keycloak groups that must ALL be present for the generated
 	// pre-request to select this role (ADR 0039 §2).
 	When []string `json:"when,omitempty"`
+}
+
+// DBServiceRole is a tenant-declared LOGIN role.
+type DBServiceRole struct {
+	MemberOf        []string `json:"member_of,omitempty"`
+	ConnectionLimit int      `json:"connection_limit,omitempty"`
+}
+
+// DBRolePrefix returns the tenant's role namespace prefix (default: the id).
+func (t Tenant) DBRolePrefix() string {
+	if t.Database != nil && t.Database.RolePrefix != "" {
+		return t.Database.RolePrefix
+	}
+	return t.ID
+}
+
+// DBServiceRoles returns the tenant's declared LOGIN roles.
+func (t Tenant) DBServiceRoles() map[string]DBServiceRole {
+	if t.Database == nil {
+		return nil
+	}
+	return t.Database.ServiceRoles
 }
 
 // DBRBAC tunes the generated pre-request function.

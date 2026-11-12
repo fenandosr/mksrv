@@ -560,3 +560,33 @@ func TestCheckMultiInstanceStacks(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateTenantRoles(t *testing.T) {
+	t.Parallel()
+	const anchor = "extensions: [pgcrypto, uuid-ossp]"
+	for name, tc := range map[string]struct {
+		body string
+		code string // "" = must be valid
+	}{
+		"valid":      {"\n  roles:\n    acme_reader: {}\n    acme_editor: {member_of: [acme_reader], when: [editors]}\n  service_roles:\n    acme_worker: {member_of: [acme_reader]}", ""},
+		"bad prefix": {"\n  roles:\n    other_reader: {}", "tenant.database.role_name"},
+		"reserved":   {"\n  roles:\n    acme_auth: {}", "tenant.database.role_name"},
+		"undeclared": {"\n  roles:\n    acme_a: {member_of: [acme_missing]}", "tenant.database.role_member"},
+		"cycle":      {"\n  roles:\n    acme_a: {member_of: [acme_b]}\n    acme_b: {member_of: [acme_a]}", "tenant.database.role_member"},
+	} {
+		root := copyExample(t)
+		patchTenant(t, root, anchor, anchor+tc.body)
+		report := revalidate(t, root)
+		if tc.code == "" {
+			if !report.Valid {
+				t.Fatalf("%s: unexpected issues %#v", name, report.Issues)
+			}
+			assertIssueCode(t, report, "tenant.database.rbac_shadow")
+			continue
+		}
+		if report.Valid {
+			t.Fatalf("%s: expected invalid report", name)
+		}
+		assertIssueCode(t, report, tc.code)
+	}
+}

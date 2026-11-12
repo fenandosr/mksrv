@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -170,6 +171,7 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 		checkTenantMeshRoutes(report, tenantFile, tenant)
 		checkTenantWeb(report, tenantFile, tenant)
 		checkTenantDatabase(report, tenantFile, tenant)
+		checkTenantRoles(report, tenantFile, tenant, data.Tenants)
 		checkTenantMail(report, tenantFile, tenant, len(assigned["mail"]) > 0)
 		checkTenantLocalHosts(report, tenantFile, tenant, data.Catalog, seenLocalHostNames, deploymentHostNames)
 	}
@@ -705,4 +707,112 @@ func contains(values []string, expected string) bool {
 		}
 	}
 	return false
+}
+
+// checkTenantRoles validates tenant-declared database roles (ADR 0039 §3).
+// Roles are cluster-global, so names are namespaced by role_prefix, may not
+// collide with any tenant's <id>_login/<id>_auth or mksrv_*, and two tenants
+// sharing a prefix must define a shared role identically.
+func checkTenantRoles(report *Report, file string, tenant model.Tenant, all map[string]model.Tenant) {
+	d := tenant.Database
+	if d == nil || (len(d.Roles) == 0 && len(d.ServiceRoles) == 0) {
+		return
+	}
+	prefix := tenant.DBRolePrefix()
+	reserved := func(name string) bool {
+		if strings.HasPrefix(name, "mksrv_") || strings.HasPrefix(name, "pg_") {
+			return true
+		}
+		for id := range all {
+			if name == id+"_login" || name == id+"_auth" {
+				return true
+			}
+		}
+		return false
+	}
+	checkName := func(path, name string) {
+		switch {
+		case !strings.HasPrefix(name, prefix+"_"):
+			semanticError(report, file, path, "tenant.database.role_name", fmt.Sprintf("role %q must start with %q", name, prefix+"_"))
+		case reserved(name):
+			semanticError(report, file, path, "tenant.database.role_name", fmt.Sprintf("role name %q is reserved", name))
+		}
+	}
+	for name := range d.Roles {
+		checkName("$.database.roles."+name, name)
+		if _, dup := d.ServiceRoles[name]; dup {
+			semanticError(report, file, "$.database.service_roles."+name, "tenant.database.role_name", fmt.Sprintf("role %q is declared in both roles and service_roles", name))
+		}
+	}
+	for name := range d.ServiceRoles {
+		checkName("$.database.service_roles."+name, name)
+	}
+	member := func(path, from string, targets []string) {
+		for _, m := range targets {
+			if _, ok := d.Roles[m]; !ok {
+				semanticError(report, file, path, "tenant.database.role_member", fmt.Sprintf("%q is member_of undeclared role %q (service roles can only join declared NOLOGIN roles)", from, m))
+			}
+		}
+	}
+	for name, r := range d.Roles {
+		member("$.database.roles."+name+".member_of", name, r.MemberOf)
+	}
+	for name, r := range d.ServiceRoles {
+		member("$.database.service_roles."+name+".member_of", name, r.MemberOf)
+	}
+	// Cycle detection over declared NOLOGIN roles.
+	state := map[string]int{}
+	var visit func(string) bool
+	visit = func(n string) bool {
+		switch state[n] {
+		case 1:
+			return true
+		case 2:
+			return false
+		}
+		state[n] = 1
+		for _, m := range d.Roles[n].MemberOf {
+			if _, ok := d.Roles[m]; ok && visit(m) {
+				return true
+			}
+		}
+		state[n] = 2
+		return false
+	}
+	names := make([]string, 0, len(d.Roles))
+	for n := range d.Roles {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		if visit(n) {
+			semanticError(report, file, "$.database.roles."+n+".member_of", "tenant.database.role_member", fmt.Sprintf("role membership cycle involving %q", n))
+			break
+		}
+	}
+	// Shared prefix: identical definitions for any role two tenants both declare.
+	for otherID, other := range all {
+		if otherID >= tenant.ID || other.Database == nil || other.DBRolePrefix() != prefix {
+			continue
+		}
+		for name, r := range d.Roles {
+			if or, ok := other.Database.Roles[name]; ok && !sameRole(r, or) {
+				semanticError(report, file, "$.database.roles."+name, "tenant.database.role_conflict", fmt.Sprintf("role %q is also declared by tenant %q (same prefix) with a different definition", name, otherID))
+			}
+		}
+		for name := range d.ServiceRoles {
+			if _, ok := other.Database.ServiceRoles[name]; ok {
+				semanticError(report, file, "$.database.service_roles."+name, "tenant.database.role_conflict", fmt.Sprintf("service role %q is also declared by tenant %q: LOGIN roles cannot be shared (would share a password)", name, otherID))
+			}
+		}
+	}
+}
+
+// sameRole compares what mksrv manages for a shared role: membership only
+// (`when` is a per-tenant pre-request concern).
+func sameRole(a, b model.DBRole) bool {
+	x, y := append([]string(nil), a.MemberOf...), append([]string(nil), b.MemberOf...)
+	sort.Strings(x)
+	sort.Strings(y)
+	return slices.Equal(x, y)
 }

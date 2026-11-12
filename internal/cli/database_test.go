@@ -270,3 +270,42 @@ func TestExtendedPreRequestSQL(t *testing.T) {
 		t.Fatalf("legacy tenant must keep <schema>.pgrst_pre_request")
 	}
 }
+
+func TestTenantRolesSQL(t *testing.T) {
+	t.Parallel()
+	tenant := model.Tenant{ID: "hg", Database: &model.TenantDatabase{
+		DefaultPrivileges: "none",
+		Roles: map[string]model.DBRole{
+			"hg_authenticated": {},
+			"hg_reception":     {MemberOf: []string{"hg_authenticated"}},
+		},
+		ServiceRoles: map[string]model.DBServiceRole{"hg_worker": {MemberOf: []string{"hg_authenticated"}, ConnectionLimit: 5}},
+	}}
+	sql := tenantDatabaseSQLWith("hg", "pw", "apw", map[string]string{"hg_worker": "wpw"}, tenant)
+	for _, want := range []string{
+		`'hg_reception'`, `NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`,
+		`GRANT "hg_authenticated" TO "hg_reception";`,
+		`GRANT "hg_reception" TO "hg_auth";`,
+		`ALTER ROLE "hg_worker" WITH LOGIN`, `PASSWORD 'wpw' CONNECTION LIMIT 5;`,
+		`GRANT CONNECT ON DATABASE "db_hg" TO "hg_worker";`,
+		`GRANT "hg_authenticated" TO "hg_worker";`,
+		`REVOKE SELECT ON ALL TABLES IN SCHEMA "app" FROM mksrv_app;`,
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("SQL missing %q:\n%s", want, sql)
+		}
+	}
+	// Roles must be created before the \connect, and never granted to mksrv_web.
+	if strings.Index(sql, `'hg_reception'`) > strings.Index(sql, `\connect`) {
+		t.Fatalf("roles must be created before \\connect")
+	}
+	if strings.Contains(sql, `TO mksrv_web;`) && strings.Contains(sql, `"hg_reception" TO mksrv_web`) {
+		t.Fatalf("tenant roles must not be granted to mksrv_web")
+	}
+	if strings.Contains(sql, `GRANT SELECT ON ALL TABLES IN SCHEMA "app" TO mksrv_app;`) {
+		t.Fatalf("default_privileges: none must not grant app SELECT:\n%s", sql)
+	}
+	if strings.Contains(sql, `"hg_worker" TO "hg_auth"`) {
+		t.Fatalf("service roles must not be reachable through the authenticator")
+	}
+}
