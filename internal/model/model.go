@@ -334,6 +334,12 @@ type TenantForward struct {
 	Open     string `json:"open"`   // browser | none | ssh-terminal | copy
 	Path     string `json:"path"`
 	SSHAlias string `json:"ssh_alias"`
+	// ListenPort pins the local loopback port Cloud-IT VPN listens on for this
+	// forward (portStrategy "fixed"). Zero keeps today's default: the app
+	// picks a free port itself (portStrategy "auto") — needed whenever a
+	// member hardcodes the port in their own ~/.ssh/config Host block instead
+	// of relying on the app to rewrite it on every reconnect.
+	ListenPort int `json:"listen_port"`
 }
 
 // TenantDNSRecord is one record mksrv writes into the tenant's own hosted zone

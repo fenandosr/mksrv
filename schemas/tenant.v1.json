@@ -73,7 +73,8 @@
           "target": {"type": "string", "maxLength": 320, "pattern": "^[A-Za-z0-9.-]+:[0-9]{1,5}$"},
           "open": {"type": "string", "enum": ["browser", "none", "ssh-terminal", "copy"]},
           "path": {"type": "string", "maxLength": 2048},
-          "ssh_alias": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"}
+          "ssh_alias": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"},
+          "listen_port": {"type": "integer", "minimum": 1024, "maximum": 65535}
         }
       }
     },

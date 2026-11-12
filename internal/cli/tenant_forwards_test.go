@@ -17,10 +17,11 @@ func TestTenantForwardsTranslation(t *testing.T) {
 		{ID: "login", Label: "Login node", Type: "ssh", Target: "mcps-login.prod.mksrv:22", SSHAlias: "mcps-login"},
 		{ID: "jupyter", Label: "JupyterHub", Type: "http", Target: "mcps-login.prod.mksrv:8000", Open: "browser"},
 		{ID: "db", Label: "Cluster DB", Type: "tcp", Target: "mcps-login.prod.mksrv:5432"},
+		{ID: "ome-despliegue", Label: "Despliegue (ome)", Type: "ssh", Target: "100.64.0.11:22", SSHAlias: "ome-hg", ListenPort: 22011},
 	}}
 	got := tenantForwards(tenant)
-	if len(got) != 3 {
-		t.Fatalf("want 3 forwards, got %d", len(got))
+	if len(got) != 4 {
+		t.Fatalf("want 4 forwards, got %d", len(got))
 	}
 
 	ssh := got[0]
@@ -30,11 +31,18 @@ func TestTenantForwardsTranslation(t *testing.T) {
 	if ssh.OpenAction.Kind != "ssh-terminal" || ssh.HealthCheck.Kind != "tcp" {
 		t.Fatalf("ssh forward defaults wrong: %+v", ssh)
 	}
+	if ssh.PortStrategy != "auto" || ssh.Listen.Port != 0 {
+		t.Fatalf("forward without listen_port should stay auto/0: %+v", ssh)
+	}
 	if got[1].OpenAction.Kind != "browser" || got[1].HealthCheck.Kind != "http" || got[1].HealthCheck.Path != "/" {
 		t.Fatalf("http forward defaults wrong: %+v", got[1])
 	}
 	if got[2].OpenAction.Kind != "none" {
 		t.Fatalf("tcp forward default open wrong: %+v", got[2])
+	}
+	fixed := got[3]
+	if fixed.PortStrategy != "fixed" || fixed.Listen.Port != 22011 || fixed.Listen.Host != "127.0.0.1" {
+		t.Fatalf("forward with listen_port should pin the port: %+v", fixed)
 	}
 
 	// The combined roster set must satisfy Cloud-IT VPN's forward rules.
