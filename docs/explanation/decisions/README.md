@@ -37,4 +37,8 @@ unanswered.
 - [ADR 0032: Tenant mail hosting — the `mail` stack, for real](0032-tenant-mail-hosting.md)
 - [ADR 0033: The shared mail server's certificate comes from acme.sh (DNS-01), not Caddy](0033-mail-cert-dns01-acme-sh.md)
 - [ADR 0034: Tenant local hosts — `meshnode`/`gitea`/`codeserver` deployed in-process, no SSH](0034-tenant-local-hosts.md)
+- [ADR 0035 (draft): SELinux policy for kernel-mode Tailscale](0035-selinux-policy-for-kernel-mode-tailscale.md)
+- [ADR 0036 (draft): A per-tenant service user, for un-sudo'd deploys on an operator-shared host](0036-per-tenant-service-user-local-hosts.md)
+- [ADR 0037 (draft): Headscale ACLs by device role tag, not just by tenant](0037-headscale-acl-device-role-tags.md)
+- [ADR 0038: Per-tenant SES sending identity, credential, and relay](0038-per-tenant-ses-relay.md)
 - [ADR 0039: Tenant-declared database roles, configurable PostgREST, and declarative Keycloak clients](0039-tenant-roles-postgrest-keycloak-clients.md)
