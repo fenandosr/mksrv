@@ -478,7 +478,10 @@ func generatedPreRequestSQL(t model.Tenant) string {
 	var b strings.Builder
 	b.WriteString("CREATE OR REPLACE FUNCTION mksrv.pgrst_pre_request() RETURNS void LANGUAGE plpgsql AS $mksrv$\n")
 	b.WriteString("DECLARE claims text := current_setting('request.jwt.claims', true); grps jsonb;\nBEGIN\n")
-	b.WriteString("  IF claims IS NULL OR claims = '' THEN RETURN; END IF;\n")
+	// Token-less requests reach here too: PostgREST already set the anon role and
+	// fills request.jwt.claims with just {"role": "<anon>"}. Only a real token
+	// (Keycloak always sets `sub`) is mapped — and denied when unmapped.
+	b.WriteString("  IF claims IS NULL OR claims = '' OR NOT ((claims::jsonb) ? 'sub') THEN RETURN; END IF;\n")
 	b.WriteString("  grps := coalesce((claims::jsonb) -> 'groups', '[]'::jsonb);\n")
 	if len(rules) == 0 {
 		b.WriteString("  IF grps ? 'admin' OR grps ? 'dev' THEN SET LOCAL ROLE mksrv_owner;\n")

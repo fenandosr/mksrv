@@ -250,6 +250,8 @@ func TestExtendedPreRequestSQL(t *testing.T) {
 		`CREATE OR REPLACE FUNCTION mksrv.pgrst_pre_request()`,
 		`PERFORM "private"."check_request"();`,
 		`ERRCODE = '42501'`,
+		// token-less requests must pass through to mksrv_anon, never hit `unmapped: deny`
+		`NOT ((claims::jsonb) ? 'sub') THEN RETURN;`,
 	} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("SQL missing %q:\n%s", want, sql)
