@@ -632,4 +632,7 @@ type StackHealth struct {
 type Lock struct {
 	Engine    string `json:"engine"`
 	AppliedAt string `json:"applied_at,omitempty"`
+	// PostgRESTPorts pins each tenant's PostgREST host port (ADR 0039 §6) so
+	// adding a tenant never moves another tenant's live container.
+	PostgRESTPorts map[string]int `json:"postgrest_ports,omitempty"`
 }

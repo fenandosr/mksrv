@@ -305,11 +305,15 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 	roster := configd.Config{}
 	fwdTargets := f.fleetForwardTargets()
 	sortedIDs := sortedTenantIDs(f.data.Tenants)
+	pgrstPorts, err := f.postgrestPorts()
+	if err != nil {
+		return "", err
+	}
 	for _, id := range sortedIDs {
 		tenant := f.data.Tenants[id]
 		restPort := 0
 		if slices.Contains(tenant.Stacks, "database") {
-			restPort = postgrestPort(sortedIDs, id)
+			restPort = pgrstPorts[id]
 		}
 		cachePort := 0
 		if slices.Contains(tenant.Stacks, "cache") {

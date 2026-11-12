@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -21,9 +22,13 @@ import (
 )
 
 // postgrestBasePort is the first host port assigned to a tenant PostgREST
-// container. Tenants take consecutive ports in sorted-id order; the Headscale
-// ACL opens 3010-3019, so this supports up to ten tenants.
-const postgrestBasePort = 3010
+// container; postgrestPortCount ports are available (3010-3099, matching the
+// Headscale ACL). Ports are persisted per tenant in mksrv.lock (ADR 0039 §6),
+// so adding or removing a tenant never moves another tenant's live container.
+const (
+	postgrestBasePort  = 3010
+	postgrestPortCount = 90
+)
 
 // postgrestConsumerIDs returns, sorted, every tenant in the whole workspace
 // that actually gets a PostgREST container — `database` in `stacks:` and
@@ -50,14 +55,69 @@ func postgrestConsumerIDs(tenants map[string]model.Tenant) []string {
 	return ids
 }
 
-// postgrestPort returns the host port for a tenant's PostgREST container, or 0
-// when the tenant is not in the sorted list.
-func postgrestPort(sortedIDs []string, id string) int {
-	i := slices.Index(sortedIDs, id)
-	if i < 0 {
-		return 0
+// assignPostgRESTPorts keeps every existing assignment for tenants that are
+// still PostgREST consumers and gives each new consumer the lowest free port,
+// in sorted-id order. With an empty `existing` (a workspace that predates the
+// lock entry) this reproduces the old alphabetical allocation, so live
+// containers keep their ports. Assignments of tenants that stopped being
+// consumers are dropped, freeing their port.
+func assignPostgRESTPorts(tenants map[string]model.Tenant, existing map[string]int) (map[string]int, error) {
+	ids := postgrestConsumerIDs(tenants)
+	out := make(map[string]int, len(ids))
+	used := map[int]bool{}
+	for _, id := range ids {
+		p := existing[id]
+		if p >= postgrestBasePort && p < postgrestBasePort+postgrestPortCount && !used[p] {
+			out[id] = p
+			used[p] = true
+		}
 	}
-	return postgrestBasePort + i
+	next := postgrestBasePort
+	for _, id := range ids {
+		if _, ok := out[id]; ok {
+			continue
+		}
+		for used[next] {
+			next++
+		}
+		if next >= postgrestBasePort+postgrestPortCount {
+			return nil, fmt.Errorf("no free PostgREST port left (range %d-%d)", postgrestBasePort, postgrestBasePort+postgrestPortCount-1)
+		}
+		out[id] = next
+		used[next] = true
+	}
+	return out, nil
+}
+
+// postgrestPorts returns the stable per-tenant PostgREST ports, assigning and
+// persisting any missing ones to mksrv.lock on first use.
+func (f *fleet) postgrestPorts() (map[string]int, error) {
+	var existing map[string]int
+	if f.data.Lock != nil {
+		existing = f.data.Lock.PostgRESTPorts
+	}
+	ports, err := assignPostgRESTPorts(f.data.Tenants, existing)
+	if err != nil {
+		return nil, err
+	}
+	if maps.Equal(ports, existing) || (len(ports) == 0 && len(existing) == 0) {
+		return ports, nil
+	}
+	lock := model.Lock{Engine: strings.TrimSpace(f.data.Deployment.Engine)}
+	if f.data.Lock != nil {
+		lock = *f.data.Lock
+	}
+	if lock.Engine == "" {
+		lock.Engine = "dev"
+	}
+	lock.PostgRESTPorts = ports
+	if f.data.Root != "" {
+		if err := writeLock(f.data.Root, lock); err != nil {
+			return nil, fmt.Errorf("persist postgrest ports to mksrv.lock: %w", err)
+		}
+	}
+	f.data.Lock = &lock
+	return ports, nil
 }
 
 // reconcilePostgREST deploys one PostgREST container per tenant that consumes
@@ -118,13 +178,16 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 	}
 
 	dep := f.data.Deployment
-	sortedIDs := postgrestConsumerIDs(f.data.Tenants)
+	ports, err := f.postgrestPorts()
+	if err != nil {
+		return err
+	}
 	rctxBase := f.renderContext(*dataHost)
 	dataPrivateIP := rctxBase.Host.PrivateIP
 
 	for _, id := range consumers {
 		tenant := f.data.Tenants[id]
-		port := postgrestPort(sortedIDs, id)
+		port := ports[id]
 		restFQDN := id + ".rest." + dep.DNS.RootDomain
 
 		authPass, err := f.resolver.Get(ctx, "/mksrv/{env}/database/tenant_"+id+"_authpw")
@@ -194,7 +257,7 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 	}
 
 	for _, id := range consumers {
-		port := postgrestPort(sortedIDs, id)
+		port := ports[id]
 		if _, err := client.Run(ctx, fmt.Sprintf(
 			"curl -fsS -m 10 --retry 12 --retry-delay 3 --retry-all-errors http://127.0.0.1:%d/ -o /dev/null", port)); err != nil {
 			return fmt.Errorf("postgrest %s did not become healthy: %w", id, err)

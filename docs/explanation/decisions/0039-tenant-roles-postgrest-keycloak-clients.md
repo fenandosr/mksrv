@@ -1,6 +1,6 @@
 # ADR 0039: Tenant-declared database roles, configurable PostgREST, and declarative Keycloak clients
 
-- Status: Accepted (§1, §2 implemented; §3-§6 pending)
+- Status: Accepted (§1, §2, §6 implemented; §3-§5 pending)
 - Date: 2026-11-12
 - Refines: ADR 0016 (tenant Keycloak RBAC), ADR 0026 (global Postgres RBAC roles), ADR 0029 (tenant `database:` block)
 
@@ -161,8 +161,11 @@ keycloak:
 
 ### 6. Stable PostgREST ports (prerequisite for a second tenant)
 
-Persist each tenant's port in `mksrv.lock` instead of deriving it from the
-alphabetical index, and widen the Headscale ACL range beyond 3010-3019. Must
+Persist each tenant's port in `mksrv.lock` (`postgrest_ports`) instead of
+deriving it from the alphabetical index, and widen the Headscale ACL range to
+3010-3099. A workspace with no lock entry is seeded with the old alphabetical
+allocation, so live containers keep their ports; new tenants take the lowest
+free port; ports of tenants that stop being consumers are freed. Must
 land before adding a staging tenant.
 
 ### Deferred

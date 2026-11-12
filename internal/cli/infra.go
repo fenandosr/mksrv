@@ -392,7 +392,16 @@ func (a *App) writeInfraOutputs(ctx context.Context, printer ui.Printer, session
 }
 
 func updateLock(root, engineVersion string) error {
-	lock := model.Lock{Engine: engineVersion, AppliedAt: time.Now().UTC().Format(time.RFC3339)}
+	lock := model.Lock{}
+	if blob, err := os.ReadFile(filepath.Join(root, "mksrv.lock")); err == nil {
+		_ = yaml.Unmarshal(blob, &lock) // keep recorded postgrest ports
+	}
+	lock.Engine = engineVersion
+	lock.AppliedAt = time.Now().UTC().Format(time.RFC3339)
+	return writeLock(root, lock)
+}
+
+func writeLock(root string, lock model.Lock) error {
 	blob, err := yaml.Marshal(lock)
 	if err != nil {
 		return err

@@ -40,41 +40,35 @@ func TestPostgrestConsumerIDsExcludesNonConsumers(t *testing.T) {
 	}
 }
 
-// TestPostgrestPortStableAcrossUnrelatedTenants guards that adding a
-// non-consumer tenant (gtex) never shifts an existing consumer's (mcps) port
-// — the live bug this was extracted to fix.
-func TestPostgrestPortStableAcrossUnrelatedTenants(t *testing.T) {
+func TestAssignPostgRESTPorts(t *testing.T) {
 	t.Parallel()
-	before := postgrestConsumerIDs(map[string]model.Tenant{
-		"bitabit": {ID: "bitabit", Stacks: []string{"database"}},
-		"hg":      {ID: "hg", Stacks: []string{"database"}},
-		"mcps":    {ID: "mcps", Stacks: []string{"database"}},
-	})
-	after := postgrestConsumerIDs(map[string]model.Tenant{
-		"bitabit": {ID: "bitabit", Stacks: []string{"database"}},
-		"gtex":    {ID: "gtex", Stacks: []string{}},
-		"hg":      {ID: "hg", Stacks: []string{"database"}},
-		"mcps":    {ID: "mcps", Stacks: []string{"database"}},
-	})
-	for _, id := range []string{"bitabit", "hg", "mcps"} {
-		gotBefore := postgrestPort(before, id)
-		gotAfter := postgrestPort(after, id)
-		if gotBefore != gotAfter {
-			t.Fatalf("tenant %s: port %d before gtex existed, %d after — adding an unrelated non-database tenant must not shift it", id, gotBefore, gotAfter)
+	db := func(ids ...string) map[string]model.Tenant {
+		m := map[string]model.Tenant{}
+		for _, id := range ids {
+			m[id] = model.Tenant{ID: id, Stacks: []string{"database"}}
 		}
+		return m
 	}
-}
-
-func TestPostgrestPort(t *testing.T) {
-	t.Parallel()
-	ids := []string{"bitabit", "hg", "mcps"}
-	for i, id := range ids {
-		if got, want := postgrestPort(ids, id), postgrestBasePort+i; got != want {
-			t.Fatalf("postgrestPort(%q) = %d, want %d", id, got, want)
-		}
+	// No lock entry yet: reproduces the old alphabetical allocation.
+	first, err := assignPostgRESTPorts(db("bitabit", "hg", "mcps"), nil)
+	if err != nil || first["bitabit"] != 3010 || first["hg"] != 3011 || first["mcps"] != 3012 {
+		t.Fatalf("seed = %v, %v", first, err)
 	}
-	if got := postgrestPort(ids, "gtex"); got != 0 {
-		t.Fatalf("postgrestPort() for a tenant not in the list = %d, want 0", got)
+	// A tenant sorting first must not move the others, and takes the next free port.
+	after, err := assignPostgRESTPorts(db("aaa", "bitabit", "hg", "mcps"), first)
+	if err != nil || after["bitabit"] != 3010 || after["hg"] != 3011 || after["mcps"] != 3012 || after["aaa"] != 3013 {
+		t.Fatalf("after adding aaa = %v, %v", after, err)
+	}
+	// A removed tenant frees its port for the next newcomer.
+	reuse, _ := assignPostgRESTPorts(db("bitabit", "mcps", "zzz"), after)
+	if reuse["bitabit"] != 3010 || reuse["mcps"] != 3012 || reuse["zzz"] != 3011 {
+		t.Fatalf("reuse = %v", reuse)
+	}
+	// Non-consumers (gtex) never get a port.
+	withWeb := db("bitabit")
+	withWeb["gtex"] = model.Tenant{ID: "gtex"}
+	if got, _ := assignPostgRESTPorts(withWeb, nil); len(got) != 1 {
+		t.Fatalf("non-consumer assigned a port: %v", got)
 	}
 }
 
