@@ -20,10 +20,10 @@ Secret=mksrv-vikunja-tenant_{{ .Tenant.ID }}_admin_pass,type=env,target=VIKUNJA_
 # owned correctly by podman automatically, a bind mount would not be.
 Volume=mksrv-vikunja-files:/app/vikunja/files
 Volume=mksrv-vikunja-db:/db
-HealthCmd=curl -fsS http://127.0.0.1:3456/api/v1/info
-HealthInterval=15s
-HealthRetries=10
-HealthStartPeriod=10s
+# No HealthCmd: confirmed live this image has no shell and not even a
+# `curl`/`cat`/`ls` binary to run one with (true single-static-binary
+# image, unlike gitea's) — matches meshnode's own template, which has the
+# same constraint.
 
 [Service]
 Restart=always
