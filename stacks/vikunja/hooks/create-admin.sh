@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
 # Seed the initial Vikunja user, once. No env-var-only bootstrap exists --
-# `vikunja user create` is the documented CLI mechanism (same shape as
-# gitea's hook). Does NOT also set the instance-admin flag: confirmed live
-# that `vikunja user set-admin <user> --admin` refuses with "the
-# admin-panel license feature is not active" even on a completely fresh,
-# unlicensed instance -- Vikunja's free tier has no instance-admin concept
-# to grant, just the one user account.
+# `vikunja user create` is the documented CLI mechanism. Unlike gitea's
+# admin-creation hook, this needs no readiness wait: confirmed live that
+# `user create` runs its own migration check synchronously within the same
+# short-lived process and succeeds immediately against a brand-new,
+# never-started database.
+#
+# The vikunja/vikunja image has no shell at all (confirmed live:
+# `podman exec vikunja sh` -> "executable file `sh` not found in $PATH" --
+# not even `ls`/`cat`/`curl` exist, just the single static binary), so the
+# password can't be read from inside the container the way gitea's hook
+# reads GITEA_ADMIN_PASS. `podman secret inspect --showsecret` reads it
+# from the host instead -- mksrv's own process already held this value in
+# memory to push the secret in the first place, so this isn't a new
+# exposure, just a different place to read the same value from.
 set -euo pipefail
 
-for _ in $(seq 1 30); do
-  if podman exec vikunja curl -fsS -o /dev/null http://127.0.0.1:3456/api/v1/info 2>/dev/null; then
-    break
-  fi
-  sleep 2
-done
+password=$(sudo podman secret inspect --showsecret --format '{{.SecretData}}' "mksrv-vikunja-tenant_${MKSRV_TENANT}_admin_pass")
 
 # Only "already exists" is swallowed (idempotent across redeploys); any
-# other failure -- including "not ready yet" if the loop above timed out --
-# fails the hook for real.
-output=$(podman exec vikunja sh -c '
-  /app/vikunja/vikunja user create \
-    --username admin \
-    --email "admin@'"${MKSRV_TENANT}"'.mksrv.local" \
-    --password "$VIKUNJA_ADMIN_PASS"
-' 2>&1) && { echo "$output"; exit 0; }
+# other failure fails the hook for real.
+output=$(podman exec vikunja /app/vikunja/vikunja user create \
+  --username admin \
+  --email "admin@${MKSRV_TENANT}.mksrv.local" \
+  --password "$password" 2>&1) && { echo "$output"; exit 0; }
 
 if echo "$output" | grep -qi "already exists"; then
   echo "vikunja admin user already exists"

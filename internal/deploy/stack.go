@@ -193,10 +193,24 @@ func pushSecrets(ctx context.Context, client Runner, stackName string, values ma
 	sort.Strings(names)
 	for _, leaf := range names {
 		secretName := "mksrv-" + stackName + "-" + leaf
-		if _, err := client.RunInput(ctx,
-			"sudo podman secret create --replace "+shellQuote(secretName)+" -",
-			[]byte(values[leaf]),
-		); err != nil {
+		// `--replace` on a secret that doesn't exist yet is documented as a
+		// no-op ("if a secret with the same name exists, replace it") but
+		// fails outright on at least one real podman version — confirmed
+		// live on a tenant's own machine (podman 4.9.3, ADR 0034):
+		// "Error: deleting secret : : no secret data with ID" on the very
+		// first create. Checking existence first and only passing
+		// --replace when actually replacing something is correct either
+		// way, so this isn't version-gated.
+		exists := false
+		if _, err := client.Run(ctx, "sudo podman secret inspect "+shellQuote(secretName)); err == nil {
+			exists = true
+		}
+		cmd := "sudo podman secret create "
+		if exists {
+			cmd += "--replace "
+		}
+		cmd += shellQuote(secretName) + " -"
+		if _, err := client.RunInput(ctx, cmd, []byte(values[leaf])); err != nil {
 			return fmt.Errorf("push secret %s: %w", secretName, err)
 		}
 	}
