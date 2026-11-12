@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -242,9 +243,13 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 		}
 	}
 
+	if err := installJWKSRefresh(ctx, client, jwksRefreshList(consumers, f.data.Tenants, dep.Identity.KeycloakDomain)); err != nil {
+		return fmt.Errorf("install postgrest JWKS refresh: %w", err)
+	}
 	if _, err := client.Run(ctx, "sudo systemctl daemon-reload"); err != nil {
 		return err
 	}
+	_, _ = client.Run(ctx, "sudo systemctl enable --now mksrv-postgrest-jwks-refresh.timer")
 	for _, id := range consumers {
 		if _, err := client.Run(ctx, "sudo systemctl restart mksrv-postgrest-"+id+".service"); err != nil {
 			return fmt.Errorf("restart postgrest %s: %w", id, err)
@@ -302,4 +307,85 @@ func fetchRealmJWKS(ctx context.Context, keycloakDomain, realm string) (string, 
 		return "", fmt.Errorf("fetch realm jwks %s: status %d", url, res.StatusCode)
 	}
 	return string(body), nil
+}
+
+// PostgREST validates tokens against a JWKS that mksrv bakes into a podman
+// secret at `tenant apply` time. A Keycloak key rotation would otherwise break
+// validation until the next apply (ADR 0039 §4). A systemd timer on the data
+// host re-fetches each realm's JWKS and, only when it changed, replaces the
+// secret and restarts that tenant's PostgREST. (A SIGUSR2 config reload would
+// avoid the restart, but is unverified against the pinned image; this is the
+// ADR's documented fallback and works on every version.)
+const (
+	jwksRefreshScriptPath = "/usr/local/bin/mksrv-postgrest-jwks-refresh"
+	jwksRefreshListPath   = "/etc/mksrv/postgrest-jwks.list"
+	jwksRefreshScript     = `#!/usr/bin/env bash
+# Managed by mksrv (ADR 0039 §4). Re-fetch each tenant realm's JWKS; replace the
+# podman secret and restart PostgREST only when it changed.
+set -uo pipefail
+rc=0
+while read -r id url; do
+  [ -n "${id:-}" ] || continue
+  new=$(curl -fsS -m 20 "$url") || { echo "jwks fetch failed for $id" >&2; rc=1; continue; }
+  case "$new" in *'"keys"'*) ;; *) echo "unexpected jwks body for $id" >&2; rc=1; continue ;; esac
+  secret="mksrv-database-postgrest-$id-jwt"
+  cur=$(podman secret inspect --showsecret --format '{{.SecretData}}' "$secret" 2>/dev/null || true)
+  [ "$new" = "$cur" ] && continue
+  printf '%s' "$new" | podman secret create --replace "$secret" - >/dev/null || { rc=1; continue; }
+  systemctl restart "mksrv-postgrest-$id.service" || rc=1
+  echo "rotated JWKS for $id"
+done < ` + jwksRefreshListPath + `
+exit $rc
+`
+	jwksRefreshService = `[Unit]
+Description=mksrv PostgREST JWKS refresh
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=` + jwksRefreshScriptPath + `
+`
+	jwksRefreshTimer = `[Unit]
+Description=mksrv PostgREST JWKS refresh (hourly)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
+`
+)
+
+// jwksRefreshList is the "<tenant> <jwks-url>" file the refresh script walks,
+// one line per PostgREST consumer, sorted.
+func jwksRefreshList(consumers []string, tenants map[string]model.Tenant, keycloakDomain string) string {
+	ids := append([]string(nil), consumers...)
+	sort.Strings(ids)
+	var b strings.Builder
+	for _, id := range ids {
+		fmt.Fprintf(&b, "%s https://%s/realms/%s/protocol/openid-connect/certs\n", id, keycloakDomain, tenantRealm(tenants[id]))
+	}
+	return b.String()
+}
+
+func installJWKSRefresh(ctx context.Context, client *sshx.Client, list string) error {
+	if _, err := client.Run(ctx, "sudo mkdir -p /etc/mksrv"); err != nil {
+		return err
+	}
+	for path, f := range map[string]struct {
+		body string
+		mode os.FileMode
+	}{
+		jwksRefreshListPath:   {list, 0o644},
+		jwksRefreshScriptPath: {jwksRefreshScript, 0o755},
+		"/etc/systemd/system/mksrv-postgrest-jwks-refresh.service": {jwksRefreshService, 0o644},
+		"/etc/systemd/system/mksrv-postgrest-jwks-refresh.timer":   {jwksRefreshTimer, 0o644},
+	} {
+		if err := client.WriteFileSudo(ctx, path, []byte(f.body), f.mode); err != nil {
+			return err
+		}
+	}
+	return nil
 }

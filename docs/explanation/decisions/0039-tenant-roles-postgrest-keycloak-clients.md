@@ -1,6 +1,6 @@
 # ADR 0039: Tenant-declared database roles, configurable PostgREST, and declarative Keycloak clients
 
-- Status: Accepted (§1, §2, §3, §5, §6 implemented; §4 pending)
+- Status: Accepted, implemented (§1-§6); live verification pending (see Open points)
 - Date: 2026-11-12
 - Refines: ADR 0016 (tenant Keycloak RBAC), ADR 0026 (global Postgres RBAC roles), ADR 0029 (tenant `database:` block)
 
@@ -123,8 +123,9 @@ database:
 
 ### 4. JWKS refresh
 
-A systemd timer on the data host re-fetches each active realm's JWKS, compares,
-and replaces it only on change. Preferred: mount the JWKS as a file and reload
+A systemd timer (hourly, `mksrv-postgrest-jwks-refresh.timer`) on the data host
+re-fetches each active realm's JWKS, compares, and replaces it only on change.
+Implemented with the fallback below; the `SIGUSR2` variant is not. Preferred: mount the JWKS as a file and reload
 with `SIGUSR2`. Fallback (simpler, robust): `podman secret create --replace`
 plus a container restart only when the document changed. The mechanism is chosen
 after verifying `SIGUSR2` reload against the pinned image (template default

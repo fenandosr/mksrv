@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -103,6 +104,35 @@ func TestPostgrestTemplateExtendedEnv(t *testing.T) {
 	} {
 		if !strings.Contains(ext, want) {
 			t.Fatalf("extended unit missing %q:\n%s", want, ext)
+		}
+	}
+}
+
+func TestJWKSRefreshListAndScript(t *testing.T) {
+	t.Parallel()
+	tenants := map[string]model.Tenant{
+		"hg":   {ID: "hg", Keycloak: model.TenantKeycloak{Realm: "hg-realm"}},
+		"mcps": {ID: "mcps"},
+	}
+	got := jwksRefreshList([]string{"mcps", "hg"}, tenants, "kc.example.com")
+	want := "hg https://kc.example.com/realms/hg-realm/protocol/openid-connect/certs\n" +
+		"mcps https://kc.example.com/realms/mcps/protocol/openid-connect/certs\n"
+	if got != want {
+		t.Fatalf("list = %q, want %q", got, want)
+	}
+	for _, need := range []string{"podman secret create --replace", `systemctl restart "mksrv-postgrest-$id.service"`, jwksRefreshListPath} {
+		if !strings.Contains(jwksRefreshScript, need) {
+			t.Fatalf("script missing %q", need)
+		}
+	}
+	if !strings.Contains(jwksRefreshTimer, "OnUnitActiveSec=1h") || !strings.Contains(jwksRefreshService, jwksRefreshScriptPath) {
+		t.Fatal("timer/service units malformed")
+	}
+	if bash, err := exec.LookPath("bash"); err == nil {
+		cmd := exec.Command(bash, "-n")
+		cmd.Stdin = strings.NewReader(jwksRefreshScript)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("refresh script has a syntax error: %v\n%s", err, out)
 		}
 	}
 }
