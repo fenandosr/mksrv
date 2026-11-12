@@ -174,7 +174,18 @@ Persist each tenant's port in `mksrv.lock` (`postgrest_ports`) instead of
 deriving it from the alphabetical index, and widen the Headscale ACL range to
 3010-3099. A workspace with no lock entry is seeded with the old alphabetical
 allocation, so live containers keep their ports; new tenants take the lowest
-free port; ports of tenants that stop being consumers are freed. Must
+free port; ports of tenants that stop being consumers are freed.
+
+**Operational note:** the seed is computed from the tenants present at that
+moment. Adding a tenant that sorts alphabetically *between* live ones, in the
+same change that first introduces `postgrest_ports`, would move the later
+tenants (found while preparing `hgstg`: it would have pushed `mcps` from 3012 to
+3013). Pin the live ports in `mksrv.lock` (or run one apply with the new binary
+before adding the tenant) first.
+
+Terraform types `database.postgrest` as `optional(bool)`; the object form is
+collapsed to its enabled flag before reaching Terraform
+(`normalizeTenantsForTerraform`). Must
 land before adding a staging tenant.
 
 ### Deferred
