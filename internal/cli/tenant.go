@@ -547,6 +547,10 @@ func tenantForwards(t model.Tenant) []configd.Forward {
 			HealthCheck:  health,
 			MaxConns:     16,
 		}
+		if fwd.ListenPort != 0 {
+			cf.Listen.Port = fwd.ListenPort
+			cf.PortStrategy = "fixed"
+		}
 		if fwd.Type == "ssh" {
 			host, _, _ := net.SplitHostPort(fwd.Target)
 			cf.SSH = &configd.SSH{

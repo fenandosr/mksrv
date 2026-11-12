@@ -45,13 +45,14 @@ variable "tenants" {
     }))
     stacks = list(string)
     forwards = optional(list(object({
-      id        = string
-      label     = string
-      type      = string
-      target    = string
-      open      = optional(string)
-      path      = optional(string)
-      ssh_alias = optional(string)
+      id          = string
+      label       = string
+      type        = string
+      target      = string
+      open        = optional(string)
+      path        = optional(string)
+      ssh_alias   = optional(string)
+      listen_port = optional(number)
     })))
     dns = optional(list(object({
       name  = string

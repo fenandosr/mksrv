@@ -46,6 +46,10 @@ until tested.**
 **Not implemented. This ADR is a draft to settle the open questions below
 before any code changes.**
 
+Existe una implementación del lado del operador en `ome`, fuera de mksrv
+(usuario `svc-hg`, sidecar por desarrollador, socket con verbos acotados).
+Este ADR trata solo de si mksrv debe gestionarlo; no bloquea ese uso.
+
 ## Open questions
 
 1. **Schema.** Does this need a new field on a `local_hosts` entry (something
