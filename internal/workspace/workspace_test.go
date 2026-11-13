@@ -634,3 +634,31 @@ func TestValidateWhenGroupMustExistInRealm(t *testing.T) {
 	}
 	assertIssueCode(t, report, "tenant.database.when_group")
 }
+
+func TestCheckAppSettings(t *testing.T) {
+	t.Parallel()
+	var ok Report
+	checkAppSettings(&ok, "t.yaml", map[string]string{
+		"oidc_issuer":   "https://auth.example.com/realms/hgstg",
+		"environment":   "staging",
+		"data_class_v2": "clinical",
+	})
+	if len(ok.Issues) != 0 {
+		t.Fatalf("valid settings rejected: %#v", ok.Issues)
+	}
+	for name, settings := range map[string]map[string]string{
+		"upper-case key":    {"Oidc_Issuer": "x"},
+		"dash in key":       {"oidc-issuer": "x"},
+		"openbao reference": {"api_key": "bao://kv/tenants/hgstg/key"},
+		"ssm reference":     {"api_key": "ssm:/mksrv/prod/x"},
+		"interpolation":     {"api_key": "${SECRET}"},
+		"quote":             {"note": `a"b`},
+		"specifier":         {"note": "%h"},
+		"newline":           {"note": "a\nEnvironment=X=1"},
+	} {
+		var r Report
+		checkAppSettings(&r, "t.yaml", settings)
+		assertIssueCode(t, r, "tenant.database.app_setting")
+		_ = name
+	}
+}

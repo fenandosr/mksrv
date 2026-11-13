@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -450,6 +451,7 @@ func checkTenantDatabase(report *Report, file string, tenant model.Tenant) {
 			semanticError(report, file, "$.database.postgrest.pre_request_hook", "tenant.database.hook_name", fmt.Sprintf("hook schema %q is reserved", sch))
 		}
 	}
+	checkAppSettings(report, file, pg.AppSettings)
 	for name, r := range tenant.Database.Roles {
 		if len(r.When) > 0 {
 			semanticWarning(report, file, "$.database.roles."+name+".when", "tenant.database.rbac_shadow", "roles with `when` are declared: the admin/dev -> mksrv_owner shortcut is disabled for PostgREST (declare it explicitly if needed)")
@@ -887,3 +889,36 @@ func checkClientRedirect(report *Report, file, path, raw string, tenant model.Te
 		bad(fmt.Sprintf("must be inside the tenant base_domain %q", base))
 	}
 }
+
+// appSettingRef matches values that look like a reference to a secret store
+// (OpenBao, SSM, ...) rather than a literal: app_settings land verbatim in the
+// container unit on the data host, so they must never carry secrets or
+// references to them.
+var appSettingRef = regexp.MustCompile(`(?i)^\s*(bao|openbao|vault|ssm|secret|kv)[:/]|\$\{|\{\{`)
+
+// checkAppSettings validates database.postgrest.app_settings (ADR 0039): keys
+// [a-z0-9_]{1,63} (also enforced by the JSON Schema), plain text values that are
+// safe inside a systemd Environment= line, and no secret references.
+func checkAppSettings(report *Report, file string, settings map[string]string) {
+	keys := make([]string, 0, len(settings))
+	for k := range settings {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := settings[k]
+		path := "$.database.postgrest.app_settings." + k
+		if !appSettingKey.MatchString(k) {
+			semanticError(report, file, path, "tenant.database.app_setting", fmt.Sprintf("key %q must match [a-z0-9_]{1,63}", k))
+			continue
+		}
+		switch {
+		case appSettingRef.MatchString(v):
+			semanticError(report, file, path, "tenant.database.app_setting", "value looks like a secret reference; app_settings are written in clear text to the container unit — non-secret values only")
+		case strings.ContainsAny(v, "\"\\%$\r\n\x00"):
+			semanticError(report, file, path, "tenant.database.app_setting", "value must not contain quotes, backslashes, %, $ or line breaks")
+		}
+	}
+}
+
+var appSettingKey = regexp.MustCompile(`^[a-z0-9_]{1,63}$`)

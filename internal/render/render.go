@@ -144,6 +144,7 @@ var funcs = template.FuncMap{
 	},
 	"join":  strings.Join,
 	"lower": strings.ToLower,
+	"upper": strings.ToUpper,
 }
 
 // Stack renders every template declared by stack, reading sources from

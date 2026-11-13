@@ -152,3 +152,35 @@ func TestPostgrestHealthCmd(t *testing.T) {
 		t.Fatalf("health command must not use -f (openapi disabled answers 404): %s", cmd)
 	}
 }
+
+func TestPostgrestTemplateAppSettings(t *testing.T) {
+	t.Parallel()
+	render := func(tenant model.Tenant) string {
+		out, err := render.One("../../stacks/database/templates/postgrest.container.tmpl", render.Context{
+			Tenant:  &tenant,
+			Secrets: map[string]string{"listen_port": "3010", "rest_fqdn": "x.rest.example.com", "oidc_issuer": "https://kc.example.com/realms/hg"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}
+	// No app_settings: only the realm-derived issuer default, as before.
+	base := render(model.Tenant{ID: "hg"})
+	if strings.Count(base, "PGRST_APP_SETTINGS_") != 1 || !strings.Contains(base, "PGRST_APP_SETTINGS_OIDC_ISSUER=https://kc.example.com/realms/hg") {
+		t.Fatalf("default issuer missing or duplicated:\n%s", base)
+	}
+	// Declared settings are upper-cased and sorted; the issuer default still applies.
+	got := render(model.Tenant{ID: "hg", Database: &model.TenantDatabase{PostgREST: &model.PostgRESTConfig{
+		AppSettings: map[string]string{"environment": "staging", "data_class": "clinical"}}}})
+	i, j := strings.Index(got, "PGRST_APP_SETTINGS_DATA_CLASS=clinical"), strings.Index(got, "PGRST_APP_SETTINGS_ENVIRONMENT=staging")
+	if i < 0 || j < 0 || i > j || !strings.Contains(got, "PGRST_APP_SETTINGS_OIDC_ISSUER=https://kc.example.com/realms/hg") {
+		t.Fatalf("app settings not rendered as expected:\n%s", got)
+	}
+	// A declared oidc_issuer replaces the default instead of duplicating it.
+	over := render(model.Tenant{ID: "hg", Database: &model.TenantDatabase{PostgREST: &model.PostgRESTConfig{
+		AppSettings: map[string]string{"oidc_issuer": "https://other.example.com/realms/x"}}}})
+	if strings.Count(over, "PGRST_APP_SETTINGS_OIDC_ISSUER=") != 1 || !strings.Contains(over, "OIDC_ISSUER=https://other.example.com/realms/x") {
+		t.Fatalf("oidc_issuer override wrong:\n%s", over)
+	}
+}
