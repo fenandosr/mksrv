@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -120,7 +121,8 @@ func TestGlobalRBACRolesSQL(t *testing.T) {
 
 func TestTenantDatabaseSQL(t *testing.T) {
 	t.Parallel()
-	sql := tenantDatabaseSQL("bitabit", "s3cr3t'value", "auth'pw", model.Tenant{ID: "bitabit"})
+	pt := true
+	sql := tenantDatabaseSQL("bitabit", "s3cr3t'value", "auth'pw", model.Tenant{ID: "bitabit", Database: &model.TenantDatabase{PostgREST: &model.PostgRESTConfig{Enabled: &pt}}})
 	for _, want := range []string{
 		// two per-tenant login roles only
 		`CREATE ROLE %I LOGIN PASSWORD %L`,
@@ -147,7 +149,7 @@ func TestTenantDatabaseSQL(t *testing.T) {
 		`ALTER DEFAULT PRIVILEGES FOR ROLE mksrv_owner IN SCHEMA "app" REVOKE SELECT ON TABLES FROM mksrv_anon;`,
 		`REVOKE SELECT ON ALL TABLES IN SCHEMA "app" FROM mksrv_anon;`,
 		`IF grps ? 'admin' OR grps ? 'dev' THEN SET LOCAL ROLE mksrv_owner;`,
-		`GRANT EXECUTE ON FUNCTION "app".pgrst_pre_request() TO mksrv_web, mksrv_anon;`,
+		`GRANT EXECUTE ON FUNCTION mksrv.pgrst_pre_request() TO mksrv_web, mksrv_anon;`,
 	} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("SQL missing %q:\n%s", want, sql)
@@ -193,7 +195,7 @@ func TestTenantDatabaseSQLWithOverrides(t *testing.T) {
 	sql := tenantDatabaseSQL("hg", "pw", "apw", model.Tenant{
 		ID: "hg",
 		Database: &model.TenantDatabase{
-			PostgREST:       &pt,
+			PostgREST:       &model.PostgRESTConfig{Enabled: &pt},
 			Schema:          "appdata",
 			Extensions:      []string{"pgcrypto", "uuid-ossp"},
 			ConnectionLimit: 40,
@@ -205,13 +207,116 @@ func TestTenantDatabaseSQLWithOverrides(t *testing.T) {
 		`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`,
 		`CREATE SCHEMA IF NOT EXISTS "appdata" AUTHORIZATION mksrv_owner;`,
 		`ALTER DATABASE "db_hg" SET search_path TO "appdata", public;`,
-		`CREATE OR REPLACE FUNCTION "appdata".pgrst_pre_request()`,
+		`CREATE OR REPLACE FUNCTION mksrv.pgrst_pre_request()`,
 	} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("SQL missing %q:\n%s", want, sql)
 		}
 	}
-	if strings.Contains(sql, `SCHEMA "app" `) || strings.Contains(sql, `"app".pgrst_pre_request`) {
+	if strings.Contains(sql, `SCHEMA "app" `) {
 		t.Fatalf("SQL still references the default `app` schema:\n%s", sql)
+	}
+}
+
+func TestPostgRESTConfigJSON(t *testing.T) {
+	t.Parallel()
+	var d model.TenantDatabase
+	if err := json.Unmarshal([]byte(`{"postgrest": false}`), &d); err != nil || d.PostgREST == nil || *d.PostgREST.Enabled {
+		t.Fatalf("bool form: %v %+v", err, d.PostgREST)
+	}
+	d = model.TenantDatabase{}
+	if err := json.Unmarshal([]byte(`{"postgrest": {"schemas": ["api"], "max_rows": 10}}`), &d); err != nil || d.PostgREST.MaxRows != 10 {
+		t.Fatalf("object form: %v %+v", err, d.PostgREST)
+	}
+	if !(model.Tenant{Database: &d}).PostgRESTEnabled() {
+		t.Fatal("object form without enabled must default to enabled")
+	}
+}
+
+func TestExtendedPreRequestSQL(t *testing.T) {
+	t.Parallel()
+	tenant := model.Tenant{ID: "hg", Database: &model.TenantDatabase{
+		Schema:    "api",
+		PostgREST: &model.PostgRESTConfig{Schemas: []string{"api", "reports"}, PreRequestHook: "private.check_request"},
+		Roles: map[string]model.DBRole{
+			"hg_reception":         {When: []string{"reception"}},
+			"hg_reception_finance": {When: []string{"finance", "reception"}},
+		},
+	}}
+	sql := tenantDatabaseSQL("hg", "pw", "apw", tenant)
+	for _, want := range []string{
+		`CREATE SCHEMA IF NOT EXISTS "reports" AUTHORIZATION mksrv_owner;`,
+		`DROP FUNCTION IF EXISTS "api".pgrst_pre_request();`,
+		`CREATE OR REPLACE FUNCTION mksrv.pgrst_pre_request()`,
+		`PERFORM "private"."check_request"();`,
+		`ERRCODE = '42501'`,
+		// token-less requests must pass through to mksrv_anon, never hit `unmapped: deny`
+		`NOT ((claims::jsonb) ? 'sub') THEN RETURN;`,
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("SQL missing %q:\n%s", want, sql)
+		}
+	}
+	// Most specific rule first, and no admin/dev shortcut.
+	i, j := strings.Index(sql, `'finance', 'reception'`), strings.Index(sql, `ARRAY['reception']`)
+	if i < 0 || j < 0 || i > j {
+		t.Fatalf("rules not ordered most-specific first:\n%s", sql)
+	}
+	if strings.Contains(sql, `grps ? 'admin'`) {
+		t.Fatalf("admin shortcut must be gone once `when` is declared:\n%s", sql)
+	}
+	// A tenant without PostgREST gets no authenticator or pre-request, and any
+	// leftovers are removed.
+	off := tenantDatabaseSQL("mcps", "pw", "", model.Tenant{ID: "mcps"})
+	for _, want := range []string{`DROP ROLE %I`, `REVOKE ALL ON DATABASE %I FROM %I`, `DROP FUNCTION IF EXISTS mksrv.pgrst_pre_request();`} {
+		if !strings.Contains(off, want) {
+			t.Fatalf("PostgREST-less SQL missing %q:\n%s", want, off)
+		}
+	}
+	for _, no := range []string{`CREATE ROLE %I LOGIN NOINHERIT`, `GRANT mksrv_web TO`, `CREATE OR REPLACE FUNCTION`} {
+		if strings.Contains(off, no) {
+			t.Fatalf("PostgREST-less SQL must not contain %q:\n%s", no, off)
+		}
+	}
+}
+
+func TestTenantRolesSQL(t *testing.T) {
+	t.Parallel()
+	pt := true
+	tenant := model.Tenant{ID: "hg", Database: &model.TenantDatabase{
+		PostgREST:         &model.PostgRESTConfig{Enabled: &pt},
+		DefaultPrivileges: "none",
+		Roles: map[string]model.DBRole{
+			"hg_authenticated": {},
+			"hg_reception":     {MemberOf: []string{"hg_authenticated"}},
+		},
+		ServiceRoles: map[string]model.DBServiceRole{"hg_worker": {MemberOf: []string{"hg_authenticated"}, ConnectionLimit: 5}},
+	}}
+	sql := tenantDatabaseSQLWith("hg", "pw", "apw", map[string]string{"hg_worker": "wpw"}, tenant)
+	for _, want := range []string{
+		`'hg_reception'`, `NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`,
+		`GRANT "hg_authenticated" TO "hg_reception";`,
+		`GRANT "hg_reception" TO "hg_auth";`,
+		`ALTER ROLE "hg_worker" WITH LOGIN`, `PASSWORD 'wpw' CONNECTION LIMIT 5;`,
+		`GRANT CONNECT ON DATABASE "db_hg" TO "hg_worker";`,
+		`GRANT "hg_authenticated" TO "hg_worker";`,
+		`REVOKE SELECT ON ALL TABLES IN SCHEMA "app" FROM mksrv_app;`,
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("SQL missing %q:\n%s", want, sql)
+		}
+	}
+	// Roles must be created before the \connect, and never granted to mksrv_web.
+	if strings.Index(sql, `'hg_reception'`) > strings.Index(sql, `\connect`) {
+		t.Fatalf("roles must be created before \\connect")
+	}
+	if strings.Contains(sql, `TO mksrv_web;`) && strings.Contains(sql, `"hg_reception" TO mksrv_web`) {
+		t.Fatalf("tenant roles must not be granted to mksrv_web")
+	}
+	if strings.Contains(sql, `GRANT SELECT ON ALL TABLES IN SCHEMA "app" TO mksrv_app;`) {
+		t.Fatalf("default_privileges: none must not grant app SELECT:\n%s", sql)
+	}
+	if strings.Contains(sql, `"hg_worker" TO "hg_auth"`) {
+		t.Fatalf("service roles must not be reachable through the authenticator")
 	}
 }

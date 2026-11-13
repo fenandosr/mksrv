@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -30,6 +31,16 @@ type RealmSpec struct {
 	// (ADR 0025) — password reset and email verification. Nil leaves
 	// Keycloak's current setting untouched.
 	SMTP *SMTPSpec
+	// Settings, when non-nil, is reconciled onto the realm (ADR 0039 §5): an
+	// allow-listed subset, each field applied only when set.
+	Settings *RealmSettings
+}
+
+// RealmSettings is the allow-listed realm settings a tenant may declare.
+type RealmSettings struct {
+	AccessTokenLifespan  int   // seconds; 0 = leave
+	RefreshTokenRotation *bool // nil = leave
+	SSOSessionIdle       int   // seconds; 0 = leave
 }
 
 // SMTPSpec is a realm's outbound email configuration.
@@ -62,6 +73,18 @@ type ClientSpec struct {
 	// flat `groups` array (the tenant RBAC groups). Consumed by configd (VPN
 	// entitlement) and OpenBao (per-group OIDC roles).
 	GroupsClaim bool
+	// PostLogoutRedirectURIs are the allowed post-logout redirects.
+	PostLogoutRedirectURIs []string
+	// DirectGrants enables the password grant (default false).
+	DirectGrants bool
+	// Audiences adds one oidc-audience-mapper (mksrv-aud-<name>) per entry, so
+	// the access token's `aud` carries them (PostgREST PGRST_JWT_AUD).
+	Audiences []string
+	// PruneMappers deletes mksrv-* protocol mappers on this client that are no
+	// longer desired. Only set for tenant-declared clients: other code paths
+	// (EnsureClient's mksrv-audience) add their own mksrv-* mappers to clients
+	// that also pass through EnsureRealm.
+	PruneMappers bool
 }
 
 // RealmResult reports what EnsureRealm changed.
@@ -138,6 +161,25 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 		result.SMTPUpdated = true
 	}
 
+	if st := spec.Settings; st != nil {
+		body := map[string]any{"realm": spec.Realm}
+		if st.AccessTokenLifespan > 0 {
+			body["accessTokenLifespan"] = st.AccessTokenLifespan
+		}
+		if st.SSOSessionIdle > 0 {
+			body["ssoSessionIdleTimeout"] = st.SSOSessionIdle
+		}
+		if st.RefreshTokenRotation != nil {
+			body["revokeRefreshToken"] = *st.RefreshTokenRotation
+			body["refreshTokenMaxReuse"] = 0
+		}
+		if len(body) > 1 {
+			if _, err := c.do(ctx, http.MethodPut, "/realms/"+spec.Realm, body, nil); err != nil {
+				return result, fmt.Errorf("set realm settings on %s: %w", spec.Realm, err)
+			}
+		}
+	}
+
 	existingGroups, err := c.groupNames(ctx, spec.Realm)
 	if err != nil {
 		return result, err
@@ -172,13 +214,11 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 			"enabled":                   true,
 			"publicClient":              cs.Public,
 			"standardFlowEnabled":       true,
-			"directAccessGrantsEnabled": false,
+			"directAccessGrantsEnabled": cs.DirectGrants,
 			"serviceAccountsEnabled":    !cs.Public,
 			"redirectUris":              cs.RedirectURIs,
 			"webOrigins":                origins,
-			"attributes": map[string]string{
-				"pkce.code.challenge.method": "S256",
-			},
+			"attributes":                clientAttributes(cs),
 		}
 		if uuid, ok := existingClients[cs.ClientID]; ok {
 			if _, err := c.do(ctx, http.MethodPut, "/realms/"+spec.Realm+"/clients/"+uuid, body, nil); err != nil {
@@ -198,13 +238,89 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 	return result, nil
 }
 
-// applyClaimMappers ensures each client's HardcodedClaims and GroupsClaim are
-// present as protocol mappers. It is additive and idempotent: a mapper is
-// created only when no mapper of the same name exists yet.
+// clientAttributes are the client attributes mksrv manages.
+func clientAttributes(cs ClientSpec) map[string]string {
+	attrs := map[string]string{"pkce.code.challenge.method": "S256"}
+	if len(cs.PostLogoutRedirectURIs) > 0 {
+		attrs["post.logout.redirect.uris"] = strings.Join(cs.PostLogoutRedirectURIs, "##")
+	}
+	return attrs
+}
+
+// desiredMappers returns the mksrv-* protocol mappers a client spec wants.
+func desiredMappers(cs ClientSpec) []map[string]any {
+	mappers := make([]map[string]any, 0, len(cs.HardcodedClaims)+len(cs.Audiences)+1)
+	claims := make([]string, 0, len(cs.HardcodedClaims))
+	for claim := range cs.HardcodedClaims {
+		claims = append(claims, claim)
+	}
+	sort.Strings(claims)
+	for _, claim := range claims {
+		mappers = append(mappers, map[string]any{
+			"name":           "mksrv-" + claim,
+			"protocol":       "openid-connect",
+			"protocolMapper": "oidc-hardcoded-claim-mapper",
+			"config": map[string]string{
+				"claim.name":                 claim,
+				"claim.value":                cs.HardcodedClaims[claim],
+				"jsonType.label":             "String",
+				"access.token.claim":         "true",
+				"id.token.claim":             "false",
+				"userinfo.token.claim":       "false",
+				"access.tokenResponse.claim": "false",
+			},
+		})
+	}
+	if cs.GroupsClaim {
+		mappers = append(mappers, map[string]any{
+			"name":           "mksrv-groups",
+			"protocol":       "openid-connect",
+			"protocolMapper": "oidc-group-membership-mapper",
+			"config": map[string]string{
+				"claim.name":           "groups",
+				"full.path":            "false",
+				"access.token.claim":   "true",
+				"id.token.claim":       "true",
+				"userinfo.token.claim": "true",
+			},
+		})
+	}
+	for _, aud := range cs.Audiences {
+		mappers = append(mappers, map[string]any{
+			"name":           "mksrv-aud-" + aud,
+			"protocol":       "openid-connect",
+			"protocolMapper": "oidc-audience-mapper",
+			"config": map[string]string{
+				"included.custom.audience": aud,
+				"access.token.claim":       "true",
+				"id.token.claim":           "false",
+			},
+		})
+	}
+	return mappers
+}
+
+// configCovers reports whether every desired config key already has the
+// desired value (Keycloak may return extra keys; those are left alone).
+func configCovers(have, want map[string]string) bool {
+	for k, v := range want {
+		if have[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// applyClaimMappers reconciles each client's mksrv-* protocol mappers to the
+// desired state: missing ones are created, ones whose configuration drifted
+// are updated in place (resolving the ADR 0016 limitation that a changed
+// value needed manual deletion), and — for clients with PruneMappers — stale
+// mksrv-* mappers are deleted. Mappers without the mksrv- prefix are never
+// touched.
 func (c *Client) applyClaimMappers(ctx context.Context, realm string, clients []ClientSpec) error {
 	var uuids map[string]string
 	for _, cs := range clients {
-		if len(cs.HardcodedClaims) == 0 && !cs.GroupsClaim {
+		if len(cs.HardcodedClaims) == 0 && !cs.GroupsClaim && len(cs.Audiences) == 0 && !cs.PruneMappers {
 			continue
 		}
 		if uuids == nil {
@@ -217,54 +333,53 @@ func (c *Client) applyClaimMappers(ctx context.Context, realm string, clients []
 		if !ok {
 			return fmt.Errorf("client %s not found after upsert", cs.ClientID)
 		}
+		base := "/realms/" + realm + "/clients/" + uuid + "/protocol-mappers/models"
 		var existing []struct {
-			Name string `json:"name"`
+			ID             string            `json:"id"`
+			Name           string            `json:"name"`
+			ProtocolMapper string            `json:"protocolMapper"`
+			Config         map[string]string `json:"config"`
 		}
-		if _, err := c.do(ctx, http.MethodGet, "/realms/"+realm+"/clients/"+uuid+"/protocol-mappers/models", nil, &existing); err != nil {
+		if _, err := c.do(ctx, http.MethodGet, base, nil, &existing); err != nil {
 			return err
 		}
-		have := make(map[string]bool, len(existing))
-		for _, m := range existing {
-			have[m.Name] = true
+		have := make(map[string]int, len(existing))
+		for i, m := range existing {
+			have[m.Name] = i
 		}
 
-		mappers := make([]map[string]any, 0, len(cs.HardcodedClaims)+1)
-		for claim, value := range cs.HardcodedClaims {
-			mappers = append(mappers, map[string]any{
-				"name":           "mksrv-" + claim,
-				"protocol":       "openid-connect",
-				"protocolMapper": "oidc-hardcoded-claim-mapper",
-				"config": map[string]string{
-					"claim.name":                 claim,
-					"claim.value":                value,
-					"jsonType.label":             "String",
-					"access.token.claim":         "true",
-					"id.token.claim":             "false",
-					"userinfo.token.claim":       "false",
-					"access.tokenResponse.claim": "false",
-				},
-			})
-		}
-		if cs.GroupsClaim {
-			mappers = append(mappers, map[string]any{
-				"name":           "mksrv-groups",
-				"protocol":       "openid-connect",
-				"protocolMapper": "oidc-group-membership-mapper",
-				"config": map[string]string{
-					"claim.name":           "groups",
-					"full.path":            "false",
-					"access.token.claim":   "true",
-					"id.token.claim":       "true",
-					"userinfo.token.claim": "true",
-				},
-			})
-		}
-		for _, body := range mappers {
-			if have[body["name"].(string)] {
+		desired := desiredMappers(cs)
+		want := make(map[string]bool, len(desired))
+		for _, body := range desired {
+			name := body["name"].(string)
+			want[name] = true
+			i, found := have[name]
+			if !found {
+				if _, err := c.do(ctx, http.MethodPost, base, body, nil); err != nil {
+					return err
+				}
 				continue
 			}
-			if _, err := c.do(ctx, http.MethodPost, "/realms/"+realm+"/clients/"+uuid+"/protocol-mappers/models", body, nil); err != nil {
+			cur := existing[i]
+			if cur.ProtocolMapper == body["protocolMapper"] && configCovers(cur.Config, body["config"].(map[string]string)) {
+				continue
+			}
+			upd := map[string]any{}
+			for k, v := range body {
+				upd[k] = v
+			}
+			upd["id"] = cur.ID
+			if _, err := c.do(ctx, http.MethodPut, base+"/"+cur.ID, upd, nil); err != nil {
 				return err
+			}
+		}
+		if cs.PruneMappers {
+			for _, m := range existing {
+				if strings.HasPrefix(m.Name, "mksrv-") && !want[m.Name] {
+					if _, err := c.do(ctx, http.MethodDelete, base+"/"+m.ID, nil, nil); err != nil {
+						return err
+					}
+				}
 			}
 		}
 	}

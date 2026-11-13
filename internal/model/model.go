@@ -3,7 +3,10 @@
 // Package model defines the public workspace and stack data contracts.
 package model
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Deployment is the decoded deployment.yaml document.
 type Deployment struct {
@@ -265,7 +268,24 @@ func (t Tenant) WebSSO() bool {
 type TenantDatabase struct {
 	// PostgREST — deploy the auto-generated REST API for this tenant. Nil or
 	// true means deploy; false means no container, no public *.rest FQDN.
-	PostgREST *bool `json:"postgrest,omitempty"`
+	// ADR 0039: also accepts an object (see PostgRESTConfig).
+	PostgREST *PostgRESTConfig `json:"postgrest,omitempty"`
+	// Roles are tenant-declared NOLOGIN privilege buckets (ADR 0039 §3), keyed
+	// by role name. Each may carry a `when` group list used by the generated
+	// pre-request function (§2).
+	Roles map[string]DBRole `json:"roles,omitempty"`
+	// RBAC tunes the generated pre-request mapping (ADR 0039 §2).
+	RBAC *DBRBAC `json:"rbac,omitempty"`
+	// RolePrefix names the tenant's role namespace: every declared role must
+	// start with "<prefix>_". Default: the tenant id (ADR 0039 §3).
+	RolePrefix string `json:"role_prefix,omitempty"`
+	// ServiceRoles are LOGIN roles (e.g. a worker needing LISTEN/NOTIFY over a
+	// direct connection); passwords are generated and kept in SSM.
+	ServiceRoles map[string]DBServiceRole `json:"service_roles,omitempty"`
+	// DefaultPrivileges: "mksrv" (default, ADR 0026/0029 behaviour: mksrv_app
+	// gets SELECT on the tenant schema) or "none" (deny-by-default; the app's
+	// migrations grant everything).
+	DefaultPrivileges string `json:"default_privileges,omitempty"`
 	// Schema is the tenant's application schema (and, when PostgREST runs, the
 	// only schema it exposes). Default "app".
 	Schema string `json:"schema,omitempty"`
@@ -288,6 +308,95 @@ type TenantDatabase struct {
 	PublicSchemaCreate bool `json:"public_schema_create,omitempty"`
 }
 
+// PostgRESTConfig is `database.postgrest`: a boolean (the ADR 0029 form) or an
+// object (ADR 0039 §1). Every field is optional; unset means today's behaviour.
+type PostgRESTConfig struct {
+	Enabled *bool `json:"enabled,omitempty"`
+	// Schemas are exposed via PGRST_DB_SCHEMAS; the first is the default
+	// profile. Default: [database.schema].
+	Schemas []string `json:"schemas,omitempty"`
+	// PreRequestHook is a `schema.function` PERFORMed after SET LOCAL ROLE.
+	PreRequestHook string `json:"pre_request_hook,omitempty"`
+	// JWTAudience -> PGRST_JWT_AUD.
+	JWTAudience string `json:"jwt_audience,omitempty"`
+	// CORSOrigins -> PGRST_SERVER_CORS_ALLOWED_ORIGINS.
+	CORSOrigins []string `json:"cors_origins,omitempty"`
+	// MaxRows -> PGRST_DB_MAX_ROWS.
+	MaxRows int `json:"max_rows,omitempty"`
+	// OpenAPIMode -> PGRST_OPENAPI_MODE (follow-privileges | ignore-privileges |
+	// disabled). Unset keeps PostgREST's default, which serves the schema and
+	// the server version to anonymous callers; clinical tenants set `disabled`.
+	OpenAPIMode string `json:"openapi_mode,omitempty"`
+}
+
+// UnmarshalJSON accepts `true`/`false` or an object.
+func (p *PostgRESTConfig) UnmarshalJSON(b []byte) error {
+	var enabled bool
+	if err := json.Unmarshal(b, &enabled); err == nil {
+		*p = PostgRESTConfig{Enabled: &enabled}
+		return nil
+	}
+	type plain PostgRESTConfig
+	var v plain
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	*p = PostgRESTConfig(v)
+	return nil
+}
+
+// DBRole is one tenant-declared role (ADR 0039 §3).
+type DBRole struct {
+	MemberOf []string `json:"member_of,omitempty"`
+	// When lists Keycloak groups that must ALL be present for the generated
+	// pre-request to select this role (ADR 0039 §2).
+	When []string `json:"when,omitempty"`
+}
+
+// DBServiceRole is a tenant-declared LOGIN role.
+type DBServiceRole struct {
+	MemberOf        []string `json:"member_of,omitempty"`
+	ConnectionLimit int      `json:"connection_limit,omitempty"`
+}
+
+// DBRolePrefix returns the tenant's role namespace prefix (default: the id).
+func (t Tenant) DBRolePrefix() string {
+	if t.Database != nil && t.Database.RolePrefix != "" {
+		return t.Database.RolePrefix
+	}
+	return t.ID
+}
+
+// DBServiceRoles returns the tenant's declared LOGIN roles.
+func (t Tenant) DBServiceRoles() map[string]DBServiceRole {
+	if t.Database == nil {
+		return nil
+	}
+	return t.Database.ServiceRoles
+}
+
+// DBRBAC tunes the generated pre-request function.
+type DBRBAC struct {
+	// Unmapped: "deny" (default once any role declares `when`) or "anon".
+	Unmapped string `json:"unmapped,omitempty"`
+}
+
+// PostgRESTSchemas returns the schemas PostgREST exposes (default: DBSchema).
+func (t Tenant) PostgRESTSchemas() []string {
+	if t.Database != nil && t.Database.PostgREST != nil && len(t.Database.PostgREST.Schemas) > 0 {
+		return t.Database.PostgREST.Schemas
+	}
+	return []string{t.DBSchema()}
+}
+
+// PostgRESTSettings returns the object-form settings (zero value otherwise).
+func (t Tenant) PostgRESTSettings() PostgRESTConfig {
+	if t.Database != nil && t.Database.PostgREST != nil {
+		return *t.Database.PostgREST
+	}
+	return PostgRESTConfig{}
+}
+
 // DBSchema returns the tenant's application schema — "app" unless overridden.
 func (t Tenant) DBSchema() string {
 	if t.Database != nil && t.Database.Schema != "" {
@@ -296,10 +405,12 @@ func (t Tenant) DBSchema() string {
 	return "app"
 }
 
-// PostgRESTEnabled reports whether PostgREST is deployed for this tenant (the
-// default when it consumes the `database` stack).
+// PostgRESTEnabled reports whether PostgREST is deployed for this tenant. It is
+// opt-in: `database.postgrest: true` or an object (unless `enabled: false`).
+// Tenants without it get no container, no <id>_auth role and no DNS record.
 func (t Tenant) PostgRESTEnabled() bool {
-	return t.Database == nil || t.Database.PostgREST == nil || *t.Database.PostgREST
+	d := t.Database
+	return d != nil && d.PostgREST != nil && (d.PostgREST.Enabled == nil || *d.PostgREST.Enabled)
 }
 
 // DBExtensions returns the Postgres extensions to install in db_<id>.
@@ -425,8 +536,63 @@ type DNSOverride struct {
 	Server   string `json:"server,omitempty"`
 }
 
+// BaseTenantGroups is the per-tenant RBAC group set every realm gets (ADR 0016).
+// admin manages the team and owns the tenant boundary; dev builds inside it;
+// apps is app SSO; vpn is a standalone mesh-device capability.
+var BaseTenantGroups = []string{"admin", "dev", "apps", "vpn"}
+
 type TenantKeycloak struct {
 	Realm string `json:"realm,omitempty"`
+	// Groups are additional realm groups, additive to BaseTenantGroups (ADR 0039 §5).
+	Groups []string `json:"groups,omitempty"`
+	// Settings is an allow-listed subset of realm settings.
+	Settings *KeycloakSettings `json:"settings,omitempty"`
+	// Clients are tenant-declared OIDC clients, reconciled to desired state.
+	Clients []KeycloakClient `json:"clients,omitempty"`
+	// AllowLocalhost permits http://localhost redirect URIs on declared clients.
+	// Only for a non-production tenant (ADR 0039 §5).
+	AllowLocalhost bool `json:"allow_localhost,omitempty"`
+}
+
+// KeycloakSettings is the allow-list of realm settings a tenant may declare.
+type KeycloakSettings struct {
+	AccessTokenLifespan  int   `json:"access_token_lifespan,omitempty"` // seconds
+	RefreshTokenRotation *bool `json:"refresh_token_rotation,omitempty"`
+	SSOSessionIdle       int   `json:"sso_session_idle,omitempty"` // seconds
+}
+
+// KeycloakClient is one tenant-declared OIDC client (ADR 0039 §5).
+type KeycloakClient struct {
+	ID                     string   `json:"id"`
+	Public                 bool     `json:"public"`
+	RedirectURIs           []string `json:"redirect_uris"`
+	PostLogoutRedirectURIs []string `json:"post_logout_redirect_uris,omitempty"`
+	PKCE                   string   `json:"pkce,omitempty"`
+	DirectGrants           bool     `json:"direct_grants,omitempty"`
+	Audience               []string `json:"audience,omitempty"`
+	Claims                 struct {
+		Groups        bool `json:"groups,omitempty"`
+		PostgRESTRole bool `json:"postgrest_role,omitempty"`
+	} `json:"claims,omitempty"`
+}
+
+// KeycloakGroups returns the tenant's full realm group set: base groups plus
+// declared ones, de-duplicated, base first.
+func (t Tenant) KeycloakGroups() []string {
+	out := append([]string(nil), BaseTenantGroups...)
+	for _, g := range t.Keycloak.Groups {
+		dup := false
+		for _, e := range out {
+			if e == g {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 type Branding struct {
@@ -533,4 +699,7 @@ type StackHealth struct {
 type Lock struct {
 	Engine    string `json:"engine"`
 	AppliedAt string `json:"applied_at,omitempty"`
+	// PostgRESTPorts pins each tenant's PostgREST host port (ADR 0039 §6) so
+	// adding a tenant never moves another tenant's live container.
+	PostgRESTPorts map[string]int `json:"postgrest_ports,omitempty"`
 }

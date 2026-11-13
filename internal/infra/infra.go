@@ -78,6 +78,15 @@ func normalizeTenantsForTerraform(tenants map[string]model.Tenant) map[string]mo
 			web[i] = w
 		}
 		t.Web = web
+		// ADR 0039: `var.tenants` types database.postgrest as {enabled};
+		// the rest of the object (schemas, hook, aud, ...) is only consumed by
+		// mksrv itself, so hand Terraform just the enabled flag.
+		if t.Database != nil && t.Database.PostgREST != nil {
+			db := *t.Database
+			enabled := t.PostgRESTEnabled()
+			db.PostgREST = &model.PostgRESTConfig{Enabled: &enabled}
+			t.Database = &db
+		}
 		out[id] = t
 	}
 	return out

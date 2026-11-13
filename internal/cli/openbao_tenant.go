@@ -79,6 +79,12 @@ func meshHostFQDN(env, host string) string {
 // over the mesh (with target_session_attrs so writes always land on the
 // leader); standalone keeps the single `mksrv-postgres` container name.
 func tenantDBSecretFields(pg postgresCluster, env, id, password string) []string {
+	return dbSecretFields(pg, env, id, id+"_login", password)
+}
+
+// dbSecretFields is tenantDBSecretFields for any LOGIN role of db_<id> (the
+// human <id>_login role, or a tenant-declared service role — ADR 0039 §3).
+func dbSecretFields(pg postgresCluster, env, id, user, password string) []string {
 	host, suffix := "mksrv-postgres:5432", ""
 	if len(pg.Nodes) > 0 {
 		parts := make([]string, len(pg.Nodes))
@@ -98,10 +104,10 @@ func tenantDBSecretFields(pg postgresCluster, env, id, password string) []string
 	// the same one in SSM tenant_<id>_password.
 	return []string{
 		"dbname=db_" + id,
-		"username=" + id + "_login",
+		"username=" + user,
 		"password=" + password,
 		"hosts=" + host,
-		"url=postgres://" + id + "_login:" + password + "@" + host + "/db_" + id + suffix,
+		"url=postgres://" + user + ":" + password + "@" + host + "/db_" + id + suffix,
 	}
 }
 
@@ -479,6 +485,24 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 			if err := mirrorTenantSecret(ctx, client, rootToken, id, "database", pw,
 				tenantDBSecretFields(f.postgres, env, id, pw)); err != nil {
 				return err
+			}
+			// ADR 0039 §3: tenant-declared service roles (a worker, a reporting
+			// job) get their own KV entry, kv/tenants/<id>/database-<role>, so
+			// the app reads its credential with its AppRole instead of SSM.
+			roles := make([]string, 0, len(f.data.Tenants[id].DBServiceRoles()))
+			for r := range f.data.Tenants[id].DBServiceRoles() {
+				roles = append(roles, r)
+			}
+			sort.Strings(roles)
+			for _, role := range roles {
+				spw, err := f.resolver.Get(ctx, "/mksrv/{env}/database/tenant_"+id+"_svc_"+role+"_password")
+				if err != nil {
+					return fmt.Errorf("openbao %s: service role %s password: %w (provision databases first)", id, role, err)
+				}
+				if err := mirrorTenantSecret(ctx, client, rootToken, id, "database-"+role, spw,
+					dbSecretFields(f.postgres, env, id, role, spw)); err != nil {
+					return err
+				}
 			}
 		}
 		if slices.Contains(stacks, "cache") {

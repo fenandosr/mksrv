@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -114,7 +115,11 @@ func TestEnsureRealmAddsHardcodedClaimMapper(t *testing.T) {
 			return
 		}
 		if mapperExists {
-			_ = json.NewEncoder(w).Encode([]map[string]string{{"name": "mksrv-role"}})
+			stored := map[string]any{"id": "m1"}
+			for k, v := range mapperPosts[0] {
+				stored[k] = v
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]any{stored})
 			return
 		}
 		_ = json.NewEncoder(w).Encode([]any{})
@@ -521,5 +526,90 @@ func TestDoReAuthenticatesOn401(t *testing.T) {
 	}
 	if logins != 2 {
 		t.Fatalf("want 2 logins (initial + re-auth), got %d", logins)
+	}
+}
+
+// TestEnsureRealmReconcilesMappersToDesiredState covers ADR 0039 §5: a changed
+// mapper value is updated in place, a stale mksrv-* mapper is pruned (only when
+// the client opts in), and a foreign mapper is never touched.
+func TestEnsureRealmReconcilesMappersToDesiredState(t *testing.T) {
+	t.Parallel()
+	var puts []string
+	var deletes []string
+	var posts []string
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/realms/master/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "t"})
+	})
+	mux.HandleFunc("/admin/realms/acme", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"realm": "acme"})
+	})
+	mux.HandleFunc("/admin/realms/acme/groups", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]any{})
+	})
+	mux.HandleFunc("/admin/realms/acme/clients", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]string{{"id": "u1", "clientId": "acme-web"}})
+	})
+	mux.HandleFunc("/admin/realms/acme/clients/u1", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/admin/realms/acme/clients/u1/protocol-mappers/models", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			posts = append(posts, body["name"].(string))
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"id": "m-role", "name": "mksrv-role", "protocolMapper": "oidc-hardcoded-claim-mapper",
+				"config": map[string]string{"claim.name": "role", "claim.value": "OLD", "jsonType.label": "String",
+					"access.token.claim": "true", "id.token.claim": "false", "userinfo.token.claim": "false", "access.tokenResponse.claim": "false"}},
+			{"id": "m-stale", "name": "mksrv-old-aud", "protocolMapper": "oidc-audience-mapper", "config": map[string]string{}},
+			{"id": "m-foreign", "name": "someone-elses", "protocolMapper": "oidc-usermodel-property-mapper", "config": map[string]string{}},
+		})
+	})
+	mux.HandleFunc("/admin/realms/acme/clients/u1/protocol-mappers/models/", func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		switch r.Method {
+		case http.MethodPut:
+			puts = append(puts, id)
+		case http.MethodDelete:
+			deletes = append(deletes, id)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := New(server.URL)
+	if err := c.Login(context.Background(), "admin", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.EnsureRealm(context.Background(), RealmSpec{
+		Realm:    "acme",
+		Settings: &RealmSettings{AccessTokenLifespan: 300},
+		Clients: []ClientSpec{{
+			ClientID: "acme-web", Public: true, PruneMappers: true,
+			HardcodedClaims: map[string]string{"role": "mksrv_web"},
+			Audiences:       []string{"acme-api"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(puts) != 1 || puts[0] != "m-role" {
+		t.Fatalf("changed mapper not updated in place: puts=%v", puts)
+	}
+	if len(deletes) != 1 || deletes[0] != "m-stale" {
+		t.Fatalf("want only the stale mksrv-* mapper pruned, got %v", deletes)
+	}
+	if len(posts) != 1 || posts[0] != "mksrv-aud-acme-api" {
+		t.Fatalf("want the new audience mapper created, got %v", posts)
 	}
 }

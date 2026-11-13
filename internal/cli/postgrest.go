@@ -6,7 +6,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -21,9 +23,13 @@ import (
 )
 
 // postgrestBasePort is the first host port assigned to a tenant PostgREST
-// container. Tenants take consecutive ports in sorted-id order; the Headscale
-// ACL opens 3010-3019, so this supports up to ten tenants.
-const postgrestBasePort = 3010
+// container; postgrestPortCount ports are available (3010-3099, matching the
+// Headscale ACL). Ports are persisted per tenant in mksrv.lock (ADR 0039 §6),
+// so adding or removing a tenant never moves another tenant's live container.
+const (
+	postgrestBasePort  = 3010
+	postgrestPortCount = 90
+)
 
 // postgrestConsumerIDs returns, sorted, every tenant in the whole workspace
 // that actually gets a PostgREST container — `database` in `stacks:` and
@@ -50,14 +56,69 @@ func postgrestConsumerIDs(tenants map[string]model.Tenant) []string {
 	return ids
 }
 
-// postgrestPort returns the host port for a tenant's PostgREST container, or 0
-// when the tenant is not in the sorted list.
-func postgrestPort(sortedIDs []string, id string) int {
-	i := slices.Index(sortedIDs, id)
-	if i < 0 {
-		return 0
+// assignPostgRESTPorts keeps every existing assignment for tenants that are
+// still PostgREST consumers and gives each new consumer the lowest free port,
+// in sorted-id order. With an empty `existing` (a workspace that predates the
+// lock entry) this reproduces the old alphabetical allocation, so live
+// containers keep their ports. Assignments of tenants that stopped being
+// consumers are dropped, freeing their port.
+func assignPostgRESTPorts(tenants map[string]model.Tenant, existing map[string]int) (map[string]int, error) {
+	ids := postgrestConsumerIDs(tenants)
+	out := make(map[string]int, len(ids))
+	used := map[int]bool{}
+	for _, id := range ids {
+		p := existing[id]
+		if p >= postgrestBasePort && p < postgrestBasePort+postgrestPortCount && !used[p] {
+			out[id] = p
+			used[p] = true
+		}
 	}
-	return postgrestBasePort + i
+	next := postgrestBasePort
+	for _, id := range ids {
+		if _, ok := out[id]; ok {
+			continue
+		}
+		for used[next] {
+			next++
+		}
+		if next >= postgrestBasePort+postgrestPortCount {
+			return nil, fmt.Errorf("no free PostgREST port left (range %d-%d)", postgrestBasePort, postgrestBasePort+postgrestPortCount-1)
+		}
+		out[id] = next
+		used[next] = true
+	}
+	return out, nil
+}
+
+// postgrestPorts returns the stable per-tenant PostgREST ports, assigning and
+// persisting any missing ones to mksrv.lock on first use.
+func (f *fleet) postgrestPorts() (map[string]int, error) {
+	var existing map[string]int
+	if f.data.Lock != nil {
+		existing = f.data.Lock.PostgRESTPorts
+	}
+	ports, err := assignPostgRESTPorts(f.data.Tenants, existing)
+	if err != nil {
+		return nil, err
+	}
+	if maps.Equal(ports, existing) || (len(ports) == 0 && len(existing) == 0) {
+		return ports, nil
+	}
+	lock := model.Lock{Engine: strings.TrimSpace(f.data.Deployment.Engine)}
+	if f.data.Lock != nil {
+		lock = *f.data.Lock
+	}
+	if lock.Engine == "" {
+		lock.Engine = "dev"
+	}
+	lock.PostgRESTPorts = ports
+	if f.data.Root != "" {
+		if err := writeLock(f.data.Root, lock); err != nil {
+			return nil, fmt.Errorf("persist postgrest ports to mksrv.lock: %w", err)
+		}
+	}
+	f.data.Lock = &lock
+	return ports, nil
 }
 
 // reconcilePostgREST deploys one PostgREST container per tenant that consumes
@@ -112,19 +173,27 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 		printer.Success("tenant %s: postgrest disabled (torn down)", id)
 	}
 	if len(consumers) == 0 {
+		if len(postgrestConsumerIDs(f.data.Tenants)) == 0 {
+			// Last PostgREST consumer gone: remove the JWKS refresh machinery too.
+			_, _ = client.Run(ctx, "sudo systemctl disable --now mksrv-postgrest-jwks-refresh.timer 2>/dev/null || true")
+			_, _ = client.Run(ctx, "sudo rm -f /etc/systemd/system/mksrv-postgrest-jwks-refresh.service /etc/systemd/system/mksrv-postgrest-jwks-refresh.timer "+jwksRefreshScriptPath+" "+jwksRefreshListPath)
+		}
 		_, _ = client.Run(ctx, "sudo systemctl daemon-reload")
 		_, _ = edgeClient.Run(ctx, "sudo podman exec mksrv-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile || sudo systemctl restart mksrv-caddy.service")
 		return nil
 	}
 
 	dep := f.data.Deployment
-	sortedIDs := postgrestConsumerIDs(f.data.Tenants)
+	ports, err := f.postgrestPorts()
+	if err != nil {
+		return err
+	}
 	rctxBase := f.renderContext(*dataHost)
 	dataPrivateIP := rctxBase.Host.PrivateIP
 
 	for _, id := range consumers {
 		tenant := f.data.Tenants[id]
-		port := postgrestPort(sortedIDs, id)
+		port := ports[id]
 		restFQDN := id + ".rest." + dep.DNS.RootDomain
 
 		authPass, err := f.resolver.Get(ctx, "/mksrv/{env}/database/tenant_"+id+"_authpw")
@@ -156,6 +225,9 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 		rctx.Secrets = map[string]string{
 			"listen_port": strconv.Itoa(port),
 			"rest_fqdn":   restFQDN,
+			// ADR 0039: issuer for hooks that validate `iss`; only rendered
+			// for tenants that use the extended PostgREST/RBAC config.
+			"oidc_issuer": "https://" + dep.Identity.KeycloakDomain + "/realms/" + tenantRealm(tenant),
 		}
 		unit, err := render.One(
 			filepath.Join(f.stacksRoot, "database", "templates", "postgrest.container.tmpl"),
@@ -176,9 +248,13 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 		}
 	}
 
+	if err := installJWKSRefresh(ctx, client, jwksRefreshList(postgrestConsumerIDs(f.data.Tenants), f.data.Tenants, dep.Identity.KeycloakDomain)); err != nil {
+		return fmt.Errorf("install postgrest JWKS refresh: %w", err)
+	}
 	if _, err := client.Run(ctx, "sudo systemctl daemon-reload"); err != nil {
 		return err
 	}
+	_, _ = client.Run(ctx, "sudo systemctl enable --now mksrv-postgrest-jwks-refresh.timer")
 	for _, id := range consumers {
 		if _, err := client.Run(ctx, "sudo systemctl restart mksrv-postgrest-"+id+".service"); err != nil {
 			return fmt.Errorf("restart postgrest %s: %w", id, err)
@@ -191,14 +267,21 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 	}
 
 	for _, id := range consumers {
-		port := postgrestPort(sortedIDs, id)
-		if _, err := client.Run(ctx, fmt.Sprintf(
-			"curl -fsS -m 10 --retry 12 --retry-delay 3 --retry-all-errors http://127.0.0.1:%d/ -o /dev/null", port)); err != nil {
+		port := ports[id]
+		if _, err := client.Run(ctx, postgrestHealthCmd(port)); err != nil {
 			return fmt.Errorf("postgrest %s did not become healthy: %w", id, err)
 		}
 		printer.Success("tenant %s: postgrest on :%d -> https://%s.rest.%s", id, port, id, dep.DNS.RootDomain)
 	}
 	return nil
+}
+
+// postgrestHealthCmd polls an anonymous GET / until PostgREST answers 200 (the
+// OpenAPI document) or 404 (database.postgrest.openapi_mode: disabled). Anything
+// else — 401/403 from a broken pre-request, 5xx from an unreachable database —
+// keeps retrying and finally fails.
+func postgrestHealthCmd(port int) string {
+	return fmt.Sprintf(`for i in $(seq 1 13); do c=$(curl -sS -m 10 -o /dev/null -w '%%{http_code}' http://127.0.0.1:%d/ 2>/dev/null); case "$c" in 200|404) exit 0;; esac; [ "$i" -lt 13 ] && sleep 3; done; echo "last status: $c" >&2; exit 1`, port)
 }
 
 // fetchRealmJWKS returns the tenant realm's JWKS document, used verbatim as
@@ -236,4 +319,85 @@ func fetchRealmJWKS(ctx context.Context, keycloakDomain, realm string) (string, 
 		return "", fmt.Errorf("fetch realm jwks %s: status %d", url, res.StatusCode)
 	}
 	return string(body), nil
+}
+
+// PostgREST validates tokens against a JWKS that mksrv bakes into a podman
+// secret at `tenant apply` time. A Keycloak key rotation would otherwise break
+// validation until the next apply (ADR 0039 §4). A systemd timer on the data
+// host re-fetches each realm's JWKS and, only when it changed, replaces the
+// secret and restarts that tenant's PostgREST. (A SIGUSR2 config reload would
+// avoid the restart, but is unverified against the pinned image; this is the
+// ADR's documented fallback and works on every version.)
+const (
+	jwksRefreshScriptPath = "/usr/local/bin/mksrv-postgrest-jwks-refresh"
+	jwksRefreshListPath   = "/etc/mksrv/postgrest-jwks.list"
+	jwksRefreshScript     = `#!/usr/bin/env bash
+# Managed by mksrv (ADR 0039 §4). Re-fetch each tenant realm's JWKS; replace the
+# podman secret and restart PostgREST only when it changed.
+set -uo pipefail
+rc=0
+while read -r id url; do
+  [ -n "${id:-}" ] || continue
+  new=$(curl -fsS -m 20 "$url") || { echo "jwks fetch failed for $id" >&2; rc=1; continue; }
+  case "$new" in *'"keys"'*) ;; *) echo "unexpected jwks body for $id" >&2; rc=1; continue ;; esac
+  secret="mksrv-database-postgrest-$id-jwt"
+  cur=$(podman secret inspect --showsecret --format '{{.SecretData}}' "$secret" 2>/dev/null || true)
+  [ "$new" = "$cur" ] && continue
+  printf '%s' "$new" | podman secret create --replace "$secret" - >/dev/null || { rc=1; continue; }
+  systemctl restart "mksrv-postgrest-$id.service" || rc=1
+  echo "rotated JWKS for $id"
+done < ` + jwksRefreshListPath + `
+exit $rc
+`
+	jwksRefreshService = `[Unit]
+Description=mksrv PostgREST JWKS refresh
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=` + jwksRefreshScriptPath + `
+`
+	jwksRefreshTimer = `[Unit]
+Description=mksrv PostgREST JWKS refresh (hourly)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
+`
+)
+
+// jwksRefreshList is the "<tenant> <jwks-url>" file the refresh script walks,
+// one line per PostgREST consumer, sorted.
+func jwksRefreshList(consumers []string, tenants map[string]model.Tenant, keycloakDomain string) string {
+	ids := append([]string(nil), consumers...)
+	sort.Strings(ids)
+	var b strings.Builder
+	for _, id := range ids {
+		fmt.Fprintf(&b, "%s https://%s/realms/%s/protocol/openid-connect/certs\n", id, keycloakDomain, tenantRealm(tenants[id]))
+	}
+	return b.String()
+}
+
+func installJWKSRefresh(ctx context.Context, client *sshx.Client, list string) error {
+	if _, err := client.Run(ctx, "sudo mkdir -p /etc/mksrv"); err != nil {
+		return err
+	}
+	for path, f := range map[string]struct {
+		body string
+		mode os.FileMode
+	}{
+		jwksRefreshListPath:   {list, 0o644},
+		jwksRefreshScriptPath: {jwksRefreshScript, 0o755},
+		"/etc/systemd/system/mksrv-postgrest-jwks-refresh.service": {jwksRefreshService, 0o644},
+		"/etc/systemd/system/mksrv-postgrest-jwks-refresh.timer":   {jwksRefreshTimer, 0o644},
+	} {
+		if err := client.WriteFileSudo(ctx, path, []byte(f.body), f.mode); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -35,11 +35,6 @@ const (
 // local listener on. The port is fixed by OpenBao.
 var openbaoRedirectURIs = []string{"http://localhost:8250/oidc/callback"}
 
-// tenantGroups is the per-tenant RBAC group set (ADR 0016). admin manages the
-// team and owns the tenant boundary; dev builds inside it; apps is app SSO;
-// vpn is a standalone mesh-device capability.
-var tenantGroups = []string{"admin", "dev", "apps", "vpn"}
-
 // vpnRedirectURIs are the OIDC loopback callbacks the Cloud-IT VPN desktop app
 // uses. The literal ports are the app's fixed candidates (chosen to avoid the
 // Hyper-V/WSL2 reserved port range); the wildcards cover any dynamic-port build.
@@ -194,10 +189,35 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 				RedirectURIs: webSSORedirectURIs(tenant), GroupsClaim: true,
 			})
 		}
+		for _, dc := range tenant.Keycloak.Clients {
+			spec := keycloak.ClientSpec{
+				ClientID:               dc.ID,
+				Public:                 dc.Public,
+				RedirectURIs:           dc.RedirectURIs,
+				PostLogoutRedirectURIs: dc.PostLogoutRedirectURIs,
+				DirectGrants:           dc.DirectGrants,
+				Audiences:              dc.Audience,
+				GroupsClaim:            dc.Claims.Groups,
+				PruneMappers:           true,
+			}
+			if dc.Claims.PostgRESTRole {
+				spec.HardcodedClaims = map[string]string{"role": dbWebRole}
+			}
+			clients = append(clients, spec)
+		}
+		var settings *keycloak.RealmSettings
+		if st := tenant.Keycloak.Settings; st != nil {
+			settings = &keycloak.RealmSettings{
+				AccessTokenLifespan:  st.AccessTokenLifespan,
+				RefreshTokenRotation: st.RefreshTokenRotation,
+				SSOSessionIdle:       st.SSOSessionIdle,
+			}
+		}
 		res, err := kc.EnsureRealm(ctx, keycloak.RealmSpec{
 			Realm:       realm,
 			DisplayName: tenant.DisplayName,
-			Groups:      tenantGroups,
+			Settings:    settings,
+			Groups:      tenant.KeycloakGroups(),
 			AdminGroup:  "admin",
 			Clients:     clients,
 			LoginTheme:  themeName(id),
@@ -305,11 +325,15 @@ func (a *App) reconcileConfigd(ctx context.Context, printer ui.Printer, f *fleet
 	roster := configd.Config{}
 	fwdTargets := f.fleetForwardTargets()
 	sortedIDs := sortedTenantIDs(f.data.Tenants)
+	pgrstPorts, err := f.postgrestPorts()
+	if err != nil {
+		return "", err
+	}
 	for _, id := range sortedIDs {
 		tenant := f.data.Tenants[id]
 		restPort := 0
 		if slices.Contains(tenant.Stacks, "database") {
-			restPort = postgrestPort(sortedIDs, id)
+			restPort = pgrstPorts[id]
 		}
 		cachePort := 0
 		if slices.Contains(tenant.Stacks, "cache") {

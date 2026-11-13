@@ -189,3 +189,17 @@ func TestBaoRoleAndSecretIDParse(t *testing.T) {
 		t.Fatalf("secret id = %#v (err %v)", sid, err)
 	}
 }
+
+func TestDBSecretFieldsServiceRole(t *testing.T) {
+	t.Parallel()
+	got := strings.Join(dbSecretFields(postgresCluster{}, "prod", "hgstg", "hgstg_worker", "w-pw"), " ")
+	for _, want := range []string{"username=hgstg_worker", "password=w-pw", "dbname=db_hgstg", "url=postgres://hgstg_worker:w-pw@mksrv-postgres:5432/db_hgstg"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("service role fields missing %q: %s", want, got)
+		}
+	}
+	// the human-login helper keeps its shape
+	if h := strings.Join(tenantDBSecretFields(postgresCluster{}, "prod", "hgstg", "x"), " "); !strings.Contains(h, "username=hgstg_login") {
+		t.Fatalf("login fields changed: %s", h)
+	}
+}

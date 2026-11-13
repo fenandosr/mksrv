@@ -3,9 +3,12 @@
 package cli
 
 import (
+	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/fenandosr/mksrv/internal/model"
+	"github.com/fenandosr/mksrv/internal/render"
 )
 
 // TestPostgrestConsumerIDsExcludesNonConsumers guards the live incident this
@@ -19,15 +22,17 @@ import (
 func TestPostgrestConsumerIDsExcludesNonConsumers(t *testing.T) {
 	t.Parallel()
 	pf := false
+	pt := true
+	on := &model.TenantDatabase{PostgREST: &model.PostgRESTConfig{Enabled: &pt}}
 	tenants := map[string]model.Tenant{
-		"bitabit": {ID: "bitabit", Stacks: []string{"database"}},
-		"gtex":    {ID: "gtex", Stacks: []string{}}, // web:-only, no database stack
-		"hg":      {ID: "hg", Stacks: []string{"database"}},
-		"mcps":    {ID: "mcps", Stacks: []string{"database"}},
-		"nopgrst": {ID: "nopgrst", Stacks: []string{"database"}, Database: &model.TenantDatabase{PostgREST: &pf}},
+		"bitabit": {ID: "bitabit", Stacks: []string{"database"}, Database: on},
+		"gtex":    {ID: "gtex", Stacks: []string{}, Database: on}, // no database stack
+		"hg":      {ID: "hg", Stacks: []string{"database"}, Database: on},
+		"mcps":    {ID: "mcps", Stacks: []string{"database"}}, // PostgREST is opt-in
+		"nopgrst": {ID: "nopgrst", Stacks: []string{"database"}, Database: &model.TenantDatabase{PostgREST: &model.PostgRESTConfig{Enabled: &pf}}},
 	}
 	got := postgrestConsumerIDs(tenants)
-	want := []string{"bitabit", "hg", "mcps"}
+	want := []string{"bitabit", "hg"}
 	if len(got) != len(want) {
 		t.Fatalf("postgrestConsumerIDs() = %v, want %v", got, want)
 	}
@@ -38,40 +43,112 @@ func TestPostgrestConsumerIDsExcludesNonConsumers(t *testing.T) {
 	}
 }
 
-// TestPostgrestPortStableAcrossUnrelatedTenants guards that adding a
-// non-consumer tenant (gtex) never shifts an existing consumer's (mcps) port
-// — the live bug this was extracted to fix.
-func TestPostgrestPortStableAcrossUnrelatedTenants(t *testing.T) {
+func TestAssignPostgRESTPorts(t *testing.T) {
 	t.Parallel()
-	before := postgrestConsumerIDs(map[string]model.Tenant{
-		"bitabit": {ID: "bitabit", Stacks: []string{"database"}},
-		"hg":      {ID: "hg", Stacks: []string{"database"}},
-		"mcps":    {ID: "mcps", Stacks: []string{"database"}},
-	})
-	after := postgrestConsumerIDs(map[string]model.Tenant{
-		"bitabit": {ID: "bitabit", Stacks: []string{"database"}},
-		"gtex":    {ID: "gtex", Stacks: []string{}},
-		"hg":      {ID: "hg", Stacks: []string{"database"}},
-		"mcps":    {ID: "mcps", Stacks: []string{"database"}},
-	})
-	for _, id := range []string{"bitabit", "hg", "mcps"} {
-		gotBefore := postgrestPort(before, id)
-		gotAfter := postgrestPort(after, id)
-		if gotBefore != gotAfter {
-			t.Fatalf("tenant %s: port %d before gtex existed, %d after — adding an unrelated non-database tenant must not shift it", id, gotBefore, gotAfter)
+	db := func(ids ...string) map[string]model.Tenant {
+		m := map[string]model.Tenant{}
+		for _, id := range ids {
+			pt := true
+			m[id] = model.Tenant{ID: id, Stacks: []string{"database"}, Database: &model.TenantDatabase{PostgREST: &model.PostgRESTConfig{Enabled: &pt}}}
+		}
+		return m
+	}
+	// No lock entry yet: reproduces the old alphabetical allocation.
+	first, err := assignPostgRESTPorts(db("bitabit", "hg", "mcps"), nil)
+	if err != nil || first["bitabit"] != 3010 || first["hg"] != 3011 || first["mcps"] != 3012 {
+		t.Fatalf("seed = %v, %v", first, err)
+	}
+	// A tenant sorting first must not move the others, and takes the next free port.
+	after, err := assignPostgRESTPorts(db("aaa", "bitabit", "hg", "mcps"), first)
+	if err != nil || after["bitabit"] != 3010 || after["hg"] != 3011 || after["mcps"] != 3012 || after["aaa"] != 3013 {
+		t.Fatalf("after adding aaa = %v, %v", after, err)
+	}
+	// A removed tenant frees its port for the next newcomer.
+	reuse, _ := assignPostgRESTPorts(db("bitabit", "mcps", "zzz"), after)
+	if reuse["bitabit"] != 3010 || reuse["mcps"] != 3012 || reuse["zzz"] != 3011 {
+		t.Fatalf("reuse = %v", reuse)
+	}
+	// Non-consumers (gtex) never get a port.
+	withWeb := db("bitabit")
+	withWeb["gtex"] = model.Tenant{ID: "gtex"}
+	if got, _ := assignPostgRESTPorts(withWeb, nil); len(got) != 1 {
+		t.Fatalf("non-consumer assigned a port: %v", got)
+	}
+}
+
+func TestPostgrestTemplateExtendedEnv(t *testing.T) {
+	t.Parallel()
+	renderUnit := func(tenant model.Tenant) string {
+		out, err := render.One("../../stacks/database/templates/postgrest.container.tmpl", render.Context{
+			Tenant:  &tenant,
+			Secrets: map[string]string{"listen_port": "3010", "rest_fqdn": "x.rest.example.com", "oidc_issuer": "https://kc.example.com/realms/hg"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}
+	base := renderUnit(model.Tenant{ID: "bitabit"})
+	for _, no := range []string{"PGRST_JWT_AUD", "PGRST_DB_MAX_ROWS", "PGRST_SERVER_CORS", "PGRST_OPENAPI_MODE"} {
+		if strings.Contains(base, no) {
+			t.Fatalf("unit without settings must not contain %s:\n%s", no, base)
+		}
+	}
+	if !strings.Contains(base, "PGRST_DB_PRE_REQUEST=mksrv.pgrst_pre_request") || !strings.Contains(base, "PGRST_DB_SCHEMAS=app\n") {
+		t.Fatalf("base unit changed:\n%s", base)
+	}
+	ext := renderUnit(model.Tenant{ID: "hg", Database: &model.TenantDatabase{Schema: "api", PostgREST: &model.PostgRESTConfig{
+		Schemas: []string{"api", "reports"}, JWTAudience: "hg-lims-api", OpenAPIMode: "disabled", CORSOrigins: []string{"https://a.example.com", "https://b.example.com"}, MaxRows: 1000}}})
+	for _, want := range []string{
+		"PGRST_DB_SCHEMAS=api,reports", "PGRST_JWT_AUD=hg-lims-api", "PGRST_OPENAPI_MODE=disabled",
+		"PGRST_SERVER_CORS_ALLOWED_ORIGINS=https://a.example.com,https://b.example.com",
+		"PGRST_DB_MAX_ROWS=1000", "PGRST_DB_PRE_REQUEST=mksrv.pgrst_pre_request",
+		"PGRST_APP_SETTINGS_OIDC_ISSUER=https://kc.example.com/realms/hg",
+	} {
+		if !strings.Contains(ext, want) {
+			t.Fatalf("extended unit missing %q:\n%s", want, ext)
 		}
 	}
 }
 
-func TestPostgrestPort(t *testing.T) {
+func TestJWKSRefreshListAndScript(t *testing.T) {
 	t.Parallel()
-	ids := []string{"bitabit", "hg", "mcps"}
-	for i, id := range ids {
-		if got, want := postgrestPort(ids, id), postgrestBasePort+i; got != want {
-			t.Fatalf("postgrestPort(%q) = %d, want %d", id, got, want)
+	tenants := map[string]model.Tenant{
+		"hg":   {ID: "hg", Keycloak: model.TenantKeycloak{Realm: "hg-realm"}},
+		"mcps": {ID: "mcps"},
+	}
+	got := jwksRefreshList([]string{"mcps", "hg"}, tenants, "kc.example.com")
+	want := "hg https://kc.example.com/realms/hg-realm/protocol/openid-connect/certs\n" +
+		"mcps https://kc.example.com/realms/mcps/protocol/openid-connect/certs\n"
+	if got != want {
+		t.Fatalf("list = %q, want %q", got, want)
+	}
+	for _, need := range []string{"podman secret create --replace", `systemctl restart "mksrv-postgrest-$id.service"`, jwksRefreshListPath} {
+		if !strings.Contains(jwksRefreshScript, need) {
+			t.Fatalf("script missing %q", need)
 		}
 	}
-	if got := postgrestPort(ids, "gtex"); got != 0 {
-		t.Fatalf("postgrestPort() for a tenant not in the list = %d, want 0", got)
+	if !strings.Contains(jwksRefreshTimer, "OnUnitActiveSec=1h") || !strings.Contains(jwksRefreshService, jwksRefreshScriptPath) {
+		t.Fatal("timer/service units malformed")
+	}
+	if bash, err := exec.LookPath("bash"); err == nil {
+		cmd := exec.Command(bash, "-n")
+		cmd.Stdin = strings.NewReader(jwksRefreshScript)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("refresh script has a syntax error: %v\n%s", err, out)
+		}
+	}
+}
+
+func TestPostgrestHealthCmd(t *testing.T) {
+	t.Parallel()
+	cmd := postgrestHealthCmd(3012)
+	for _, want := range []string{"127.0.0.1:3012/", "200|404) exit 0", "exit 1"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("health command missing %q: %s", want, cmd)
+		}
+	}
+	if strings.Contains(cmd, "curl -f") {
+		t.Fatalf("health command must not use -f (openapi disabled answers 404): %s", cmd)
 	}
 }

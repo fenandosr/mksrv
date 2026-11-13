@@ -22,7 +22,7 @@ locals {
   ses_mail_from = "mail.${local.root_domain}"
 
   # Per-tenant PostgREST data API: <id>.rest.<root_domain>, fronted by the edge.
-  # Skipped when the tenant sets database.postgrest = false (ADR 0029).
+  # Opt-in: only tenants with database.postgrest enabled (ADR 0029/0039).
   #
   # NOTE on try()+coalesce() below: var.tenants is now an explicit object() type
   # (optional() attributes), so an unset optional attribute is a real `null`
@@ -33,7 +33,7 @@ locals {
   # catches the "block present, attribute unset" null.
   tenant_rest_fqdns = [
     for id, t in var.tenants : "${id}.rest.${local.root_domain}"
-    if contains(try(t.stacks, []), "database") && try(coalesce(t.database.postgrest, true), true)
+    if contains(try(t.stacks, []), "database") && try(coalesce(t.database.postgrest.enabled, false), false)
   ]
 
   # Records mksrv writes into each tenant's own hosted zone (never the operator
