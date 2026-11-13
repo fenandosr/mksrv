@@ -40,6 +40,9 @@ Environment=PGRST_SERVER_CORS_ALLOWED_ORIGINS={{ join .CORSOrigins "," }}
 {{- if .MaxRows }}
 Environment=PGRST_DB_MAX_ROWS={{ .MaxRows }}
 {{- end }}
+{{- if .OpenAPIMode }}
+Environment=PGRST_OPENAPI_MODE={{ .OpenAPIMode }}
+{{- end }}
 {{- end }}
 Environment=PGRST_OPENAPI_SERVER_PROXY_URI=https://{{ .Secrets.rest_fqdn }}
 Secret=mksrv-database-postgrest-{{ .Tenant.ID }}-dburi,type=env,target=PGRST_DB_URI

@@ -89,7 +89,7 @@ func TestPostgrestTemplateExtendedEnv(t *testing.T) {
 		return string(out)
 	}
 	base := renderUnit(model.Tenant{ID: "bitabit"})
-	for _, no := range []string{"PGRST_JWT_AUD", "PGRST_DB_MAX_ROWS", "PGRST_SERVER_CORS"} {
+	for _, no := range []string{"PGRST_JWT_AUD", "PGRST_DB_MAX_ROWS", "PGRST_SERVER_CORS", "PGRST_OPENAPI_MODE"} {
 		if strings.Contains(base, no) {
 			t.Fatalf("unit without settings must not contain %s:\n%s", no, base)
 		}
@@ -98,9 +98,9 @@ func TestPostgrestTemplateExtendedEnv(t *testing.T) {
 		t.Fatalf("base unit changed:\n%s", base)
 	}
 	ext := renderUnit(model.Tenant{ID: "hg", Database: &model.TenantDatabase{Schema: "api", PostgREST: &model.PostgRESTConfig{
-		Schemas: []string{"api", "reports"}, JWTAudience: "hg-lims-api", CORSOrigins: []string{"https://a.example.com", "https://b.example.com"}, MaxRows: 1000}}})
+		Schemas: []string{"api", "reports"}, JWTAudience: "hg-lims-api", OpenAPIMode: "disabled", CORSOrigins: []string{"https://a.example.com", "https://b.example.com"}, MaxRows: 1000}}})
 	for _, want := range []string{
-		"PGRST_DB_SCHEMAS=api,reports", "PGRST_JWT_AUD=hg-lims-api",
+		"PGRST_DB_SCHEMAS=api,reports", "PGRST_JWT_AUD=hg-lims-api", "PGRST_OPENAPI_MODE=disabled",
 		"PGRST_SERVER_CORS_ALLOWED_ORIGINS=https://a.example.com,https://b.example.com",
 		"PGRST_DB_MAX_ROWS=1000", "PGRST_DB_PRE_REQUEST=mksrv.pgrst_pre_request",
 		"PGRST_APP_SETTINGS_OIDC_ISSUER=https://kc.example.com/realms/hg",

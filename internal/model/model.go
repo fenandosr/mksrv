@@ -323,6 +323,10 @@ type PostgRESTConfig struct {
 	CORSOrigins []string `json:"cors_origins,omitempty"`
 	// MaxRows -> PGRST_DB_MAX_ROWS.
 	MaxRows int `json:"max_rows,omitempty"`
+	// OpenAPIMode -> PGRST_OPENAPI_MODE (follow-privileges | ignore-privileges |
+	// disabled). Unset keeps PostgREST's default, which serves the schema and
+	// the server version to anonymous callers; clinical tenants set `disabled`.
+	OpenAPIMode string `json:"openapi_mode,omitempty"`
 }
 
 // UnmarshalJSON accepts `true`/`false` or an object.

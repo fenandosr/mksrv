@@ -31,15 +31,26 @@ isolation or changing behaviour for existing tenants.
 The role, group, client and setting features below are **optional**: a tenant
 that declares none of them gets the same realm and base roles as before.
 
-**Breaking change (no PostgREST consumer existed when this landed):**
-PostgREST itself is now **opt-in**. A tenant without `database.postgrest: true`
-(or the object form) gets no container, no `<id>_auth` role, no
-`mksrv.pgrst_pre_request` and no `<id>.rest.<root_domain>` DNS record, and
-`mksrv deploy` / `tenant apply` remove any left over from before (container,
-podman secrets, Caddy fragment, `<id>_auth` role + its CONNECT grant, the
-pre-request function; the only residue is the unused `_authpw` SSM parameter). Every PostgREST tenant now uses
-the generated pre-request in the `mksrv` schema; the old
-`<schema>.pgrst_pre_request` is dropped.
+**Breaking change.** PostgREST itself is now **opt-in**, and the legacy
+`<schema>.pgrst_pre_request` path is gone. When this landed, no application was
+actually calling PostgREST, so no compatibility shim was kept, but the change is
+not invisible: `hg` and `bitabit` had to add `database.postgrest: true`, and
+`mcps` (which does not need a data API) was deliberately switched off.
+
+- A tenant without `database.postgrest: true` (or the object form) gets no
+  container, no `<id>_auth` role, no `mksrv.pgrst_pre_request` and no
+  `<id>.rest.<root_domain>` DNS record. `tenant apply` removes anything left
+  over from before: container, podman secrets, Caddy fragment, the `<id>_auth`
+  role and its CONNECT grant, and the pre-request function. The only residue is
+  the unused `_authpw` SSM parameter.
+- **Every** PostgREST tenant, opted into the object form or not, now uses the
+  generated pre-request in the non-exposed `mksrv` schema (§2), and the legacy
+  `<schema>.pgrst_pre_request` is dropped from its exposed schema. Only the
+  `roles` / `when` mapping, `rbac`, the hook and the exposure settings remain
+  per-tenant opt-in.
+- A pre-ADR function in a schema the tenant no longer names (for example `hg`,
+  whose `schema` was changed after provisioning) is not found by that `DROP`
+  and must be removed by hand.
 
 ### 1. `database.postgrest` becomes an opt-in object (`true` still works)
 
@@ -52,11 +63,14 @@ database:
     jwt_audience: hg-lims-api
     cors_origins: [https://lims.example.org]
     max_rows: 1000
+    openapi_mode: disabled         # follow-privileges (default) | ignore-privileges | disabled
 ```
 
 - Maps to `PGRST_DB_SCHEMAS`, `PGRST_JWT_AUD`,
-  `PGRST_SERVER_CORS_ALLOWED_ORIGINS`, `PGRST_DB_MAX_ROWS`. Variables are
-  emitted only when declared.
+  `PGRST_SERVER_CORS_ALLOWED_ORIGINS`, `PGRST_DB_MAX_ROWS`, `PGRST_OPENAPI_MODE`.
+  Variables are emitted only when declared. PostgREST's default serves the
+  OpenAPI document (schema and server version) to anonymous callers on `GET /`;
+  clinical tenants should set `openapi_mode: disabled`.
 - Listed schemas are created if missing, owned by `mksrv_owner`.
 - `PGRST_APP_SETTINGS_OIDC_ISSUER` is always injected.
 - One PostgREST instance per tenant stays. Several instances per tenant
@@ -113,12 +127,22 @@ database:
   user, which is how `mksrv_owner` already works through `mksrv_web`.
 - Names must start with `<role_prefix>_`; `<id>_login`, `<id>_auth` and
   `mksrv_*` are reserved. Never `SUPERUSER`, `CREATEROLE`, `BYPASSRLS` or
-  `REPLICATION`. Service roles get `CONNECT` only on `db_<id>`; passwords come
+  `REPLICATION`. Service roles are granted `CONNECT` on `db_<id>` only, but `PUBLIC` still has the
+  default `CONNECT` on the shared databases (`postgres`, `app`) and on any
+  other database whose ACL was never restricted, so a service role (like
+  `<id>_login` today) can open a session there; it has no privileges inside.
+  Revoking `CONNECT` from `PUBLIC` on those databases is a follow-up (the
+  postgres exporter uses the superuser, which is unaffected; Patroni and
+  pgAdmin must be checked first); passwords come
   from `EnsureRandom` like the others.
 - Service-role passwords are generated into SSM (`tenant_<id>_svc_<role>_password`)
   and, for tenants with the `openbao` stack, mirrored to
   `kv/tenants/<id>/database-<role>` (same write-if-missing-or-drifted rule as the
-  tenant's own database secret). Membership is additive: removing a
+  tenant's own database secret). The tenant `admin` policy has full control of
+  `kv/tenants/<id>/*` (intentional, same as for `database`), so an admin can
+  overwrite the entry: the next `tenant apply` restores it only when the
+  stored `password` differs from SSM, and SSM (not OpenBao) is the source of
+  truth for what Postgres actually has. Membership is additive: removing a
   `member_of` entry from the YAML does not revoke it.
 - mksrv manages existence, membership and `CONNECT` only. Object privileges
   belong to the app's migrations inside `db_<id>`.
@@ -231,7 +255,9 @@ the semantic pass.
 
 ## Consequences
 
-- Existing tenants are unchanged (golden tests); no data migration.
+- No data migration, but not unchanged: PostgREST is opt-in, the legacy
+  pre-request path is gone (see the breaking-change notice), and tenants that
+  keep PostgREST move to `mksrv.pgrst_pre_request`.
 - Data-plane authorisation for opted-in tenants moves from a fixed shortcut to
   an explicit group→role mapping. Note that "a developer token cannot read
   business data through the API" only holds when §2 is active, since
@@ -244,7 +270,24 @@ the semantic pass.
   hook), then an end-to-end run on a synthetic staging tenant before touching
   `hg`.
 
+- Invariants worth stating, because the tests of this ADR found them:
+  - **`jwt_audience` is the real barrier between clients of one realm.** Any
+    other client in the realm that carries the `role` and `groups` mappers
+    produces tokens PostgREST would otherwise accept; it is the `aud` check that
+    rejects them. A PostgREST tenant should always set `jwt_audience`.
+  - **`<id>_auth` is a transitive member of `mksrv_owner`** through
+    `mksrv_web` (ADR 0026), by design: the generated pre-request is what keeps
+    a request from landing there, so no `when` rule may target a role that
+    reaches `mksrv_owner`.
+  - Roles are cluster-global: with the default prefix (the tenant id) nothing is
+    shared; `role_prefix` sharing between tenants (a staging tenant reusing
+    `hg_*`) is validated but has not been exercised live.
+
 ## Open points
+
+- PostgREST is pinned to v12.2.3 in the template; HG-LIMS validates against
+  14.x. Bumping the image is a separate decision (it affects every tenant).
+- `REVOKE CONNECT ... FROM PUBLIC` on `postgres` and `app` (see §3).
 
 - Confirm Postgres version of `mksrv-postgres` and that `SET LOCAL ROLE` with
   `<id>_auth` as `session_user` behaves as described on it.
