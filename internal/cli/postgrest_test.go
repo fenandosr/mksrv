@@ -139,3 +139,16 @@ func TestJWKSRefreshListAndScript(t *testing.T) {
 		}
 	}
 }
+
+func TestPostgrestHealthCmd(t *testing.T) {
+	t.Parallel()
+	cmd := postgrestHealthCmd(3012)
+	for _, want := range []string{"127.0.0.1:3012/", "200|404) exit 0", "exit 1"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("health command missing %q: %s", want, cmd)
+		}
+	}
+	if strings.Contains(cmd, "curl -f") {
+		t.Fatalf("health command must not use -f (openapi disabled answers 404): %s", cmd)
+	}
+}

@@ -268,13 +268,20 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 
 	for _, id := range consumers {
 		port := ports[id]
-		if _, err := client.Run(ctx, fmt.Sprintf(
-			"curl -fsS -m 10 --retry 12 --retry-delay 3 --retry-all-errors http://127.0.0.1:%d/ -o /dev/null", port)); err != nil {
+		if _, err := client.Run(ctx, postgrestHealthCmd(port)); err != nil {
 			return fmt.Errorf("postgrest %s did not become healthy: %w", id, err)
 		}
 		printer.Success("tenant %s: postgrest on :%d -> https://%s.rest.%s", id, port, id, dep.DNS.RootDomain)
 	}
 	return nil
+}
+
+// postgrestHealthCmd polls an anonymous GET / until PostgREST answers 200 (the
+// OpenAPI document) or 404 (database.postgrest.openapi_mode: disabled). Anything
+// else — 401/403 from a broken pre-request, 5xx from an unreachable database —
+// keeps retrying and finally fails.
+func postgrestHealthCmd(port int) string {
+	return fmt.Sprintf(`for i in $(seq 1 13); do c=$(curl -sS -m 10 -o /dev/null -w '%%{http_code}' http://127.0.0.1:%d/ 2>/dev/null); case "$c" in 200|404) exit 0;; esac; [ "$i" -lt 13 ] && sleep 3; done; echo "last status: $c" >&2; exit 1`, port)
 }
 
 // fetchRealmJWKS returns the tenant realm's JWKS document, used verbatim as
