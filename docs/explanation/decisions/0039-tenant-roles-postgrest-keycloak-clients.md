@@ -103,25 +103,31 @@ database:
 ```
 
 - `when` is a list of Keycloak groups that must **all** be present (AND).
-  The first match wins. Rules are ordered deterministically, **most specific
-  first** (more required groups, then role name): the YAML loader goes through
-  JSON, so map declaration order is not preserved and cannot be the rule. No
-  explicit priorities.
+  The first match wins. Rules are ordered deterministically: a role that
+  **inherits** another (`member_of`, transitively) before the roles it
+  includes, then more required groups, then role name. Inheritance first means a
+  user holding the groups of both `lab` and `reporting` lands in
+  `hgstg_reporting` (which includes `hgstg_lab`) and not in the narrower role;
+  two unrelated single-group roles a user holds at once (say `finance` and `hr`)
+  are broken by name, so declare a combined role with `when: [finance, hr]` when
+  that combination matters. The YAML loader goes through JSON, so map
+  declaration order is not preserved and cannot be the rule. No explicit
+  priorities.
 - If at least one `when` is declared, the `admin`/`dev` → `mksrv_owner`
   shortcut **is removed** for PostgREST unless the tenant declares it
   (`when: [admin]` → `mksrv_owner`). `unmapped` defaults to `deny`
   (HTTP 403). Without any `when`, behaviour is unchanged. `validate` emits the
   `rbac_shadow` warning.
 - After `SET LOCAL ROLE`, `pre_request_hook` (if set) is invoked with
-  `PERFORM`, already under the business role. It can raise to reject.
+  `PERFORM`, already under the business role: that role needs `USAGE` on the
+  hook's schema and `EXECUTE` on the function (mksrv grants neither; the app's
+  migrations do). It can raise to reject.
   Resolution is at run time, so the hook may be created by a later migration.
   The name must be `schema.function`, escaped with `%I`; reserved schemas are
   rejected.
 - Token-less requests return early as today; the hook is not called.
-- The function moves to a non-exposed schema (`mksrv.pgrst_pre_request`) **only
-  for tenants that opt in** (any of `roles`, `rbac`, `pre_request_hook`).
-  Existing tenants keep `<schema>.pgrst_pre_request` until a separate, explicit
-  migration.
+- The function lives in a non-exposed schema (`mksrv.pgrst_pre_request`) for
+  every PostgREST tenant (see the breaking-change notice).
 
 ### 3. Tenant-declared roles
 
@@ -157,10 +163,21 @@ database:
   `kv/tenants/<id>/*` (intentional, same as for `database`), so an admin can
   overwrite the entry: the next `tenant apply` restores it only when the
   stored `password` differs from SSM, and SSM (not OpenBao) is the source of
-  truth for what Postgres actually has. Membership is additive: removing a
-  `member_of` entry from the YAML does not revoke it.
+  truth for what Postgres actually has. Membership among the tenant's
+  declared roles is declarative: a membership between two of them that the YAML
+  no longer lists (for example a service role that must not inherit the API
+  roles) is revoked on the next `tenant apply`. Memberships involving roles
+  outside the declared set, and `<id>_auth`'s grants, are not touched.
 - mksrv manages existence, membership and `CONNECT` only. Object privileges
   belong to the app's migrations inside `db_<id>`.
+- `schemas: [app, private, legacy]` creates extra schemas that PostgREST does
+  **not** expose, owned by `mksrv_owner` (the migration identity runs as
+  `mksrv_owner` and has no `CREATE` on the database, so it cannot create them
+  itself). They get no `USAGE` for `mksrv_app` / `mksrv_anon` / `mksrv_web`: the
+  app's migrations grant what its roles need. `validate` rejects reserved
+  names and any schema that is the tenant's main or PostgREST-exposed one.
+  Because `<id>_login` sessions run as `mksrv_owner`, a migration tool can keep
+  its bookkeeping table in such a schema (`private.schema_migrations`).
 - `default_privileges: none` stops the default grants to `mksrv_app` on the
   exposed schema; required for deny-by-default data (clinical).
 - **Shared prefix across tenants** (e.g. `hg` and a staging tenant): roles are
