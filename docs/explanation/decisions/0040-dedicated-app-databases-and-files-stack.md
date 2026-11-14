@@ -58,10 +58,14 @@ Postgres container per app.
   `skopeo list-tags`; this fixes a stack that would have failed to pull on
   its very first real deploy). Nextcloud gets a Caddy vhost on the edge
   (`<id>.files.<root_domain>`, `docs/reference/stacks.md`); Samba is
-  tailnet/loopback-only (SMB has no reverse-proxy story). Both get consecutive
-  per-tenant host ports (`filesNextcloudBasePort` 8030, `filesSambaBasePort`
-  4450, ten tenants each, `internal/cli/files.go`), opened in the Headscale
-  ACL (`internal/headscale/headscale.go`'s `fleetPorts`).
+  tailnet/loopback-only (SMB has no reverse-proxy story). Both get per-tenant
+  host ports (`filesNextcloudBasePort` 8030, `filesSambaBasePort` 4450, ten
+  tenants each, `internal/cli/files.go`), opened in the Headscale ACL
+  (`internal/headscale/headscale.go`'s `fleetPorts`). The assignment is **pinned
+  in `mksrv.lock`** (`files_nextcloud_ports`, `files_samba_ports`), like
+  `postgrest_ports` (ADR 0039 §6): the first tenant takes the lowest free port
+  and a tenant added later never moves an existing one (indexing by sorted
+  tenant id would, as it once did for PostgREST).
 
 ## Consequences
 

@@ -10,18 +10,22 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/fenandosr/mksrv/internal/model"
 	"github.com/fenandosr/mksrv/internal/render"
 	sshx "github.com/fenandosr/mksrv/internal/ssh"
 	"github.com/fenandosr/mksrv/internal/ui"
 )
 
 // filesNextcloudBasePort and filesSambaBasePort are the first host ports
-// assigned to a tenant's Nextcloud/Samba containers, same sorted-id-index
-// scheme as postgrestBasePort — up to ten tenants each, the Headscale ACL
-// opens the matching ranges (internal/headscale/headscale.go).
+// assigned to a tenant's Nextcloud/Samba containers — up to ten tenants each,
+// the Headscale ACL opens the matching ranges (internal/headscale/headscale.go).
+// Assignments are pinned in mksrv.lock (files_nextcloud_ports /
+// files_samba_ports), like postgrest_ports, so adding a tenant never moves
+// another tenant's live containers.
 const (
 	filesNextcloudBasePort = 8030
 	filesSambaBasePort     = 4450
+	filesPortCount         = 10
 )
 
 // filesConsumerIDs returns, sorted, every tenant in the whole workspace that
@@ -39,12 +43,27 @@ func (f *fleet) filesConsumerIDs() []string {
 	return ids
 }
 
-func filesPort(base int, sortedIDs []string, id string) int {
-	i := slices.Index(sortedIDs, id)
-	if i < 0 {
-		return 0
+// filesPorts returns the stable per-tenant Nextcloud and Samba host ports,
+// assigning and persisting any missing ones to mksrv.lock on first use.
+func (f *fleet) filesPorts() (nextcloud, samba map[string]int, err error) {
+	var ncExisting, smbExisting map[string]int
+	if f.data.Lock != nil {
+		ncExisting, smbExisting = f.data.Lock.FilesNextcloudPorts, f.data.Lock.FilesSambaPorts
 	}
-	return base + i
+	ids := f.filesConsumerIDs()
+	if nextcloud, err = assignStablePorts(ids, filesNextcloudBasePort, filesPortCount, ncExisting, "Nextcloud"); err != nil {
+		return nil, nil, err
+	}
+	if samba, err = assignStablePorts(ids, filesSambaBasePort, filesPortCount, smbExisting, "Samba"); err != nil {
+		return nil, nil, err
+	}
+	if err = f.persistPorts(nextcloud, ncExisting, "nextcloud", func(l *model.Lock, p map[string]int) { l.FilesNextcloudPorts = p }); err != nil {
+		return nil, nil, err
+	}
+	if err = f.persistPorts(samba, smbExisting, "samba", func(l *model.Lock, p map[string]int) { l.FilesSambaPorts = p }); err != nil {
+		return nil, nil, err
+	}
+	return nextcloud, samba, nil
 }
 
 // provisionFilesTenants reconciles one Nextcloud + one Samba instance per
@@ -129,7 +148,10 @@ func (f *fleet) provisionFilesTenants(ctx context.Context, printer ui.Printer, e
 	pg, pgClient = f.ensurePrimary(ctx, pgClient, pg)
 
 	dep := f.data.Deployment
-	sortedIDs := f.filesConsumerIDs()
+	ncPorts, smbPorts, err := f.filesPorts()
+	if err != nil {
+		return err
+	}
 	rctxBase := f.renderContext(*dataHost)
 	// Nextcloud joins mksrv-files.network, not Postgres's own network, so a
 	// container-name DSN (what pg.pgAdmin is in standalone mode — fine for
@@ -180,8 +202,8 @@ func (f *fleet) provisionFilesTenants(ctx context.Context, printer ui.Printer, e
 		}
 
 		filesFQDN := id + ".files." + dep.DNS.RootDomain
-		ncPort := filesPort(filesNextcloudBasePort, sortedIDs, id)
-		smbPort := filesPort(filesSambaBasePort, sortedIDs, id)
+		ncPort := ncPorts[id]
+		smbPort := smbPorts[id]
 
 		rctx := rctxBase
 		t := tenant
@@ -235,12 +257,12 @@ func (f *fleet) provisionFilesTenants(ctx context.Context, printer ui.Printer, e
 	}
 
 	for _, id := range consumers {
-		ncPort := filesPort(filesNextcloudBasePort, sortedIDs, id)
+		ncPort := ncPorts[id]
 		if _, err := client.Run(ctx, fmt.Sprintf(
 			"curl -fsS -m 10 --retry 12 --retry-delay 3 --retry-all-errors http://127.0.0.1:%d/status.php -o /dev/null", ncPort)); err != nil {
 			return fmt.Errorf("files %s: nextcloud did not become healthy: %w", id, err)
 		}
-		smbPort := filesPort(filesSambaBasePort, sortedIDs, id)
+		smbPort := smbPorts[id]
 		if _, err := client.Run(ctx, fmt.Sprintf(
 			"timeout 10 bash -c 'until cat < /dev/null > /dev/tcp/127.0.0.1/%d; do sleep 1; done'", smbPort)); err != nil {
 			return fmt.Errorf("files %s: samba did not become healthy: %w", id, err)
