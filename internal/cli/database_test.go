@@ -365,3 +365,25 @@ func TestRoleRulesInheritanceFirst(t *testing.T) {
 		t.Fatalf("rule order = %v, want %v", got, want)
 	}
 }
+
+func TestTenantRolesSQLRevokesUndeclaredMemberships(t *testing.T) {
+	t.Parallel()
+	tenant := model.Tenant{ID: "hgstg", Database: &model.TenantDatabase{
+		Roles: map[string]model.DBRole{
+			"hgstg_authenticated": {},
+			"hgstg_reception":     {MemberOf: []string{"hgstg_authenticated"}, When: []string{"reception"}},
+		},
+		ServiceRoles: map[string]model.DBServiceRole{"hgstg_worker": {}}, // no member_of: must not inherit the API roles
+	}}
+	sql := strings.Join(tenantRolesSQL("hgstg", tenant, map[string]string{"hgstg_worker": "w"}), "\n")
+	for _, want := range []string{
+		`SELECT format('REVOKE %I FROM %I', g.rolname, m.rolname) FROM pg_auth_members`,
+		`g.rolname IN ('hgstg_authenticated', 'hgstg_reception')`,
+		`m.rolname IN ('hgstg_authenticated', 'hgstg_reception', 'hgstg_worker')`,
+		`NOT IN (VALUES ('', ''), ('hgstg_reception', 'hgstg_authenticated'))`,
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("SQL missing %q:\n%s", want, sql)
+		}
+	}
+}

@@ -635,5 +635,29 @@ func tenantRolesSQL(id string, t model.Tenant, servicePasswords map[string]strin
 			out = append(out, fmt.Sprintf(`GRANT %q TO %q;`, m, n))
 		}
 	}
+	// Membership is declarative among the tenant's own declared roles: a
+	// membership between two of them that the YAML no longer lists is revoked.
+	// Only real memberships produce a REVOKE (the query reads pg_auth_members),
+	// and roles outside the declared set, or <id>_auth's grants, are never touched.
+	pairs := []string{"('', '')"}
+	for _, n := range names {
+		for _, m := range t.Database.Roles[n].MemberOf {
+			pairs = append(pairs, fmt.Sprintf("(%s, %s)", q(n), q(m)))
+		}
+	}
+	for _, n := range svc {
+		for _, m := range t.Database.ServiceRoles[n].MemberOf {
+			pairs = append(pairs, fmt.Sprintf("(%s, %s)", q(n), q(m)))
+		}
+	}
+	quoted := func(list []string) string {
+		qs := make([]string, len(list))
+		for i, n := range list {
+			qs[i] = q(n)
+		}
+		return strings.Join(qs, ", ")
+	}
+	out = append(out, fmt.Sprintf(`SELECT format('REVOKE %%I FROM %%I', g.rolname, m.rolname) FROM pg_auth_members am JOIN pg_roles g ON g.oid = am.roleid JOIN pg_roles m ON m.oid = am.member WHERE g.rolname IN (%s) AND m.rolname IN (%s) AND (m.rolname, g.rolname) NOT IN (VALUES %s)\gexec`,
+		quoted(names), quoted(append(append([]string(nil), names...), svc...)), strings.Join(pairs, ", ")))
 	return out
 }

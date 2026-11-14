@@ -163,8 +163,11 @@ database:
   `kv/tenants/<id>/*` (intentional, same as for `database`), so an admin can
   overwrite the entry: the next `tenant apply` restores it only when the
   stored `password` differs from SSM, and SSM (not OpenBao) is the source of
-  truth for what Postgres actually has. Membership is additive: removing a
-  `member_of` entry from the YAML does not revoke it.
+  truth for what Postgres actually has. Membership among the tenant's
+  declared roles is declarative: a membership between two of them that the YAML
+  no longer lists (for example a service role that must not inherit the API
+  roles) is revoked on the next `tenant apply`. Memberships involving roles
+  outside the declared set, and `<id>_auth`'s grants, are not touched.
 - mksrv manages existence, membership and `CONNECT` only. Object privileges
   belong to the app's migrations inside `db_<id>`.
 - `schemas: [app, private, legacy]` creates extra schemas that PostgREST does
