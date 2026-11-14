@@ -1,24 +1,28 @@
 name: files
 title: Files
-description: "Samba and Nextcloud for tenant file services"
+description: "Nextcloud and Samba file services, one instance per tenant"
 targets: [cloud, local]
 per_tenant: true
-depends_on: [identity]
+depends_on: [database, identity]
 apps:
-  - name: samba
-    image: ghcr.io/servercontainers/samba:4.20.6
   - name: nextcloud
-    image: docker.io/library/nextcloud:30
+    image: docker.io/library/nextcloud:30-apache
+  - name: samba
+    image: ghcr.io/servercontainers/samba:a3.24.2-s4.23.8-r0
 networks: [mksrv-files]
-secrets:
-  - /mksrv/{env}/files/nextcloud_admin_password
-tailnet_ports: [445, 8080]
+secrets: []
+tailnet_ports: [8030, 4450]
 resources:
-  min_ram_mb: 2048
-  disk_gb: 100
-templates: []
-health:
-  - app: nextcloud
-    type: http
-    path: /status.php
-    port: 8080
+  min_ram_mb: 640
+  disk_gb: 50
+templates:
+  - src: templates/mksrv-files.network.tmpl
+    dst: /etc/containers/systemd/mksrv-files.network
+    scope: shared
+  - src: templates/nextcloud.container.tmpl
+    dst: "/etc/containers/systemd/mksrv-nextcloud-{tenant}.container"
+    scope: per_tenant
+  - src: templates/samba.container.tmpl
+    dst: "/etc/containers/systemd/mksrv-samba-{tenant}.container"
+    scope: per_tenant
+health: []

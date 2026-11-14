@@ -1,0 +1,30 @@
+[Unit]
+Description=mksrv Samba ({{ .Tenant.ID }})
+
+[Container]
+ContainerName=mksrv-samba-{{ .Tenant.ID }}
+Image={{ .Image "samba" | default "ghcr.io/servercontainers/samba:a3.24.2-s4.23.8-r0" }}
+Network=mksrv-files.network
+# No PublishPort on the private VPC IP: SMB has no reverse-proxy story, so
+# this is tailnet/loopback only — never reachable from the public edge.
+{{- if .Host.TailnetIP }}
+PublishPort={{ .Host.TailnetIP }}:{{ .Secrets.samba_port }}:445
+{{- end }}
+PublishPort=127.0.0.1:{{ .Secrets.samba_port }}:445
+Volume=mksrv-samba-{{ .Tenant.ID }}-data:/shares/data
+Environment=SAMBA_CONF_WORKGROUP=MKSRV
+Environment=SAMBA_CONF_SERVER_STRING={{ .Tenant.ID }} files
+# One fixed account name ("tenant") per container, not the tenant ID itself —
+# a tenant ID may contain a hyphen (schema pattern [a-z0-9][a-z0-9-]*), which
+# is not a valid shell/env-var identifier for an ACCOUNT_<name>=<password>
+# key; every container already belongs to exactly one tenant, so a shared
+# literal name carries no cross-tenant ambiguity.
+Environment=SAMBA_VOLUME_CONFIG_data=[files]; path=/shares/data; valid users = tenant; guest ok = no; read only = no
+Secret=mksrv-files-{{ .Tenant.ID }}-sambapass,type=env,target=ACCOUNT_tenant
+
+[Service]
+Restart=always
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

@@ -723,4 +723,8 @@ type Lock struct {
 	// PostgRESTPorts pins each tenant's PostgREST host port (ADR 0039 §6) so
 	// adding a tenant never moves another tenant's live container.
 	PostgRESTPorts map[string]int `json:"postgrest_ports,omitempty"`
+	// FilesNextcloudPorts / FilesSambaPorts pin each `files` tenant's Nextcloud
+	// and Samba host ports (ADR 0040) for the same reason.
+	FilesNextcloudPorts map[string]int `json:"files_nextcloud_ports,omitempty"`
+	FilesSambaPorts     map[string]int `json:"files_samba_ports,omitempty"`
 }

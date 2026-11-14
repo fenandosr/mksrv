@@ -56,24 +56,23 @@ func postgrestConsumerIDs(tenants map[string]model.Tenant) []string {
 	return ids
 }
 
-// assignPostgRESTPorts keeps every existing assignment for tenants that are
-// still PostgREST consumers and gives each new consumer the lowest free port,
+// assignStablePorts keeps every existing assignment for ids that are still
+// consumers and gives each new one the lowest free port in [base, base+count),
 // in sorted-id order. With an empty `existing` (a workspace that predates the
 // lock entry) this reproduces the old alphabetical allocation, so live
-// containers keep their ports. Assignments of tenants that stopped being
-// consumers are dropped, freeing their port.
-func assignPostgRESTPorts(tenants map[string]model.Tenant, existing map[string]int) (map[string]int, error) {
-	ids := postgrestConsumerIDs(tenants)
+// containers keep their ports. Assignments of ids that stopped being consumers
+// are dropped, freeing their port.
+func assignStablePorts(ids []string, base, count int, existing map[string]int, what string) (map[string]int, error) {
 	out := make(map[string]int, len(ids))
 	used := map[int]bool{}
 	for _, id := range ids {
 		p := existing[id]
-		if p >= postgrestBasePort && p < postgrestBasePort+postgrestPortCount && !used[p] {
+		if p >= base && p < base+count && !used[p] {
 			out[id] = p
 			used[p] = true
 		}
 	}
-	next := postgrestBasePort
+	next := base
 	for _, id := range ids {
 		if _, ok := out[id]; ok {
 			continue
@@ -81,13 +80,40 @@ func assignPostgRESTPorts(tenants map[string]model.Tenant, existing map[string]i
 		for used[next] {
 			next++
 		}
-		if next >= postgrestBasePort+postgrestPortCount {
-			return nil, fmt.Errorf("no free PostgREST port left (range %d-%d)", postgrestBasePort, postgrestBasePort+postgrestPortCount-1)
+		if next >= base+count {
+			return nil, fmt.Errorf("no free %s port left (range %d-%d)", what, base, base+count-1)
 		}
 		out[id] = next
 		used[next] = true
 	}
 	return out, nil
+}
+
+func assignPostgRESTPorts(tenants map[string]model.Tenant, existing map[string]int) (map[string]int, error) {
+	return assignStablePorts(postgrestConsumerIDs(tenants), postgrestBasePort, postgrestPortCount, existing, "PostgREST")
+}
+
+// persistPorts writes ports into the workspace's mksrv.lock (through set) when
+// they differ from existing, and keeps the in-memory lock in step.
+func (f *fleet) persistPorts(ports, existing map[string]int, what string, set func(*model.Lock, map[string]int)) error {
+	if maps.Equal(ports, existing) || (len(ports) == 0 && len(existing) == 0) {
+		return nil
+	}
+	lock := model.Lock{Engine: strings.TrimSpace(f.data.Deployment.Engine)}
+	if f.data.Lock != nil {
+		lock = *f.data.Lock
+	}
+	if lock.Engine == "" {
+		lock.Engine = "dev"
+	}
+	set(&lock, ports)
+	if f.data.Root != "" {
+		if err := writeLock(f.data.Root, lock); err != nil {
+			return fmt.Errorf("persist %s ports to mksrv.lock: %w", what, err)
+		}
+	}
+	f.data.Lock = &lock
+	return nil
 }
 
 // postgrestPorts returns the stable per-tenant PostgREST ports, assigning and
@@ -101,23 +127,9 @@ func (f *fleet) postgrestPorts() (map[string]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	if maps.Equal(ports, existing) || (len(ports) == 0 && len(existing) == 0) {
-		return ports, nil
+	if err := f.persistPorts(ports, existing, "postgrest", func(l *model.Lock, p map[string]int) { l.PostgRESTPorts = p }); err != nil {
+		return nil, err
 	}
-	lock := model.Lock{Engine: strings.TrimSpace(f.data.Deployment.Engine)}
-	if f.data.Lock != nil {
-		lock = *f.data.Lock
-	}
-	if lock.Engine == "" {
-		lock.Engine = "dev"
-	}
-	lock.PostgRESTPorts = ports
-	if f.data.Root != "" {
-		if err := writeLock(f.data.Root, lock); err != nil {
-			return nil, fmt.Errorf("persist postgrest ports to mksrv.lock: %w", err)
-		}
-	}
-	f.data.Lock = &lock
 	return ports, nil
 }
 

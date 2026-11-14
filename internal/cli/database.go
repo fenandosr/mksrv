@@ -310,7 +310,7 @@ func tenantDatabaseSQLWith(id, password, authPassword string, servicePasswords m
 	db := "db_" + id
 	login := id + "_login" // humans (admin/dev) over the VPN; member of mksrv_owner
 	schema := t.DBSchema()
-	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	q := sqlQuote
 
 	connLimit := "-1"
 	if cl := t.DBConnectionLimit(); cl > 0 {
