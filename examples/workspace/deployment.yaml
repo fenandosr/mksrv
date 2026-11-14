@@ -37,6 +37,10 @@ hosts:
     root_gb: 30
     data_gb: 40
     stacks: [base, identity, mail]
+    extra_ports:
+      - port: 51820
+        protocol: udp
+        description: "legacy VPN relay, migrating off"
   onprem-data:
     provider: existing
     address: 10.20.0.11
