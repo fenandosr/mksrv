@@ -662,3 +662,20 @@ func TestCheckAppSettings(t *testing.T) {
 		_ = name
 	}
 }
+
+func TestCheckTenantDatabaseSchemas(t *testing.T) {
+	t.Parallel()
+	mk := func(schemas []string) Report {
+		var r Report
+		checkTenantDatabase(&r, "t.yaml", model.Tenant{ID: "hgstg", Stacks: []string{"database"}, Database: &model.TenantDatabase{
+			Schema: "api", Schemas: schemas, PostgREST: &model.PostgRESTConfig{Schemas: []string{"api", "reports"}},
+		}})
+		return r
+	}
+	if r := mk([]string{"app", "private", "legacy"}); len(r.Issues) != 0 {
+		t.Fatalf("valid schemas rejected: %#v", r.Issues)
+	}
+	for _, bad := range []string{"mksrv", "public", "pg_temp", "api", "reports"} {
+		assertIssueCode(t, mk([]string{bad}), "tenant.database.schemas")
+	}
+}

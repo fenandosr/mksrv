@@ -289,6 +289,12 @@ type TenantDatabase struct {
 	// Schema is the tenant's application schema (and, when PostgREST runs, the
 	// only schema it exposes). Default "app".
 	Schema string `json:"schema,omitempty"`
+	// Schemas are extra, NOT exposed schemas created in db_<id> and owned by
+	// mksrv_owner (the migration identity cannot CREATE SCHEMA itself): for
+	// example `private` or `legacy`. They get no USAGE for mksrv_app / anon / web;
+	// the app's migrations grant what its roles need. Schemas PostgREST exposes
+	// belong in postgrest.schemas instead.
+	Schemas []string `json:"schemas,omitempty"`
 	// Extensions are CREATE EXTENSION IF NOT EXISTS'd in db_<id>. Allow-listed
 	// in semantic validation.
 	Extensions []string `json:"extensions,omitempty"`

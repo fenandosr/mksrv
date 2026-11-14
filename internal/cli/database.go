@@ -358,6 +358,9 @@ func tenantDatabaseSQLWith(id, password, authPassword string, servicePasswords m
 	stmts = append(stmts,
 		fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS %q AUTHORIZATION %s;`, schema, dbOwnerRole),
 		fmt.Sprintf(`ALTER SCHEMA %q OWNER TO %s;`, schema, dbOwnerRole),
+	)
+	stmts = append(stmts, privateSchemasSQL(t)...)
+	stmts = append(stmts,
 		fmt.Sprintf(`ALTER DATABASE %q SET search_path TO %q, public;`, db, schema),
 		fmt.Sprintf(`GRANT USAGE ON SCHEMA %q TO %s, %s, %s;`, schema, dbAppRole, dbAnonRole, dbWebRole),
 		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES FOR ROLE %s IN SCHEMA %q GRANT ALL ON TABLES TO %s;`, dbOwnerRole, schema, dbOwnerRole),
@@ -375,6 +378,23 @@ func tenantDatabaseSQLWith(id, password, authPassword string, servicePasswords m
 	stmts = append(stmts, postgrestSQL(t)...)
 	stmts = append(stmts, "")
 	return strings.Join(stmts, "\n")
+}
+
+// privateSchemasSQL creates database.schemas: extra schemas owned by
+// mksrv_owner with no USAGE for the shared buckets, so they are neither exposed
+// by PostgREST nor reachable by mksrv_app / mksrv_anon / mksrv_web.
+func privateSchemasSQL(t model.Tenant) []string {
+	if t.Database == nil {
+		return nil
+	}
+	var out []string
+	for _, s := range t.Database.Schemas {
+		out = append(out,
+			fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS %q AUTHORIZATION %s;`, s, dbOwnerRole),
+			fmt.Sprintf(`ALTER SCHEMA %q OWNER TO %s;`, s, dbOwnerRole),
+		)
+	}
+	return out
 }
 
 // authenticatorSQL creates the PostgREST authenticator (<id>_auth) for tenants
@@ -443,6 +463,24 @@ type roleRule struct {
 	groups []string
 }
 
+// inheritedRoles returns every declared role reachable from name through
+// member_of, excluding name itself (cycles are rejected by validation, but the
+// walk is guarded anyway).
+func inheritedRoles(roles map[string]model.DBRole, name string) map[string]bool {
+	seen := map[string]bool{}
+	var walk func(string)
+	walk = func(n string) {
+		for _, m := range roles[n].MemberOf {
+			if m != name && !seen[m] {
+				seen[m] = true
+				walk(m)
+			}
+		}
+	}
+	walk(name)
+	return seen
+}
+
 // roleRules returns the tenant's `when` mappings. YAML maps carry no order
 // (the loader goes through JSON), so rules are ordered deterministically: more
 // required groups first, then by role name. First match wins.
@@ -458,7 +496,17 @@ func roleRules(t model.Tenant) []roleRule {
 			rules = append(rules, roleRule{role: name, groups: g})
 		}
 	}
+	// A role that inherits another (member_of, transitively) must be tried first:
+	// a user holding the groups of both should land in the broader role, not in
+	// the one it already includes. Then more required groups, then name.
+	inherited := make(map[string]int, len(rules))
+	for _, r := range rules {
+		inherited[r.role] = len(inheritedRoles(t.Database.Roles, r.role))
+	}
 	sort.Slice(rules, func(i, j int) bool {
+		if a, b := inherited[rules[i].role], inherited[rules[j].role]; a != b {
+			return a > b
+		}
 		if len(rules[i].groups) != len(rules[j].groups) {
 			return len(rules[i].groups) > len(rules[j].groups)
 		}

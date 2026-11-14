@@ -4,6 +4,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -318,5 +319,49 @@ func TestTenantRolesSQL(t *testing.T) {
 	}
 	if strings.Contains(sql, `"hg_worker" TO "hg_auth"`) {
 		t.Fatalf("service roles must not be reachable through the authenticator")
+	}
+}
+
+func TestPrivateSchemasSQL(t *testing.T) {
+	t.Parallel()
+	tenant := model.Tenant{ID: "hgstg", Database: &model.TenantDatabase{
+		Schema: "api", Schemas: []string{"app", "private", "legacy"},
+	}}
+	sql := tenantDatabaseSQL("hgstg", "pw", "apw", tenant)
+	for _, s := range []string{"app", "private", "legacy"} {
+		for _, want := range []string{
+			fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS %q AUTHORIZATION mksrv_owner;`, s),
+			fmt.Sprintf(`ALTER SCHEMA %q OWNER TO mksrv_owner;`, s),
+		} {
+			if !strings.Contains(sql, want) {
+				t.Fatalf("SQL missing %q:\n%s", want, sql)
+			}
+		}
+		// never exposed to the shared buckets
+		if strings.Contains(sql, fmt.Sprintf(`GRANT USAGE ON SCHEMA %q`, s)) || strings.Contains(sql, fmt.Sprintf(`IN SCHEMA %q`, s)) {
+			t.Fatalf("private schema %q must get no grants:\n%s", s, sql)
+		}
+	}
+}
+
+// A role that inherits another must be tried before the one it includes, even
+// though both require a single group; otherwise a user holding both groups
+// would land in the narrower role.
+func TestRoleRulesInheritanceFirst(t *testing.T) {
+	t.Parallel()
+	tenant := model.Tenant{ID: "hgstg", Database: &model.TenantDatabase{Roles: map[string]model.DBRole{
+		"hgstg_authenticated": {},
+		"hgstg_lab":           {MemberOf: []string{"hgstg_authenticated"}, When: []string{"lab"}},
+		"hgstg_reporting":     {MemberOf: []string{"hgstg_lab"}, When: []string{"reporting"}},
+		"hgstg_director":      {MemberOf: []string{"hgstg_reporting"}, When: []string{"director"}},
+		"hgstg_hr":            {MemberOf: []string{"hgstg_authenticated"}, When: []string{"hr"}},
+	}}}
+	var got []string
+	for _, r := range roleRules(tenant) {
+		got = append(got, r.role)
+	}
+	want := []string{"hgstg_director", "hgstg_reporting", "hgstg_hr", "hgstg_lab"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("rule order = %v, want %v", got, want)
 	}
 }

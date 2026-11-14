@@ -452,6 +452,19 @@ func checkTenantDatabase(report *Report, file string, tenant model.Tenant) {
 		}
 	}
 	checkAppSettings(report, file, pg.AppSettings)
+	exposed := map[string]bool{tenant.DBSchema(): true}
+	for _, e := range pg.Schemas {
+		exposed[e] = true
+	}
+	for i, sch := range tenant.Database.Schemas {
+		path := fmt.Sprintf("$.database.schemas[%d]", i)
+		switch {
+		case reservedSchemas[sch] || strings.HasPrefix(sch, "pg_") || sch == "mksrv":
+			semanticError(report, file, path, "tenant.database.schemas", fmt.Sprintf("schema %q is reserved", sch))
+		case exposed[sch]:
+			semanticError(report, file, path, "tenant.database.schemas", fmt.Sprintf("schema %q is already the tenant's main or PostgREST-exposed schema; database.schemas is for schemas that must NOT be exposed", sch))
+		}
+	}
 	for name, r := range tenant.Database.Roles {
 		if len(r.When) > 0 {
 			semanticWarning(report, file, "$.database.roles."+name+".when", "tenant.database.rbac_shadow", "roles with `when` are declared: the admin/dev -> mksrv_owner shortcut is disabled for PostgREST (declare it explicitly if needed)")
