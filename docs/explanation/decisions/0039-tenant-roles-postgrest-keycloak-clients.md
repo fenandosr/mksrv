@@ -64,6 +64,9 @@ database:
     cors_origins: [https://lims.example.org]
     max_rows: 1000
     openapi_mode: disabled         # follow-privileges (default) | ignore-privileges | disabled
+    app_settings:                  # non-secret, plain text -> current_setting('app.settings.<key>', true)
+    #  oidc_issuer: https://auth.example.com/realms/hg   # default: the tenant realm's issuer
+    #  environment: staging
 ```
 
 - Maps to `PGRST_DB_SCHEMAS`, `PGRST_JWT_AUD`,
@@ -72,7 +75,19 @@ database:
   OpenAPI document (schema and server version) to anonymous callers on `GET /`;
   clinical tenants should set `openapi_mode: disabled`.
 - Listed schemas are created if missing, owned by `mksrv_owner`.
-- `PGRST_APP_SETTINGS_OIDC_ISSUER` is always injected.
+- `PGRST_APP_SETTINGS_OIDC_ISSUER` is always injected (from the tenant realm), so
+  `current_setting('app.settings.oidc_issuer', true)` works out of the box and
+  cannot drift from the realm. `app_settings` adds more keys, or overrides
+  `oidc_issuer`: each key `k` becomes `PGRST_APP_SETTINGS_<K>` and is readable as
+  `app.settings.<k>`. Keys are `[a-z0-9_]{1,63}`, values plain text. They are
+  written **in clear text** to the container unit on the data host, so only
+  non-secret values are allowed: `validate` (`tenant.database.app_setting`)
+  rejects references to OpenBao/SSM or interpolation, and characters unsafe in
+  a systemd `Environment=` line. PostgREST itself checks only signature and
+  `aud`; validating `iss` inside the database is a defence in depth the tenant
+  hook can build on this setting. Changing the map restarts the tenant's
+  PostgREST on the next `tenant apply`, as any unit change does (every
+  `tenant apply` currently restarts the selected PostgREST containers).
 - One PostgREST instance per tenant stays. Several instances per tenant
   (`postgrest.instances[]`) are deferred; several projects = several schemas.
 

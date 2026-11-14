@@ -29,8 +29,13 @@ Environment=PGRST_JWT_ROLE_CLAIM_KEY=.role
 # db-pre-request narrows mksrv_web to mksrv_owner / mksrv_app / mksrv_anon by the token's RBAC groups.
 # ADR 0039: the generated pre-request lives in the non-exposed mksrv schema.
 Environment=PGRST_DB_PRE_REQUEST=mksrv.pgrst_pre_request
-Environment=PGRST_APP_SETTINGS_OIDC_ISSUER={{ .Secrets.oidc_issuer }}
 {{- with .Tenant.PostgRESTSettings }}
+{{- if not (index .AppSettings "oidc_issuer") }}
+Environment=PGRST_APP_SETTINGS_OIDC_ISSUER={{ $.Secrets.oidc_issuer }}
+{{- end }}
+{{- range $k, $v := .AppSettings }}
+Environment=PGRST_APP_SETTINGS_{{ upper $k }}={{ $v }}
+{{- end }}
 {{- if .JWTAudience }}
 Environment=PGRST_JWT_AUD={{ .JWTAudience }}
 {{- end }}

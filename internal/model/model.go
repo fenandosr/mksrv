@@ -327,6 +327,11 @@ type PostgRESTConfig struct {
 	// disabled). Unset keeps PostgREST's default, which serves the schema and
 	// the server version to anonymous callers; clinical tenants set `disabled`.
 	OpenAPIMode string `json:"openapi_mode,omitempty"`
+	// AppSettings are non-secret key/value pairs published as
+	// PGRST_APP_SETTINGS_<KEY> and readable in SQL as
+	// current_setting('app.settings.<key>', true). `oidc_issuer` defaults to the
+	// tenant realm's issuer; declaring it here overrides that default.
+	AppSettings map[string]string `json:"app_settings,omitempty"`
 }
 
 // UnmarshalJSON accepts `true`/`false` or an object.

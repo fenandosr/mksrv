@@ -98,7 +98,12 @@
                 "jwt_audience": {"type": "string", "minLength": 1, "maxLength": 255},
                 "cors_origins": {"type": "array", "uniqueItems": true, "maxItems": 16, "items": {"type": "string", "pattern": "^https?://[A-Za-z0-9.:-]+$"}},
                 "max_rows": {"type": "integer", "minimum": 1, "maximum": 100000},
-                "openapi_mode": {"type": "string", "enum": ["follow-privileges", "ignore-privileges", "disabled"]}
+                "openapi_mode": {"type": "string", "enum": ["follow-privileges", "ignore-privileges", "disabled"]},
+                "app_settings": {
+                  "type": "object", "maxProperties": 32,
+                  "propertyNames": {"pattern": "^[a-z0-9_]{1,63}$"},
+                  "additionalProperties": {"type": "string", "maxLength": 1024}
+                }
               }
             }
           ]
