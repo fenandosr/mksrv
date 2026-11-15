@@ -304,14 +304,18 @@ func checkTenantMeshRoutes(report *Report, file string, tenant model.Tenant) {
 }
 
 // checkTenantWeb validates the `web:` block (ADR 0028): each hostname must be in
-// the tenant's own apex, needs a route53 dns_override, must not clash with a
+// the tenant's own apex, needs a route53 dns_override (or none, publishing in
+// the operator zone), must not clash with a
 // `dns:` record, and `cdn: true` is not implemented yet.
 func checkTenantWeb(report *Report, file string, tenant model.Tenant) {
 	if len(tenant.Web) == 0 {
 		return
 	}
-	if tenant.DNSOverride == nil || tenant.DNSOverride.Provider != "route53" || strings.TrimSpace(tenant.DNSOverride.ZoneID) == "" {
-		semanticError(report, file, "$.web", "tenant.web.no_zone", "web endpoints require dns_override with provider route53 and a zone_id")
+	// A tenant with no dns_override at all lives under the operator root domain
+	// (domain.outside_root enforces it) and its web hostnames are published in
+	// the operator zone. Any other override must be a route53 zone mksrv writes.
+	if tenant.DNSOverride != nil && (tenant.DNSOverride.Provider != "route53" || strings.TrimSpace(tenant.DNSOverride.ZoneID) == "") {
+		semanticError(report, file, "$.web", "tenant.web.no_zone", "web endpoints require either no dns_override (hostnames published in the operator zone) or dns_override with provider route53 and a zone_id")
 		return
 	}
 	dnsNames := make(map[string]bool, len(tenant.DNS))

@@ -146,3 +146,22 @@ then hosts then a manual `tenant apply`) also converges.
   schema); path-based routing and arbitrary per-route header rules; caching
   policy tuning for genuinely cacheable tenant sites; per-AZ edge / NAT for
   control-path HA (ADR 0027's deferred item).
+
+## Addendum (ADR 0040 era): zoneless tenants and cross-tenant origins
+
+Two cases the original design did not cover, found publishing a staging tenant's
+SPA whose origin runs on a production tenant's node:
+
+- **A tenant with no `dns_override`** (its `base_domain` lives under the operator
+  root domain, e.g. `hgstg.cloud-it.click`) may declare `web:`. Its hostnames
+  (still inside `base_domain`, so inside the root) are published as A records to
+  the edge **in the operator zone**, like `<id>.rest.<root_domain>`
+  (`operator_fqdns` in `infra/root`), instead of in a tenant zone it does not
+  have. A tenant that does set `dns_override` must still use a `route53` zone
+  with a `zone_id` (`tenant.web.no_zone`). This writes no mail-related record.
+- **A `web:` target may be another tenant's device.** The `fleet@ → <id>@:<ports>`
+  rule only reaches nodes owned by the declaring tenant, so a target that is a
+  literal tailnet IP also gets an exact `fleet@ → <ip>:<port>` rule
+  (`PolicyTenant.WebOrigins`). Tenants still cannot reach each other; only the
+  fleet (the edge) is opened, and only to the declared `ip:port`. Targets given
+  as names get no IP rule.

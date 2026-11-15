@@ -103,3 +103,23 @@ func TestExpireAPIKeysExceptKeepsTheNewOne(t *testing.T) {
 		}
 	}
 }
+
+// A `web:` target may be a node of another tenant (staging publishing an app that
+// runs on the production tenant's host): the fleet gets a rule for that exact
+// ip:port, de-duplicated across tenants, and tenants still cannot reach each other.
+func TestPolicyOpensFleetToWebOriginsByIP(t *testing.T) {
+	t.Parallel()
+	got := Policy([]PolicyTenant{
+		{ID: "hg", WebPorts: []string{"8000"}, WebOrigins: []string{"100.64.0.11:8000"}},
+		{ID: "hgstg", WebPorts: []string{"8101"}, WebOrigins: []string{"100.64.0.11:8101", "100.64.0.11:8000"}},
+	})
+	if !strings.Contains(got, `{ "action": "accept", "src": ["mksrv-fleet@"], "dst": ["100.64.0.11:8101"] }`) {
+		t.Fatalf("missing fleet -> origin ip rule:\n%s", got)
+	}
+	if n := strings.Count(got, `"dst": ["100.64.0.11:8000"]`); n != 1 {
+		t.Fatalf("origin rule not de-duplicated (%d):\n%s", n, got)
+	}
+	if strings.Contains(got, `"src": ["hgstg@"], "dst": ["hg@`) || strings.Contains(got, `"src": ["hgstg@"], "dst": ["100.64.0.11`) {
+		t.Fatalf("a tenant must not gain access to another tenant's node:\n%s", got)
+	}
+}
