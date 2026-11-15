@@ -72,7 +72,9 @@ locals {
             value = local.edge_ip
             ttl   = 300
           }
-          if coalesce(w.provider, "edge") == "edge"
+          # Tenants without their own zone publish `web:` hostnames in the
+          # operator zone instead (operator_fqdns below).
+          if coalesce(w.provider, "edge") == "edge" && try(coalesce(t.dns_override.zone_id, ""), "") != ""
         ],
         # ADR 0032: MX/SPF/DMARC are fully computable from the tenant's own
         # `mail:` block — no dependency on the mail server's live state (unlike
@@ -194,6 +196,19 @@ locals {
     local.mail_branded_tenant_zone_arns,
   )) : []
 
+  # `web:` hostnames of tenants that have no zone of their own (no
+  # dns_override.zone_id): their base_domain lives under the operator root
+  # domain, so the A record to the edge goes in the operator zone, like
+  # <id>.rest.<root_domain>. Semantic validation (tenant.web.outside_apex +
+  # domain.outside_root) keeps these hostnames inside that root.
+  tenant_web_operator_fqdns = flatten([
+    for id, t in var.tenants : [
+      for w in coalesce(t.web, []) : w.hostname
+      if coalesce(w.provider, "edge") == "edge"
+    ]
+    if try(coalesce(t.dns_override.zone_id, ""), "") == ""
+  ])
+
   # Shared operator endpoints, all fronted by the edge.
   operator_fqdns = distinct(concat(
     [
@@ -204,6 +219,7 @@ locals {
       "pgadmin.${local.root_domain}",
     ],
     local.tenant_rest_fqdns,
+    local.tenant_web_operator_fqdns,
     length(local.mail_hosts) > 0 ? ["mail.${local.root_domain}"] : [],
   ))
   operator_records = concat(

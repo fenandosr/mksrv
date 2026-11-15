@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add (web, ADR 0028 addendum): a tenant with no `dns_override` can declare
+  `web:` — its hostnames are published in the operator zone (`operator_fqdns`)
+  instead of failing `tenant.web.no_zone`. A `web:` target that is a literal
+  tailnet IP also opens the fleet to exactly that `ip:port` in the Headscale
+  ACL, so a tenant can publish an app running on another tenant's node (staging
+  SPA on a production host) without any tenant gaining access to another.
+
 - Feat: tenant local hosts (ADR 0034) — `meshnode`, `gitea`, and `codeserver`
   stacks deployed in-process by `mksrv deploy <name>`/`mksrv mesh`, run on a
   tenant's own laptop or workstation. No SSH, no cloud provisioning, no

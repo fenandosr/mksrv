@@ -628,11 +628,31 @@ func policyTenants(tenants map[string]model.Tenant) []headscale.PolicyTenant {
 	out := make([]headscale.PolicyTenant, 0, len(tenants))
 	for _, id := range sortedTenantIDs(tenants) {
 		out = append(out, headscale.PolicyTenant{
-			ID:       id,
-			Routes:   tenants[id].MeshRoutes,
-			WebPorts: webOriginPorts(tenants[id].Web),
+			ID:         id,
+			Routes:     tenants[id].MeshRoutes,
+			WebPorts:   webOriginPorts(tenants[id].Web),
+			WebOrigins: webOriginIPs(tenants[id].Web),
 		})
 	}
+	return out
+}
+
+// webOriginIPs is the sorted, de-duplicated set of `web:` targets whose host is a
+// literal IP (a tailnet address), as "ip:port".
+func webOriginIPs(web []model.TenantWebEndpoint) []string {
+	set := map[string]bool{}
+	for _, w := range web {
+		host, port, err := net.SplitHostPort(w.Target)
+		if err != nil || port == "" || net.ParseIP(host) == nil {
+			continue
+		}
+		set[net.JoinHostPort(host, port)] = true
+	}
+	out := make([]string, 0, len(set))
+	for o := range set {
+		out = append(out, o)
+	}
+	sort.Strings(out)
 	return out
 }
 

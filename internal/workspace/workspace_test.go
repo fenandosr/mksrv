@@ -679,3 +679,24 @@ func TestCheckTenantDatabaseSchemas(t *testing.T) {
 		assertIssueCode(t, mk([]string{bad}), "tenant.database.schemas")
 	}
 }
+
+func TestCheckTenantWebZones(t *testing.T) {
+	t.Parallel()
+	web := []model.TenantWebEndpoint{{Hostname: "lims.hgstg.cloud-it.click", Target: "100.64.0.11:8101"}}
+	check := func(o *model.DNSOverride) Report {
+		var r Report
+		checkTenantWeb(&r, "t.yaml", model.Tenant{ID: "hgstg", BaseDomain: "hgstg.cloud-it.click", DNSOverride: o, Web: web})
+		return r
+	}
+	// No override: published in the operator zone, so it is valid.
+	if r := check(nil); len(r.Issues) != 0 {
+		t.Fatalf("zoneless web rejected: %#v", r.Issues)
+	}
+	// A route53 zone of its own stays valid.
+	if r := check(&model.DNSOverride{Provider: "route53", ZoneID: "Z123"}); len(r.Issues) != 0 {
+		t.Fatalf("route53 web rejected: %#v", r.Issues)
+	}
+	// Any other override cannot be written by mksrv.
+	assertIssueCode(t, check(&model.DNSOverride{Provider: "route53"}), "tenant.web.no_zone")
+	assertIssueCode(t, check(&model.DNSOverride{Provider: "cloudflare", ZoneID: "Z"}), "tenant.web.no_zone")
+}

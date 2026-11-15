@@ -5,6 +5,7 @@ package cli
 import (
 	"net"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/fenandosr/mksrv/internal/configd"
@@ -146,5 +147,20 @@ func assertForwardsValid(t *testing.T, forwards []configd.Forward) {
 		if f.Type == "ssh" && (f.SSH == nil || f.SSH.ConfigAlias == "" || f.SSH.KnownHostsFile == "" || f.SSH.HostKeyAlias == "") {
 			t.Fatalf("forward %s ssh settings incomplete: %+v", f.ID, f.SSH)
 		}
+	}
+}
+
+func TestWebOriginIPs(t *testing.T) {
+	t.Parallel()
+	got := webOriginIPs([]model.TenantWebEndpoint{
+		{Hostname: "a.example.com", Target: "100.64.0.11:8101"},
+		{Hostname: "b.example.com", Target: "100.64.0.11:8101"},
+		{Hostname: "c.example.com", Target: "genome.prod.mksrv:8000"}, // a name, not an IP
+		{Hostname: "d.example.com", Target: "100.64.0.12:8080"},
+		{Hostname: "e.example.com", Target: "not-a-target"},
+	})
+	want := []string{"100.64.0.11:8101", "100.64.0.12:8080"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("webOriginIPs = %v, want %v", got, want)
 	}
 }

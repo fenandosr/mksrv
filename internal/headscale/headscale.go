@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -209,6 +210,12 @@ type PolicyTenant struct {
 	ID       string
 	Routes   []string
 	WebPorts []string
+	// WebOrigins are the `web:` targets given as a literal tailnet IP
+	// ("100.64.0.11:8101"). The fleet is allowed to reach exactly those
+	// ip:port pairs whichever tenant owns the device: a `web:` entry may point at
+	// another tenant's node (a staging tenant publishing an app that runs on the
+	// production tenant's host), which the <tenant>@:ports rule above cannot cover.
+	WebOrigins []string
 }
 
 // Policy renders the tenant-isolation HuJSON ACL: fleet hosts reach everything,
@@ -237,6 +244,22 @@ func Policy(tenants []PolicyTenant) string {
 				fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s@:%s"] }`, fleetUser, t.ID, strings.Join(t.WebPorts, ",")),
 			)
 		}
+	}
+	seen := map[string]bool{}
+	var origins []string
+	for _, t := range tenants {
+		for _, o := range t.WebOrigins {
+			if !seen[o] {
+				seen[o] = true
+				origins = append(origins, o)
+			}
+		}
+	}
+	sort.Strings(origins)
+	for _, o := range origins {
+		rules = append(rules,
+			fmt.Sprintf(`{ "action": "accept", "src": ["%s@"], "dst": ["%s"] }`, fleetUser, o),
+		)
 	}
 	return "{\n  \"acls\": [\n    " + strings.Join(rules, ",\n    ") + "\n  ]\n}\n"
 }
