@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add (forwards, Cloud-IT VPN contract): optional `forwards[].ssh_user` (ssh
+  forwards only) is carried into the signed clientconfig as `ssh.user`, which
+  the desktop app writes as `User` in the member's ssh config block. mksrv now
+  keeps a copy of the shared contract, `schemas/clientconfig.v1.json` (+
+  `.sha256`), byte-identical to the Cloud-IT VPN repo's canonical file, and a
+  test validates what configd emits against it (the app rejects unknown
+  properties), so a contract change on either side fails here first.
+
 - Add (web, ADR 0028 addendum): a tenant with no `dns_override` can declare
   `web:` — its hostnames are published in the operator zone (`operator_fqdns`)
   instead of failing `tenant.web.no_zone`. A `web:` target that is a literal

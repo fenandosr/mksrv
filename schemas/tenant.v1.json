@@ -156,6 +156,7 @@
           "open": {"type": "string", "enum": ["browser", "none", "ssh-terminal", "copy"]},
           "path": {"type": "string", "maxLength": 2048},
           "ssh_alias": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"},
+          "ssh_user": {"type": "string", "pattern": "^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$"},
           "listen_port": {"type": "integer", "minimum": 1024, "maximum": 65535}
         }
       }

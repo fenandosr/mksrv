@@ -700,3 +700,20 @@ func TestCheckTenantWebZones(t *testing.T) {
 	assertIssueCode(t, check(&model.DNSOverride{Provider: "route53"}), "tenant.web.no_zone")
 	assertIssueCode(t, check(&model.DNSOverride{Provider: "cloudflare", ZoneID: "Z"}), "tenant.web.no_zone")
 }
+
+func TestCheckTenantForwardsSSHUser(t *testing.T) {
+	t.Parallel()
+	mk := func(fwd model.TenantForward) Report {
+		var r Report
+		checkTenantForwards(&r, "t.yaml", model.Tenant{ID: "hg", Forwards: []model.TenantForward{fwd}})
+		return r
+	}
+	ok := model.TenantForward{ID: "login", Label: "L", Type: "ssh", Target: "h.prod.mksrv:22", SSHAlias: "login", SSHUser: "svc-hg"}
+	for _, i := range mk(ok).Issues {
+		if i.Code == "forward.ssh_user" {
+			t.Fatalf("valid ssh_user rejected: %+v", i)
+		}
+	}
+	bad := model.TenantForward{ID: "web", Label: "W", Type: "http", Target: "h.prod.mksrv:80", SSHUser: "svc-hg"}
+	assertIssueCode(t, mk(bad), "forward.ssh_user")
+}

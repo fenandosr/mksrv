@@ -262,6 +262,9 @@ func checkTenantForwards(report *Report, file string, tenant model.Tenant) {
 		if _, _, err := net.SplitHostPort(fwd.Target); err != nil {
 			semanticError(report, file, path+".target", "forward.target", fmt.Sprintf("target %q must be host:port", fwd.Target))
 		}
+		if fwd.Type != "ssh" && fwd.SSHUser != "" {
+			semanticError(report, file, path+".ssh_user", "forward.ssh_user", "ssh_user only applies to forwards of type ssh")
+		}
 		if fwd.Type == "ssh" && strings.TrimSpace(fwd.SSHAlias) == "" {
 			semanticError(report, file, path+".ssh_alias", "forward.ssh_alias", "an ssh forward requires ssh_alias")
 		}

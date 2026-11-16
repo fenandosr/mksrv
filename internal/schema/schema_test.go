@@ -17,8 +17,8 @@ func TestEmbeddedSchemasAreValidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Glob() error = %v", err)
 	}
-	if len(entries) != 4 {
-		t.Fatalf("schema count = %d, want 4", len(entries))
+	if len(entries) != 5 {
+		t.Fatalf("schema count = %d, want 5", len(entries))
 	}
 	for _, name := range entries {
 		data, err := engineassets.FS.ReadFile(name)
@@ -76,7 +76,7 @@ dns_override:
   zone_id: Z0EXAMPLE
 stacks: [database]
 forwards:
-  - { id: login, label: "Login node", type: ssh, target: mcps-login.prod.mksrv:22, ssh_alias: mcps-login }
+  - { id: login, label: "Login node", type: ssh, target: mcps-login.prod.mksrv:22, ssh_alias: mcps-login, ssh_user: svc-hg }
   - { id: jupyter, label: "JupyterHub", type: http, target: mcps-login.prod.mksrv:8000, open: browser }
 dns:
   - { name: jupyter, type: A, value: "203.0.113.9" }

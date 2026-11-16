@@ -53,6 +53,7 @@ variable "tenants" {
       path        = optional(string)
       ssh_alias   = optional(string)
       listen_port = optional(number)
+      ssh_user    = optional(string)
     })))
     dns = optional(list(object({
       name  = string

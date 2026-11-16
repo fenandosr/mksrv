@@ -586,6 +586,7 @@ func tenantForwards(t model.Tenant) []configd.Forward {
 				WriteConfig:    true,
 				ConfigAlias:    fwd.SSHAlias,
 				KnownHostsFile: fwd.SSHAlias,
+				User:           fwd.SSHUser,
 			}
 		}
 		out = append(out, cf)

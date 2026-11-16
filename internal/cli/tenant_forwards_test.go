@@ -18,7 +18,7 @@ func TestTenantForwardsTranslation(t *testing.T) {
 		{ID: "login", Label: "Login node", Type: "ssh", Target: "mcps-login.prod.mksrv:22", SSHAlias: "mcps-login"},
 		{ID: "jupyter", Label: "JupyterHub", Type: "http", Target: "mcps-login.prod.mksrv:8000", Open: "browser"},
 		{ID: "db", Label: "Cluster DB", Type: "tcp", Target: "mcps-login.prod.mksrv:5432"},
-		{ID: "ome-despliegue", Label: "Despliegue (ome)", Type: "ssh", Target: "100.64.0.11:22", SSHAlias: "ome-hg", ListenPort: 22011},
+		{ID: "ome-despliegue", Label: "Despliegue (ome)", Type: "ssh", Target: "100.64.0.11:22", SSHAlias: "ome-hg", SSHUser: "svc-hg", ListenPort: 22011},
 	}}
 	got := tenantForwards(tenant)
 	if len(got) != 4 {
@@ -28,6 +28,12 @@ func TestTenantForwardsTranslation(t *testing.T) {
 	ssh := got[0]
 	if ssh.SSH == nil || ssh.SSH.ConfigAlias != "mcps-login" || ssh.SSH.HostKeyAlias != "mcps-login.prod.mksrv" || !ssh.SSH.WriteConfig {
 		t.Fatalf("ssh forward wrong: %+v / %+v", ssh, ssh.SSH)
+	}
+	if ssh.SSH.User != "" {
+		t.Fatalf("ssh forward without ssh_user must not set a user: %+v", ssh.SSH)
+	}
+	if u := got[3].SSH; u == nil || u.User != "svc-hg" {
+		t.Fatalf("ssh_user not carried into the clientconfig: %+v", got[3].SSH)
 	}
 	if ssh.OpenAction.Kind != "ssh-terminal" || ssh.HealthCheck.Kind != "tcp" {
 		t.Fatalf("ssh forward defaults wrong: %+v", ssh)

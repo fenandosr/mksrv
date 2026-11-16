@@ -83,6 +83,9 @@ type SSH struct {
 	WriteConfig    bool   `json:"writeSshConfig"`
 	ConfigAlias    string `json:"sshConfigAlias"`
 	KnownHostsFile string `json:"knownHostsFile"`
+	// User is the login name the desktop app writes as `User` in the generated
+	// ssh config block. Optional in the contract (schemas/clientconfig.v1.json).
+	User string `json:"user,omitempty"`
 }
 
 type Policy struct {

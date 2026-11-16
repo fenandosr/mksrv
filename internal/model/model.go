@@ -466,6 +466,9 @@ type TenantForward struct {
 	Open     string `json:"open"`   // browser | none | ssh-terminal | copy
 	Path     string `json:"path"`
 	SSHAlias string `json:"ssh_alias"`
+	// SSHUser is the login name Cloud-IT VPN writes as `User` in the member's ssh
+	// config block for this forward (ssh forwards only; optional).
+	SSHUser string `json:"ssh_user"`
 	// ListenPort pins the local loopback port Cloud-IT VPN listens on for this
 	// forward (portStrategy "fixed"). Zero keeps today's default: the app
 	// picks a free port itself (portStrategy "auto") — needed whenever a
