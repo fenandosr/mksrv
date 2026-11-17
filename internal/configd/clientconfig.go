@@ -83,6 +83,14 @@ type SSH struct {
 	WriteConfig    bool   `json:"writeSshConfig"`
 	ConfigAlias    string `json:"sshConfigAlias"`
 	KnownHostsFile string `json:"knownHostsFile"`
+	// User is the login name the desktop app writes as `User` in the generated
+	// ssh config block. Optional in the contract (schemas/clientconfig.v1.json).
+	User string `json:"user,omitempty"`
+	// HostKeys are the server's full public host keys ("<type> <base64>", no
+	// comment). When present the client trusts only these and rejects any other
+	// key without asking; it requires WriteConfig to be true. Up to 8, so an old
+	// and a new key can be published together while rotating.
+	HostKeys []string `json:"hostKeys,omitempty"`
 }
 
 type Policy struct {

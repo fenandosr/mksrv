@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Add (forwards, Cloud-IT VPN contract): optional `forwards[].ssh_user` (ssh
+  forwards only) is carried into the signed clientconfig as `ssh.user`, which
+  the desktop app writes as `User` in the member's ssh config block. mksrv now
+  keeps a copy of the shared contract, `schemas/clientconfig.v1.json` (+
+  `.sha256`), byte-identical to the Cloud-IT VPN repo's canonical file, and a
+  test validates what configd emits against it (the app rejects unknown
+  properties), so a contract change on either side fails here first.
+  Also: the signed clientconfig now carries each ssh forward's alias namespaced
+  as `<tenant id>.<ssh_alias>` (`ssh.sshConfigAlias`), which the desktop client
+  requires so two tenants on one machine can never share an alias; the YAML
+  `ssh_alias` stays the short name. `ssh.knownHostsFile` is still emitted (the
+  contract requires it) but the client ignores it.
+  Optional `forwards[].ssh_host_keys` (ssh forwards, up to 8) pins the server's
+  public host keys into the clientconfig as `ssh.hostKeys`: the client then
+  trusts only those keys and refuses any other without asking, so `validate`
+  checks that each is a real public key of the declared type, with no comment
+  and no duplicates, and that the target host is a valid `hostKeyAlias`. Publish
+  the old and the new key together while rotating. Get a key from the server
+  itself (`cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub`), not from a
+  network scan you cannot verify.
+
 - Add (web, ADR 0028 addendum): a tenant with no `dns_override` can declare
   `web:` — its hostnames are published in the operator zone (`operator_fqdns`)
   instead of failing `tenant.web.no_zone`. A `web:` target that is a literal

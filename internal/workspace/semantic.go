@@ -3,6 +3,7 @@
 package workspace
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/fenandosr/mksrv/internal/model"
+	xssh "golang.org/x/crypto/ssh"
 )
 
 // normalizeImplicitStacks appends stacks a fleet needs implicitly rather than
@@ -262,13 +264,70 @@ func checkTenantForwards(report *Report, file string, tenant model.Tenant) {
 		if _, _, err := net.SplitHostPort(fwd.Target); err != nil {
 			semanticError(report, file, path+".target", "forward.target", fmt.Sprintf("target %q must be host:port", fwd.Target))
 		}
+		if fwd.Type != "ssh" && fwd.SSHUser != "" {
+			semanticError(report, file, path+".ssh_user", "forward.ssh_user", "ssh_user only applies to forwards of type ssh")
+		}
 		if fwd.Type == "ssh" && strings.TrimSpace(fwd.SSHAlias) == "" {
 			semanticError(report, file, path+".ssh_alias", "forward.ssh_alias", "an ssh forward requires ssh_alias")
 		}
+		if fwd.Type == "ssh" {
+			// hostKeyAlias is the target host; the desktop client rejects anything
+			// else (spaces, quotes and the ssh_config pattern characters , * ? ! [).
+			if host, _, err := net.SplitHostPort(fwd.Target); err == nil && !hostKeyAliasPattern.MatchString(host) {
+				semanticError(report, file, path+".target", "forward.host_key_alias", fmt.Sprintf("ssh target host %q must match %s (it becomes the client's hostKeyAlias)", host, hostKeyAliasPattern))
+			}
+		} else if len(fwd.SSHHostKeys) > 0 {
+			semanticError(report, file, path+".ssh_host_keys", "forward.ssh_host_keys", "ssh_host_keys only applies to forwards of type ssh")
+		}
+		checkSSHHostKeys(report, file, path+".ssh_host_keys", fwd.SSHHostKeys)
 	}
 	// builtinForwards emits at most 5 built-in forwards; Cloud-IT VPN caps at 32.
 	if len(tenant.Forwards)+5 > 32 {
 		semanticError(report, file, "$.forwards", "forward.count", fmt.Sprintf("%d tenant forwards plus mksrv's built-ins exceed the 32-forward limit", len(tenant.Forwards)))
+	}
+}
+
+// hostKeyAliasPattern is what Cloud-IT VPN accepts as an ssh hostKeyAlias.
+var hostKeyAliasPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$`)
+
+// checkSSHHostKeys validates a forward's pinned server host keys. The client
+// trusts ONLY these keys and refuses any other without asking, so a wrong value
+// locks people out of the service: beyond the contract's format, each key must
+// be a real public key whose embedded type matches the declared one (catches
+// truncated or mistyped base64), with no comment, and no duplicates.
+func checkSSHHostKeys(report *Report, file, path string, keys []string) {
+	if len(keys) == 0 {
+		return
+	}
+	if len(keys) > 8 {
+		semanticError(report, file, path, "forward.ssh_host_keys", fmt.Sprintf("%d host keys; at most 8 (an old and a new key while rotating)", len(keys)))
+	}
+	seen := map[string]int{}
+	for i, k := range keys {
+		kp := fmt.Sprintf("%s[%d]", path, i)
+		if first, dup := seen[k]; dup {
+			semanticError(report, file, kp, "forward.ssh_host_keys", fmt.Sprintf("duplicates ssh_host_keys[%d]", first))
+			continue
+		}
+		seen[k] = i
+		parts := strings.Fields(k)
+		if len(parts) != 2 {
+			semanticError(report, file, kp, "forward.ssh_host_keys", `must be "<type> <base64>" with no comment or options (the public key file without its third column)`)
+			continue
+		}
+		blob, err := base64.StdEncoding.DecodeString(parts[1])
+		if err != nil {
+			semanticError(report, file, kp, "forward.ssh_host_keys", "the key is not valid base64")
+			continue
+		}
+		pub, err := xssh.ParsePublicKey(blob)
+		if err != nil {
+			semanticError(report, file, kp, "forward.ssh_host_keys", fmt.Sprintf("not a valid ssh public key: %v", err))
+			continue
+		}
+		if pub.Type() != parts[0] {
+			semanticError(report, file, kp, "forward.ssh_host_keys", fmt.Sprintf("declared type %q but the key is %q", parts[0], pub.Type()))
+		}
 	}
 }
 

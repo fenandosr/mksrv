@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloud-it.example/schemas/clientconfig.v1.json",
+  "title": "Cloud-IT VPN client configuration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "iat", "tenant", "tailnet", "forwards", "policy", "update", "telemetry"],
+  "properties": {
+    "version": { "const": 1 },
+    "iat": { "type": "integer", "minimum": 1 },
+    "tenant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "displayName", "branding"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,31}$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "branding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["primary", "logoDataUri"],
+          "properties": {
+            "primary": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+            "logoDataUri": { "type": "string", "maxLength": 2097152 }
+          }
+        }
+      }
+    },
+    "tailnet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["controlUrl", "preauthKey", "nodeName", "ephemeral"],
+      "properties": {
+        "controlUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "preauthKey": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "nodeName": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+        "ephemeral": { "type": "boolean", "default": false }
+      }
+    },
+    "forwards": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/forward" }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reconnect", "idleDisconnectMin", "killSwitch"],
+      "properties": {
+        "reconnect": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["backoffSec"],
+          "properties": {
+            "backoffSec": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": { "type": "integer", "minimum": 1, "maximum": 3600 }
+            }
+          }
+        },
+        "idleDisconnectMin": { "type": "integer", "minimum": 0, "maximum": 1440 },
+        "killSwitch": { "type": "boolean" }
+      }
+    },
+    "update": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["feedUrl", "minVersion"],
+      "properties": {
+        "feedUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "minVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$" }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "endpoint"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "endpoint": { "type": "string", "maxLength": 2048 }
+      }
+    }
+  },
+  "$defs": {
+    "forward": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "type", "listen", "portStrategy", "target", "openAction", "healthCheck", "maxConns"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,31}$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "type": { "enum": ["http", "tcp", "ssh"] },
+        "listen": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["host", "port"],
+          "properties": {
+            "host": { "const": "127.0.0.1" },
+            "port": {
+              "oneOf": [
+                { "const": 0 },
+                { "type": "integer", "minimum": 1024, "maximum": 65535 }
+              ]
+            }
+          }
+        },
+        "portStrategy": { "enum": ["auto", "fixed"] },
+        "target": { "type": "string", "pattern": "^[^:\\s]+:[0-9]{1,5}$", "maxLength": 320 },
+        "openAction": { "$ref": "#/$defs/openAction" },
+        "healthCheck": { "$ref": "#/$defs/healthCheck" },
+        "maxConns": { "type": "integer", "minimum": 1, "maximum": 1024 },
+        "ssh": { "$ref": "#/$defs/ssh" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "portStrategy": { "const": "fixed" } }, "required": ["portStrategy"] },
+          "then": { "properties": { "listen": { "properties": { "port": { "minimum": 1024 } } } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "ssh" } }, "required": ["type"] },
+          "then": { "required": ["ssh"] }
+        }
+      ]
+    },
+    "openAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["browser", "ssh-terminal", "copy", "none"] },
+        "path": { "type": "string", "maxLength": 2048 },
+        "template": { "type": "string", "maxLength": 4096 }
+      }
+    },
+    "healthCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "intervalSec"],
+      "properties": {
+        "kind": { "enum": ["http", "tcp"] },
+        "path": { "type": "string", "maxLength": 2048 },
+        "intervalSec": { "type": "integer", "minimum": 5, "maximum": 3600 }
+      }
+    },
+    "ssh": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hostKeyAlias", "writeSshConfig", "sshConfigAlias", "knownHostsFile"],
+      "properties": {
+        "hostKeyAlias": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "writeSshConfig": { "type": "boolean" },
+        "sshConfigAlias": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,255}$" },
+        "knownHostsFile": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "user": { "type": "string", "pattern": "^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$" },
+        "hostKeys": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "maxLength": 8192,
+            "pattern": "^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa|sk-ssh-ed25519@openssh\\.com|sk-ecdsa-sha2-nistp256@openssh\\.com) [A-Za-z0-9+/]+={0,2}$"
+          }
+        }
+      }
+    }
+  }
+}
