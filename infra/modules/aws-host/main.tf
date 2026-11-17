@@ -269,6 +269,18 @@ resource "aws_instance" "host" {
 
   tags        = merge(local.tags, { Name = local.name })
   volume_tags = merge(local.tags, { Name = "${local.name}-root" })
+
+  # The AMI is looked up as "the most recent Rocky 9" (data.aws_ami.rocky9), so a
+  # newer upstream image would otherwise plan a REPLACEMENT of every running host
+  # — and, because each EBS volume takes its availability zone from the instance,
+  # of every data volume too (Postgres, OpenBao raft, mail). A host keeps the image
+  # it was created from; OS updates go through dnf on the host, not through a new
+  # AMI. New hosts still get the latest image. To roll a host onto a new image on
+  # purpose, `terraform apply -replace` that one instance (data volumes need a
+  # migration plan first) or set `ami_id` explicitly.
+  lifecycle {
+    ignore_changes = [ami]
+  }
 }
 
 resource "aws_ebs_volume" "data" {
