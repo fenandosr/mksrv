@@ -12,7 +12,7 @@ apps:
   - name: keycloak
     image: quay.io/keycloak/keycloak:26.1
   - name: configd
-    image: ghcr.io/fenandosr/mksrv-configd:v0.1.0
+    image: ghcr.io/fenandosr/mksrv-configd:sha-db410a2
 networks: [mksrv-identity]
 secrets:
   - /mksrv/{env}/identity/kc_db_password

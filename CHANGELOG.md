@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix (identity): the `configd` image moves from `v0.1.0` (2026-09-03) to the
+  immutable `sha-db410a2` build, the first one that emits `ssh.user` and
+  `ssh.hostKeys` (earlier images silently drop them from the signed clientconfig).
+  The only `internal/configd` change since `v0.1.0` is that feature.
+
 - Add (forwards, Cloud-IT VPN contract): optional `forwards[].ssh_user` (ssh
   forwards only) is carried into the signed clientconfig as `ssh.user`, which
   the desktop app writes as `User` in the member's ssh config block. mksrv now
