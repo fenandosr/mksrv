@@ -4,6 +4,8 @@ package workspace
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/fenandosr/mksrv/internal/model"
+	xssh "golang.org/x/crypto/ssh"
 )
 
 func TestValidateExampleWorkspace(t *testing.T) {
@@ -716,4 +719,63 @@ func TestCheckTenantForwardsSSHUser(t *testing.T) {
 	}
 	bad := model.TenantForward{ID: "web", Label: "W", Type: "http", Target: "h.prod.mksrv:80", SSHUser: "svc-hg"}
 	assertIssueCode(t, mk(bad), "forward.ssh_user")
+}
+
+func testHostKey(t *testing.T) string {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp, err := xssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(xssh.MarshalAuthorizedKey(sp)))
+}
+
+func TestCheckSSHHostKeys(t *testing.T) {
+	t.Parallel()
+	good, other := testHostKey(t), testHostKey(t)
+	var ok Report
+	checkSSHHostKeys(&ok, "t.yaml", "$.forwards[0].ssh_host_keys", []string{good, other})
+	if len(ok.Issues) != 0 {
+		t.Fatalf("valid host keys rejected: %#v", ok.Issues)
+	}
+	parts := strings.Fields(good)
+	for name, keys := range map[string][]string{
+		"comment":       {good + " root@server"},
+		"truncated":     {parts[0] + " " + parts[1][:len(parts[1])-8]},
+		"not base64":    {parts[0] + " !!!!"},
+		"wrong type":    {"ecdsa-sha2-nistp256 " + parts[1]},
+		"duplicate":     {good, good},
+		"only the type": {parts[0]},
+		"nine keys":     {good, other, testHostKey(t), testHostKey(t), testHostKey(t), testHostKey(t), testHostKey(t), testHostKey(t), testHostKey(t)},
+	} {
+		var r Report
+		checkSSHHostKeys(&r, "t.yaml", "$.forwards[0].ssh_host_keys", keys)
+		if len(r.Issues) == 0 {
+			t.Fatalf("%s: expected an issue", name)
+		}
+		assertIssueCode(t, r, "forward.ssh_host_keys")
+	}
+}
+
+func TestCheckTenantForwardsSSHHostKeysAndAlias(t *testing.T) {
+	t.Parallel()
+	mk := func(fwd model.TenantForward) Report {
+		var r Report
+		checkTenantForwards(&r, "t.yaml", model.Tenant{ID: "hg", Forwards: []model.TenantForward{fwd}})
+		return r
+	}
+	ssh := model.TenantForward{ID: "login", Label: "L", Type: "ssh", Target: "login.prod.mksrv:22", SSHAlias: "login", SSHHostKeys: []string{testHostKey(t)}}
+	for _, i := range mk(ssh).Issues {
+		t.Fatalf("valid ssh forward with host keys rejected: %+v", i)
+	}
+	web := model.TenantForward{ID: "web", Label: "W", Type: "http", Target: "h.prod.mksrv:80", SSHHostKeys: []string{testHostKey(t)}}
+	assertIssueCode(t, mk(web), "forward.ssh_host_keys")
+	badHost := ssh
+	badHost.SSHHostKeys = nil
+	badHost.Target = "-bad.prod.mksrv:22" // would be an invalid hostKeyAlias for the client
+	assertIssueCode(t, mk(badHost), "forward.host_key_alias")
 }

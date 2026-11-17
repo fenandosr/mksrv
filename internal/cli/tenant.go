@@ -593,6 +593,7 @@ func tenantForwards(t model.Tenant) []configd.Forward {
 				ConfigAlias:    alias,
 				KnownHostsFile: alias,
 				User:           fwd.SSHUser,
+				HostKeys:       fwd.SSHHostKeys,
 			}
 		}
 		out = append(out, cf)

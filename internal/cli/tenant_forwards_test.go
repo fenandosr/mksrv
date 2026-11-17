@@ -18,7 +18,7 @@ func TestTenantForwardsTranslation(t *testing.T) {
 		{ID: "login", Label: "Login node", Type: "ssh", Target: "mcps-login.prod.mksrv:22", SSHAlias: "mcps-login"},
 		{ID: "jupyter", Label: "JupyterHub", Type: "http", Target: "mcps-login.prod.mksrv:8000", Open: "browser"},
 		{ID: "db", Label: "Cluster DB", Type: "tcp", Target: "mcps-login.prod.mksrv:5432"},
-		{ID: "ome-despliegue", Label: "Despliegue (ome)", Type: "ssh", Target: "100.64.0.11:22", SSHAlias: "ome-hg", SSHUser: "svc-hg", ListenPort: 22011},
+		{ID: "ome-despliegue", Label: "Despliegue (ome)", Type: "ssh", Target: "100.64.0.11:22", SSHAlias: "ome-hg", SSHUser: "svc-hg", SSHHostKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA"}, ListenPort: 22011},
 	}}
 	got := tenantForwards(tenant)
 	if len(got) != 4 {
@@ -35,6 +35,9 @@ func TestTenantForwardsTranslation(t *testing.T) {
 		if !strings.HasPrefix(f.SSH.ConfigAlias, "mcps.") || len(f.SSH.ConfigAlias) == len("mcps.") || f.SSH.KnownHostsFile == "" {
 			t.Fatalf("ssh alias not namespaced for the client contract: %+v", f.SSH)
 		}
+	}
+	if hk := got[3].SSH.HostKeys; len(hk) != 1 || hk[0] != "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA" || got[0].SSH.HostKeys != nil {
+		t.Fatalf("hostKeys not carried (only where declared): %v / %v", got[3].SSH.HostKeys, got[0].SSH.HostKeys)
 	}
 	if got[3].SSH.ConfigAlias != "mcps.ome-hg" {
 		t.Fatalf("alias = %q, want mcps.ome-hg", got[3].SSH.ConfigAlias)

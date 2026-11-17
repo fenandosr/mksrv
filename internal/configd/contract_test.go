@@ -3,6 +3,8 @@
 package configd
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/fenandosr/mksrv/internal/schema"
+	xssh "golang.org/x/crypto/ssh"
 )
 
 // The clientconfig contract is shared with the Cloud-IT VPN desktop app, whose
@@ -37,14 +40,32 @@ func TestClientConfigSchemaMatchesRecordedHash(t *testing.T) {
 // (additionalProperties: false everywhere), with and without the optional ssh.user.
 func TestEmittedClientConfigValidatesAgainstContract(t *testing.T) {
 	t.Parallel()
-	for name, user := range map[string]string{"without ssh.user": "", "with ssh.user": "jdoe"} {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp, err := xssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostKey := strings.TrimSpace(string(xssh.MarshalAuthorizedKey(sp)))
+	for name, c := range map[string]struct {
+		user string
+		keys []string
+	}{
+		"without ssh.user":       {},
+		"with ssh.user":          {user: "jdoe"},
+		"with hostKeys":          {keys: []string{hostKey}},
+		"with user and hostKeys": {user: "jdoe", keys: []string{hostKey}},
+	} {
+		user := c.user
 		cfg := testConfig()
 		cfg.Forwards = append(cfg.Forwards, Forward{
 			ID: "login", Label: "Login", Type: "ssh",
 			Listen: Listen{Host: "127.0.0.1"}, PortStrategy: "auto",
 			Target: "login.prod.mksrv:22", OpenAction: OpenAction{Kind: "ssh-terminal"},
 			HealthCheck: HealthCheck{Kind: "tcp", IntervalSec: 30}, MaxConns: 16,
-			SSH: &SSH{HostKeyAlias: "login.prod.mksrv", WriteConfig: true, ConfigAlias: "login", KnownHostsFile: "login", User: user},
+			SSH: &SSH{HostKeyAlias: "login.prod.mksrv", WriteConfig: true, ConfigAlias: "login", KnownHostsFile: "login", User: user, HostKeys: c.keys},
 		})
 		blob, err := json.Marshal(cfg)
 		if err != nil {
@@ -52,6 +73,9 @@ func TestEmittedClientConfigValidatesAgainstContract(t *testing.T) {
 		}
 		if has := strings.Contains(string(blob), `"user"`); has != (user != "") {
 			t.Fatalf("%s: user emitted=%v, want %v: %s", name, has, user != "", blob)
+		}
+		if has := strings.Contains(string(blob), `"hostKeys"`); has != (len(c.keys) > 0) {
+			t.Fatalf("%s: hostKeys emitted=%v, want %v: %s", name, has, len(c.keys) > 0, blob)
 		}
 		var value any
 		if err := json.Unmarshal(blob, &value); err != nil {
