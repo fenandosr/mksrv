@@ -581,11 +581,17 @@ func tenantForwards(t model.Tenant) []configd.Forward {
 		}
 		if fwd.Type == "ssh" {
 			host, _, _ := net.SplitHostPort(fwd.Target)
+			// The desktop client requires the ssh config alias to be namespaced
+			// "<tenant id>.<name>" (tenant ids never contain a dot, so two tenants
+			// on one machine can never share an alias); the YAML keeps the short
+			// name. knownHostsFile is advisory — the client always uses its own
+			// per-tenant known_hosts — but the contract still requires it non-empty.
+			alias := t.ID + "." + fwd.SSHAlias
 			cf.SSH = &configd.SSH{
 				HostKeyAlias:   host,
 				WriteConfig:    true,
-				ConfigAlias:    fwd.SSHAlias,
-				KnownHostsFile: fwd.SSHAlias,
+				ConfigAlias:    alias,
+				KnownHostsFile: alias,
 				User:           fwd.SSHUser,
 			}
 		}

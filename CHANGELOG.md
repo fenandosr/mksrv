@@ -9,6 +9,11 @@
   `.sha256`), byte-identical to the Cloud-IT VPN repo's canonical file, and a
   test validates what configd emits against it (the app rejects unknown
   properties), so a contract change on either side fails here first.
+  Also: the signed clientconfig now carries each ssh forward's alias namespaced
+  as `<tenant id>.<ssh_alias>` (`ssh.sshConfigAlias`), which the desktop client
+  requires so two tenants on one machine can never share an alias; the YAML
+  `ssh_alias` stays the short name. `ssh.knownHostsFile` is still emitted (the
+  contract requires it) but the client ignores it.
 
 - Add (web, ADR 0028 addendum): a tenant with no `dns_override` can declare
   `web:` — its hostnames are published in the operator zone (`operator_fqdns`)

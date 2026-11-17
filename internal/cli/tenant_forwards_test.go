@@ -14,7 +14,7 @@ import (
 
 func TestTenantForwardsTranslation(t *testing.T) {
 	t.Parallel()
-	tenant := model.Tenant{Forwards: []model.TenantForward{
+	tenant := model.Tenant{ID: "mcps", Forwards: []model.TenantForward{
 		{ID: "login", Label: "Login node", Type: "ssh", Target: "mcps-login.prod.mksrv:22", SSHAlias: "mcps-login"},
 		{ID: "jupyter", Label: "JupyterHub", Type: "http", Target: "mcps-login.prod.mksrv:8000", Open: "browser"},
 		{ID: "db", Label: "Cluster DB", Type: "tcp", Target: "mcps-login.prod.mksrv:5432"},
@@ -26,8 +26,18 @@ func TestTenantForwardsTranslation(t *testing.T) {
 	}
 
 	ssh := got[0]
-	if ssh.SSH == nil || ssh.SSH.ConfigAlias != "mcps-login" || ssh.SSH.HostKeyAlias != "mcps-login.prod.mksrv" || !ssh.SSH.WriteConfig {
+	if ssh.SSH == nil || ssh.SSH.ConfigAlias != "mcps.mcps-login" || ssh.SSH.HostKeyAlias != "mcps-login.prod.mksrv" || !ssh.SSH.WriteConfig {
 		t.Fatalf("ssh forward wrong: %+v / %+v", ssh, ssh.SSH)
+	}
+	// The desktop client rejects an alias that is not namespaced "<tenant>." (and
+	// non-empty after it); knownHostsFile stays non-empty though it is advisory.
+	for _, f := range []configd.Forward{got[0], got[3]} {
+		if !strings.HasPrefix(f.SSH.ConfigAlias, "mcps.") || len(f.SSH.ConfigAlias) == len("mcps.") || f.SSH.KnownHostsFile == "" {
+			t.Fatalf("ssh alias not namespaced for the client contract: %+v", f.SSH)
+		}
+	}
+	if got[3].SSH.ConfigAlias != "mcps.ome-hg" {
+		t.Fatalf("alias = %q, want mcps.ome-hg", got[3].SSH.ConfigAlias)
 	}
 	if ssh.SSH.User != "" {
 		t.Fatalf("ssh forward without ssh_user must not set a user: %+v", ssh.SSH)

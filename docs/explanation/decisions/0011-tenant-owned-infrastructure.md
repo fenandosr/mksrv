@@ -24,7 +24,7 @@ fleet services; nothing minted tenant-scoped Headscale pre-auth keys.
 ### Three optional tenant-document blocks
 
 - **`forwards`** — a list of `{id, label, type (http|tcp|ssh), target, open?,
-  path?, ssh_alias?, ssh_user?}`. `mksrv tenant apply` translates each to a `configd.Forward`
+  path?, ssh_alias?, ssh_user?}` (the signed config carries the alias as `<tenant>.<ssh_alias>`). `mksrv tenant apply` translates each to a `configd.Forward`
   and appends it to the tenant's broker roster entry, after the built-in fleet
   forwards. `target` is a `host:port` MagicDNS name of a tenant mesh node. No
   change to `configd` (the roster already carries `forwards` verbatim) or to
