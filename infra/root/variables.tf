@@ -71,6 +71,15 @@ variable "tenants" {
       sso        = optional(bool)
       sso_groups = optional(list(string))
     })))
+    # Only `s3` is Terraform's business; storage.approles are OpenBao-side
+    # (internal/cli/openbao_tenant.go) and are dropped on conversion.
+    storage = optional(object({
+      s3 = optional(object({
+        bucket               = string
+        cors_origins         = optional(list(string))
+        abort_multipart_days = optional(number)
+      }))
+    }))
     device_limit = optional(number)
     branding = object({
       primary       = optional(string)

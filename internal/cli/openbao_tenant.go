@@ -129,7 +129,10 @@ func tenantCacheSecretFields(cacheHost, id, password string) []string {
 
 // baoKVPasswordField pulls the current `password` value from a `bao kv get
 // -format=json` document, or "" when absent.
-func baoKVPasswordField(stdout string) string {
+func baoKVPasswordField(stdout string) string { return baoKVField(stdout, "password") }
+
+// baoKVField pulls one field of a `bao kv get -format=json` document, or "".
+func baoKVField(stdout, field string) string {
 	var doc struct {
 		Data struct {
 			Data map[string]string `json:"data"`
@@ -138,7 +141,7 @@ func baoKVPasswordField(stdout string) string {
 	if json.Unmarshal([]byte(stdout), &doc) != nil {
 		return ""
 	}
-	return doc.Data.Data["password"]
+	return doc.Data.Data[field]
 }
 
 // mirrorTenantSecret writes fields to kv/tenants/<id>/<name>, skipping the write
@@ -330,7 +333,7 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 	// already holds for its own tenant policies; cheap and idempotent.
 	if _, err := client.RunInput(ctx,
 		baoExec(rootToken, "policy", "write", "mksrv-operator", "-"),
-		[]byte(operatorAppRolePolicyHCL(openbaoTenantIDs(f.data.Tenants))),
+		[]byte(operatorAppRolePolicyHCL(openbaoTenantIDs(f.data.Tenants), tenantAppRoleNames(f.data.Tenants)...)),
 	); err != nil {
 		return fmt.Errorf("openbao: refresh mksrv-operator policy: %w", err)
 	}
@@ -520,6 +523,10 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 				tenantCacheSecretFields(cacheHost, id, pw)); err != nil {
 				return err
 			}
+		}
+
+		if err := f.provisionTenantStorage(ctx, client, rootToken, id); err != nil {
+			return err
 		}
 
 		printer.Success("tenant %s: openbao admin/dev/svc policies + approle + transit + oidc + secrets (realm %s)", id, realm)

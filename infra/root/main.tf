@@ -619,6 +619,147 @@ resource "aws_ses_domain_mail_from" "tenant" {
   mail_from_domain = "bounce.${each.value}"
 }
 
+# ADR 0041: a tenant's own S3 bucket + a dedicated IAM user for it. Fixed
+# posture (not configurable): Block Public Access, BucketOwnerEnforced, SSE-S3,
+# no versioning, TLS-only bucket policy, and a lifecycle with ONLY the
+# abort-incomplete-multipart rule -- retention (transitions/expirations) is the
+# tenant application's decision, added later by an explicit change.
+#
+# The IAM user is long-lived-key by design: presigned URLs signed by an STS
+# session die with it, and a worker outside AWS has no instance role. Its key
+# is rotated every 90 days by re-creating aws_iam_access_key (terraform apply
+# -replace), then re-mirroring to OpenBao.
+locals {
+  tenant_s3 = {
+    for id, t in var.tenants : id => t.storage.s3
+    if try(t.storage.s3, null) != null
+  }
+}
+
+resource "aws_s3_bucket" "tenant" {
+  for_each = local.tenant_s3
+  bucket   = each.value.bucket
+  tags = {
+    "mksrv:env"    = local.env
+    "mksrv:tenant" = each.key
+    tenant         = each.key
+    env            = local.env
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "tenant" {
+  for_each                = local.tenant_s3
+  bucket                  = aws_s3_bucket.tenant[each.key].id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_ownership_controls" "tenant" {
+  for_each = local.tenant_s3
+  bucket   = aws_s3_bucket.tenant[each.key].id
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "tenant" {
+  for_each = local.tenant_s3
+  bucket   = aws_s3_bucket.tenant[each.key].id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "tenant_tls_only" {
+  for_each = local.tenant_s3
+  bucket   = aws_s3_bucket.tenant[each.key].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "DenyInsecureTransport"
+      Effect    = "Deny"
+      Principal = "*"
+      Action    = "s3:*"
+      Resource = [
+        aws_s3_bucket.tenant[each.key].arn,
+        "${aws_s3_bucket.tenant[each.key].arn}/*",
+      ]
+      Condition = { Bool = { "aws:SecureTransport" = "false" } }
+    }]
+  })
+  # The public-access block must exist first or the policy PUT can race it.
+  depends_on = [aws_s3_bucket_public_access_block.tenant]
+}
+
+resource "aws_s3_bucket_cors_configuration" "tenant" {
+  for_each = {
+    for id, b in local.tenant_s3 : id => b
+    if length(coalesce(b.cors_origins, [])) > 0
+  }
+  bucket = aws_s3_bucket.tenant[each.key].id
+  cors_rule {
+    allowed_origins = each.value.cors_origins
+    allowed_methods = ["PUT", "GET", "HEAD"]
+    allowed_headers = ["*"]
+    # Without ETag exposed the browser cannot finish a multipart upload.
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3600
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "tenant" {
+  for_each = local.tenant_s3
+  bucket   = aws_s3_bucket.tenant[each.key].id
+  rule {
+    id     = "abort-incomplete-multipart"
+    status = "Enabled"
+    filter {}
+    abort_incomplete_multipart_upload {
+      days_after_initiation = coalesce(each.value.abort_multipart_days, 3)
+    }
+  }
+}
+
+resource "aws_iam_user" "tenant_s3" {
+  for_each = local.tenant_s3
+  name     = "mksrv-${local.env}-${each.key}-s3"
+  tags     = { "mksrv:env" = local.env, "mksrv:tenant" = each.key }
+}
+
+# Least privilege: no DeleteObject, no ACL, no bucket administration. Deletion
+# arrives with the tenant's retention classes and is its own explicit change.
+resource "aws_iam_user_policy" "tenant_s3" {
+  for_each = local.tenant_s3
+  name     = "s3-data"
+  user     = aws_iam_user.tenant_s3[each.key].name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "Bucket"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket", "s3:ListBucketMultipartUploads", "s3:GetBucketLocation"]
+        Resource = aws_s3_bucket.tenant[each.key].arn
+      },
+      {
+        Sid      = "Objects"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:GetObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"]
+        Resource = "${aws_s3_bucket.tenant[each.key].arn}/*"
+      },
+    ]
+  })
+}
+
+resource "aws_iam_access_key" "tenant_s3" {
+  for_each = local.tenant_s3
+  user     = aws_iam_user.tenant_s3[each.key].name
+}
+
 module "dns_operator" {
   source  = "../modules/dns"
   records = local.operator_records

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fenandosr/mksrv/internal/model"
 	sshx "github.com/fenandosr/mksrv/internal/ssh"
 	"github.com/fenandosr/mksrv/internal/ui"
 )
@@ -31,11 +32,18 @@ import (
 // tenant currently consuming the openbao stack, not just the ones a given
 // `tenant apply` run happens to select — provisionOpenBaoTenants passes the
 // full roster so a partial apply never narrows another tenant's access.
-func operatorAppRolePolicyHCL(ids []string) string {
+//
+// extraRoles are the tenants' declared `storage.approles` (`svc-<id>-<name>`,
+// ADR 0041): same four sub-paths, same one-block-per-role rule.
+func operatorAppRolePolicyHCL(ids []string, extraRoles ...string) string {
 	var b strings.Builder
+	roles := make([]string, 0, 2*len(ids)+len(extraRoles))
 	for _, id := range ids {
-		for _, role := range []string{"tenant-" + id, "svc-" + id} {
-			fmt.Fprintf(&b, `path "auth/approle/role/%[1]s/secret-id" {
+		roles = append(roles, "tenant-"+id, "svc-"+id)
+	}
+	roles = append(roles, extraRoles...)
+	for _, role := range roles {
+		fmt.Fprintf(&b, `path "auth/approle/role/%[1]s/secret-id" {
   capabilities = ["create", "update", "list"]
 }
 path "auth/approle/role/%[1]s/secret-id-accessor/lookup" {
@@ -48,7 +56,6 @@ path "auth/approle/role/%[1]s/role-id" {
   capabilities = ["read"]
 }
 `, role)
-		}
 	}
 	return b.String()
 }
@@ -82,7 +89,7 @@ func (f *fleet) operatorBaoToken(ctx context.Context, client *sshx.Client) (stri
 	}
 	if _, err := client.RunInput(ctx,
 		baoExec(root, "policy", "write", "mksrv-operator", "-"),
-		[]byte(operatorAppRolePolicyHCL(openbaoTenantIDs(f.data.Tenants))),
+		[]byte(operatorAppRolePolicyHCL(openbaoTenantIDs(f.data.Tenants), tenantAppRoleNames(f.data.Tenants)...)),
 	); err != nil {
 		return "", fmt.Errorf("write mksrv-operator policy: %w", err)
 	}
@@ -131,12 +138,28 @@ func baoAppRoleLogin(ctx context.Context, client *sshx.Client, roleID, secretID 
 type tenantSecretIDOptions struct {
 	Name    string
 	Service bool
+	// AppRole names one of the tenant's storage.approles (ADR 0041); the role
+	// is svc-<id>-<AppRole>. Mutually exclusive with Service.
+	AppRole string
 	WrapTTL time.Duration
 	TTL     time.Duration
 	NumUses int
 	CIDRs   []string
 	List    bool
 	Revoke  string
+}
+
+// tenantHasAppRole reports whether t declares storage.approles[name].
+func tenantHasAppRole(t model.Tenant, name string) bool {
+	if t.Storage == nil {
+		return false
+	}
+	for _, r := range t.Storage.AppRoles {
+		if r.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // secretIDMintArgs builds the `bao write` argv that mints one wrapped SecretID
@@ -146,6 +169,10 @@ func secretIDMintArgs(role string, o tenantSecretIDOptions) []string {
 	meta := map[string]string{"issued_by": "mksrv"}
 	if o.Service {
 		meta["tier"] = "svc"
+	}
+	if o.AppRole != "" {
+		meta["tier"] = "approle"
+		meta["approle"] = o.AppRole
 	}
 	if o.Name != "" {
 		meta["name"] = o.Name
@@ -176,6 +203,14 @@ func (a *App) runTenantSecretID(ctx context.Context, printer ui.Printer, globals
 	t, ok := f.data.Tenants[id]
 	if !ok {
 		return &ExitError{Code: 2, Err: fmt.Errorf("unknown tenant %q", id)}
+	}
+	if o.AppRole != "" {
+		if o.Service {
+			return &ExitError{Code: 2, Err: fmt.Errorf("--approle and --service are mutually exclusive")}
+		}
+		if !tenantHasAppRole(t, o.AppRole) {
+			return &ExitError{Code: 2, Err: fmt.Errorf("tenant %q declares no storage.approles entry named %q", id, o.AppRole)}
+		}
 	}
 	if !slices.Contains(t.Stacks, "openbao") {
 		return &ExitError{Code: 2, Err: fmt.Errorf("tenant %q does not consume the openbao stack", id)}
@@ -209,6 +244,9 @@ func (a *App) runTenantSecretID(ctx context.Context, printer ui.Printer, globals
 	roleName := "tenant-" + id
 	if o.Service {
 		roleName = "svc-" + id
+	}
+	if o.AppRole != "" {
+		roleName = "svc-" + id + "-" + o.AppRole
 	}
 	role := "auth/approle/role/" + roleName
 
@@ -292,6 +330,11 @@ func (a *App) runTenantSecretID(ctx context.Context, printer ui.Printer, globals
 	printer.Info("")
 	printer.Info("send the wrapping token on a side channel. The recipient unwraps it once:")
 	printer.Info("  BAO_TOKEN=<wrapping token> bao unwrap")
-	printer.Info("→ the SecretID. It does not expire; store it in the service's secret store.")
+	if o.AppRole != "" {
+		printer.Info("→ the SecretID. It expires per the role's secret_id_ttl (default 90 days) and is")
+		printer.Info("  bound to the role's CIDRs; store it in the service's secret store and rotate before then.")
+	} else {
+		printer.Info("→ the SecretID. It does not expire; store it in the service's secret store.")
+	}
 	return nil
 }

@@ -89,6 +89,7 @@ func (a *App) newTenantCommand(opts *globalOptions) *cobra.Command {
 			o := tenantSecretIDOptions{}
 			o.Name, _ = cmd.Flags().GetString("name")
 			o.Service, _ = cmd.Flags().GetBool("service")
+			o.AppRole, _ = cmd.Flags().GetString("approle")
 			o.WrapTTL, _ = cmd.Flags().GetDuration("wrap-ttl")
 			o.TTL, _ = cmd.Flags().GetDuration("ttl")
 			o.NumUses, _ = cmd.Flags().GetInt("num-uses")
@@ -100,8 +101,9 @@ func (a *App) newTenantCommand(opts *globalOptions) *cobra.Command {
 	}
 	secretID.Flags().String("name", "", "label recorded in SecretID metadata (audit)")
 	secretID.Flags().Bool("service", false, "mint for the narrow tenant-<id>-svc AppRole (Transit only, no KV) instead of tenant-<id>")
+	secretID.Flags().String("approle", "", "mint for a storage.approles entry of the tenant (svc-<id>-<name>) instead of tenant-<id>")
 	secretID.Flags().Duration("wrap-ttl", time.Hour, "wrapping token lifetime")
-	secretID.Flags().Duration("ttl", 0, "SecretID lifetime (0 = never expires)")
+	secretID.Flags().Duration("ttl", 0, "SecretID lifetime (0 = the role's default; never expires for tenant-<id> and --service)")
 	secretID.Flags().Int("num-uses", 0, "SecretID use limit (0 = unlimited)")
 	secretID.Flags().StringSlice("cidr", nil, "bind the SecretID and its tokens to these source CIDRs")
 	secretID.Flags().Bool("list", false, "list issued SecretID accessors instead of minting")
