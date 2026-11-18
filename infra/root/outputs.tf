@@ -75,6 +75,19 @@ output "tenant_mail_smtp" {
   }
 }
 
+output "tenant_storage_s3" {
+  description = "Per-tenant S3 bucket + dedicated IAM access key, keyed by tenant id (ADR 0041). Only tenants with storage.s3."
+  sensitive   = true
+  value = {
+    for id, b in local.tenant_s3 : id => {
+      bucket            = aws_s3_bucket.tenant[id].bucket
+      region            = local.region
+      access_key_id     = aws_iam_access_key.tenant_s3[id].id
+      secret_access_key = aws_iam_access_key.tenant_s3[id].secret
+    }
+  }
+}
+
 output "network" {
   value = {
     vpc_id             = module.network.vpc_id

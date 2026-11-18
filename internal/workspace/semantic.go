@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -137,6 +138,14 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 		tenantIDs = append(tenantIDs, tenantID)
 	}
 	sort.Strings(tenantIDs)
+	// Cross-tenant uniqueness for tenant `storage:` (ADR 0041): S3 bucket names
+	// are global to AWS, and an OpenBao role name `svc-<tenant>-<name>` can
+	// collide with another tenant's own `svc-<id>` (tenant `hg-stg` vs tenant
+	// `hg` + approle `stg`).
+	storageNames := &storageNameRegistry{buckets: map[string]string{}, roles: map[string]string{}}
+	for _, id := range tenantIDs {
+		storageNames.roles["svc-"+id] = id
+	}
 	for _, tenantID := range tenantIDs {
 		tenant := data.Tenants[tenantID]
 		tenantFile := data.TenantFiles[tenantID]
@@ -175,6 +184,7 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 		checkTenantMeshRoutes(report, tenantFile, tenant)
 		checkTenantWeb(report, tenantFile, tenant)
 		checkTenantDatabase(report, tenantFile, tenant)
+		checkTenantStorage(report, tenantFile, tenant, storageNames)
 		checkTenantRoles(report, tenantFile, tenant, data.Tenants)
 		checkTenantKeycloak(report, tenantFile, tenant)
 		checkTenantMail(report, tenantFile, tenant, len(assigned["mail"]) > 0)
@@ -482,6 +492,68 @@ var allowedDBExtensions = map[string]bool{
 // reservedSchemas can't be used as a tenant's application schema.
 var reservedSchemas = map[string]bool{
 	"public": true, "pg_catalog": true, "information_schema": true, "pg_toast": true,
+}
+
+// storageNameRegistry tracks names that must be unique across tenants.
+type storageNameRegistry struct {
+	buckets map[string]string // bucket name -> tenant id
+	roles   map[string]string // OpenBao role name -> owner tenant id
+}
+
+// checkTenantStorage validates a tenant's `storage:` block (ADR 0041).
+func checkTenantStorage(report *Report, file string, tenant model.Tenant, names *storageNameRegistry) {
+	st := tenant.Storage
+	if st == nil {
+		return
+	}
+	if b := st.S3; b != nil {
+		path := "$.storage.s3.bucket"
+		switch {
+		case strings.HasPrefix(b.Bucket, "xn--") || strings.HasPrefix(b.Bucket, "sthree-"):
+			semanticError(report, file, path, "tenant.storage.bucket", fmt.Sprintf("bucket %q uses an S3-reserved prefix", b.Bucket))
+		case strings.HasSuffix(b.Bucket, "-s3alias") || strings.HasSuffix(b.Bucket, "--ol-s3") || strings.HasSuffix(b.Bucket, ".mrap"):
+			semanticError(report, file, path, "tenant.storage.bucket", fmt.Sprintf("bucket %q uses an S3-reserved suffix", b.Bucket))
+		case net.ParseIP(b.Bucket) != nil:
+			semanticError(report, file, path, "tenant.storage.bucket", "bucket name must not look like an IP address")
+		}
+		if owner, dup := names.buckets[b.Bucket]; dup {
+			semanticError(report, file, path, "tenant.storage.bucket_duplicate", fmt.Sprintf("bucket %q is already declared by tenant %q", b.Bucket, owner))
+		} else {
+			names.buckets[b.Bucket] = tenant.ID
+		}
+	}
+	if len(st.AppRoles) == 0 {
+		return
+	}
+	if !contains(tenant.Stacks, "openbao") {
+		semanticError(report, file, "$.storage.approles", "tenant.storage.no_openbao", "storage.approles requires the tenant to consume the `openbao` stack")
+		return
+	}
+	seen := map[string]int{}
+	for i, r := range st.AppRoles {
+		path := fmt.Sprintf("$.storage.approles[%d]", i)
+		if first, dup := seen[r.Name]; dup {
+			semanticError(report, file, path+".name", "tenant.storage.approle_duplicate", fmt.Sprintf("approle %q duplicates approles[%d]", r.Name, first))
+			continue
+		}
+		seen[r.Name] = i
+		role := r.AppRoleName(tenant.ID)
+		if owner, clash := names.roles[role]; clash {
+			semanticError(report, file, path+".name", "tenant.storage.approle_collision", fmt.Sprintf("OpenBao role %q collides with the role of tenant %q; pick another name", role, owner))
+		} else {
+			names.roles[role] = tenant.ID
+		}
+		for j, c := range r.CIDRs {
+			p, err := netip.ParsePrefix(c)
+			if err != nil || !p.Addr().Is4() {
+				semanticError(report, file, fmt.Sprintf("%s.cidrs[%d]", path, j), "tenant.storage.cidr", fmt.Sprintf("%q is not an IPv4 CIDR", c))
+				continue
+			}
+			if p.Bits() < 16 {
+				semanticError(report, file, fmt.Sprintf("%s.cidrs[%d]", path, j), "tenant.storage.cidr", fmt.Sprintf("%q is wider than /16; bind a role to the node(s) that run the service", c))
+			}
+		}
+	}
 }
 
 func checkTenantDatabase(report *Report, file string, tenant model.Tenant) {

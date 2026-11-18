@@ -237,3 +237,45 @@ func TestValidateTenantPostgRESTForms(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateTenantStorage(t *testing.T) {
+	t.Parallel()
+	validator := New()
+	doc := `
+version: 1
+id: hgstg
+display_name: HG staging
+base_domain: hgstg.example.com
+stacks: [openbao]
+storage:
+  s3:
+    bucket: hg-lims-hgstg-data
+    cors_origins: [https://lims.hgstg.example.com]
+  approles:
+    - { name: lims-worker, cidrs: [100.64.0.11/32], kv_read: ["storage-*"], secret_id_ttl_days: 90 }
+`
+	_, issues, err := validator.ValidateYAML("tenant.v1.json", []byte(doc))
+	if err != nil {
+		t.Fatalf("ValidateYAML() error = %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("issues = %#v", issues)
+	}
+	for name, repl := range map[string][2]string{
+		"uppercase bucket":     {"bucket: hg-lims-hgstg-data", "bucket: Hg_Lims"},
+		"http origin":          {"https://lims.hgstg.example.com", "http://lims.hgstg.example.com"},
+		"wildcard origin":      {"https://lims.hgstg.example.com", "https://*.example.com"},
+		"approle without cidr": {"cidrs: [100.64.0.11/32]", "cidrs: []"},
+		"kv_read escapes":      {`kv_read: ["storage-*"]`, `kv_read: ["../other/*"]`},
+		"kv_read mid glob":     {`kv_read: ["storage-*"]`, `kv_read: ["st*age"]`},
+	} {
+		bad := strings.Replace(doc, repl[0], repl[1], 1)
+		_, issues, err := validator.ValidateYAML("tenant.v1.json", []byte(bad))
+		if err != nil {
+			t.Fatalf("%s: ValidateYAML() error = %v", name, err)
+		}
+		if len(issues) == 0 {
+			t.Errorf("%s: expected a validation issue", name)
+		}
+	}
+}

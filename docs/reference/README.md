@@ -15,6 +15,9 @@ consult these while working, rather than reading them end to end.
 - [Per-stack storage and retention](storage.md) — the `storage:` descriptor
   block, dedicated EBS volumes, the `retention:` block, and migrating a stack
   off a shared named volume.
+- [Tenant `storage:` (S3 + AppRoles)](tenant-storage.md) — a tenant's S3 bucket,
+  its IAM credential mirrored to OpenBao, and the narrow `svc-<id>-<name>`
+  AppRole that reads it.
 - [Monitoring](monitoring.md) — what's scraped, bundled dashboards, the alert
   rule catalog, and wiring up notifications.
 - [Tenant RBAC](rbac.md) — the four additive groups, what each grants across

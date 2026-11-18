@@ -779,3 +779,55 @@ func TestCheckTenantForwardsSSHHostKeysAndAlias(t *testing.T) {
 	badHost.Target = "-bad.prod.mksrv:22" // would be an invalid hostKeyAlias for the client
 	assertIssueCode(t, mk(badHost), "forward.host_key_alias")
 }
+
+func TestCheckTenantStorage(t *testing.T) {
+	t.Parallel()
+	role := model.TenantAppRole{Name: "lims-worker", CIDRs: []string{"100.64.0.11/32"}}
+	mk := func(id string, st *model.TenantStorage, stacks ...string) model.Tenant {
+		return model.Tenant{ID: id, Stacks: stacks, Storage: st}
+	}
+	names := func() *storageNameRegistry {
+		return &storageNameRegistry{buckets: map[string]string{}, roles: map[string]string{"svc-hg": "hg", "svc-hgstg": "hgstg", "svc-hgstg-lims": "hgstg"}}
+	}
+	check := func(tn model.Tenant, reg *storageNameRegistry) Report {
+		var r Report
+		checkTenantStorage(&r, "t.yaml", tn, reg)
+		return r
+	}
+
+	ok := mk("hgstg", &model.TenantStorage{
+		S3:       &model.TenantS3Bucket{Bucket: "hg-lims-hgstg-data"},
+		AppRoles: []model.TenantAppRole{role},
+	}, "openbao")
+	if r := check(ok, names()); len(r.Issues) != 0 {
+		t.Fatalf("valid storage rejected: %#v", r.Issues)
+	}
+
+	// approles need the openbao stack.
+	noBao := ok
+	noBao.Stacks = nil
+	assertIssueCode(t, check(noBao, names()), "tenant.storage.no_openbao")
+
+	// Bucket names are global: a second tenant cannot reuse one.
+	reg := names()
+	check(ok, reg)
+	assertIssueCode(t, check(mk("other", &model.TenantStorage{S3: &model.TenantS3Bucket{Bucket: "hg-lims-hgstg-data"}}), reg), "tenant.storage.bucket_duplicate")
+
+	for _, b := range []string{"xn--abc", "mine-s3alias", "x--ol-s3", "192.168.5.4"} {
+		assertIssueCode(t, check(mk("t", &model.TenantStorage{S3: &model.TenantS3Bucket{Bucket: b}}), names()), "tenant.storage.bucket")
+	}
+
+	// svc-hgstg-lims (approle "lims" of tenant hgstg) vs tenant "hgstg-lims"'s own svc-<id>.
+	clash := mk("hgstg", &model.TenantStorage{AppRoles: []model.TenantAppRole{{Name: "lims", CIDRs: []string{"100.64.0.11/32"}}}}, "openbao")
+	reg = names()
+	reg.roles["svc-hgstg-lims"] = "hgstg-lims" // another tenant owns this role name
+	assertIssueCode(t, check(clash, reg), "tenant.storage.approle_collision")
+
+	dup := mk("hgstg", &model.TenantStorage{AppRoles: []model.TenantAppRole{role, role}}, "openbao")
+	assertIssueCode(t, check(dup, names()), "tenant.storage.approle_duplicate")
+
+	for _, c := range []string{"not-a-cidr", "100.64.0.0/8", "fd00::/64"} {
+		bad := mk("hgstg", &model.TenantStorage{AppRoles: []model.TenantAppRole{{Name: "w", CIDRs: []string{c}}}}, "openbao")
+		assertIssueCode(t, check(bad, names()), "tenant.storage.cidr")
+	}
+}

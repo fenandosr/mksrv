@@ -134,11 +134,22 @@ type TenantMailSMTPOutput struct {
 	FromAddress     string `json:"from_address"`
 }
 
+// TenantStorageS3Output is one tenant's S3 bucket and its dedicated IAM access
+// key (ADR 0041). Present only for tenants that declare storage.s3.
+type TenantStorageS3Output struct {
+	Bucket          string `json:"bucket"`
+	Region          string `json:"region"`
+	AccessKeyID     string `json:"access_key_id"`
+	SecretAccessKey string `json:"secret_access_key"`
+}
+
 // Outputs is the decoded outputs.json.
 type Outputs struct {
 	Hosts          map[string]HostOutput           `json:"hosts"`
 	MailSMTP       MailSMTPOutput                  `json:"mail_smtp"`
 	TenantMailSMTP map[string]TenantMailSMTPOutput `json:"tenant_mail_smtp"`
+	// TenantStorageS3 is keyed by tenant id (ADR 0041).
+	TenantStorageS3 map[string]TenantStorageS3Output `json:"tenant_storage_s3"`
 }
 
 // LoadOutputs reads and decodes <root>/.mksrv/infra/outputs.json.

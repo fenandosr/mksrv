@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add (storage, ADR 0041): a tenant may declare `storage:` — `s3` creates a
+  bucket (Block Public Access, BucketOwnerEnforced, SSE-S3, TLS-only policy,
+  CORS from `cors_origins`, lifecycle that only aborts incomplete multipart
+  uploads) and a dedicated IAM user whose key `tenant apply` mirrors to SSM and
+  to `kv/tenants/<id>/storage-s3`; `approles` creates narrow read-only
+  `svc-<id>-<name>` AppRoles bound to CIDRs with a 90-day SecretID TTL. New
+  `mksrv tenant secret-id <id> --approle <name>` delivers its SecretID wrapped.
+  `validate` checks bucket/role-name uniqueness across tenants.
+
 - Fix (identity): the `configd` image moves from `v0.1.0` (2026-09-03) to the
   immutable `sha-db410a2` build, the first one that emits `ssh.user` and
   `ssh.hostKeys` (earlier images silently drop them from the signed clientconfig).

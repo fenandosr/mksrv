@@ -162,6 +162,7 @@ type Tenant struct {
 	DNS         []TenantDNSRecord   `json:"dns,omitempty"`
 	MeshRoutes  []string            `json:"mesh_routes,omitempty"`
 	Web         []TenantWebEndpoint `json:"web,omitempty"`
+	Storage     *TenantStorage      `json:"storage,omitempty"`
 	DeviceLimit int                 `json:"device_limit,omitempty"`
 	Branding    Branding            `json:"branding,omitempty"`
 	// LocalHosts is infrastructure the tenant owns and runs directly — a
@@ -478,6 +479,82 @@ type TenantForward struct {
 	// member hardcodes the port in their own ~/.ssh/config Host block instead
 	// of relying on the app to rewrite it on every reconnect.
 	ListenPort int `json:"listen_port"`
+}
+
+// TenantStorage declares the tenant's object storage and the OpenBao AppRoles
+// that read its credentials (ADR 0041). Not to be confused with a stack
+// descriptor's `storage:` (dedicated EBS volumes, ADR 0014).
+type TenantStorage struct {
+	// S3 is one AWS S3 bucket in the deployment's account and region, plus the
+	// dedicated IAM user (and its access key) that reads and writes it.
+	S3 *TenantS3Bucket `json:"s3,omitempty"`
+	// AppRoles are extra, narrow OpenBao AppRoles (`svc-<id>-<name>`) for a
+	// tenant-owned service that must read some of the tenant's KV secrets
+	// (the S3 credential, typically) without the broader `-dev` policy.
+	AppRoles []TenantAppRole `json:"approles,omitempty"`
+}
+
+// TenantS3Bucket is the declarative shape of a tenant's S3 bucket. Everything
+// not listed is fixed: Block Public Access on, BucketOwnerEnforced, SSE-S3, no
+// versioning, a deny-without-TLS bucket policy, and a lifecycle with only the
+// abort-incomplete-multipart rule (never transitions or expirations).
+type TenantS3Bucket struct {
+	Bucket string `json:"bucket"`
+	// CORSOrigins are the browser origins allowed to PUT/GET/HEAD directly
+	// against the bucket (presigned multipart uploads). Empty = no CORS.
+	CORSOrigins []string `json:"cors_origins,omitempty"`
+	// AbortMultipartDays is the DaysAfterInitiation of the multipart-abort
+	// lifecycle rule. Zero means the default (3).
+	AbortMultipartDays int `json:"abort_multipart_days,omitempty"`
+}
+
+// DefaultAbortMultipartDays is TenantS3Bucket.AbortMultipartDays when unset.
+const DefaultAbortMultipartDays = 3
+
+func (b TenantS3Bucket) AbortDays() int {
+	if b.AbortMultipartDays > 0 {
+		return b.AbortMultipartDays
+	}
+	return DefaultAbortMultipartDays
+}
+
+// TenantAppRole is one extra AppRole, `svc-<tenant>-<name>`, read-only over
+// the listed paths of the tenant's own KV subtree and bound to CIDRs.
+type TenantAppRole struct {
+	Name string `json:"name"`
+	// CIDRs bind both the SecretID and the tokens it mints (required: a worker
+	// outside the tailnet node it was issued for cannot use a leaked SecretID).
+	CIDRs []string `json:"cidrs"`
+	// KVRead lists secret names (a trailing `*` allowed) under
+	// kv/tenants/<id>/ the role may read. Empty means ["storage-*"].
+	KVRead []string `json:"kv_read,omitempty"`
+	// SecretIDTTLDays is the default lifetime of a SecretID minted for this
+	// role. Zero means the default (90).
+	SecretIDTTLDays int `json:"secret_id_ttl_days,omitempty"`
+}
+
+// DefaultAppRoleSecretIDTTLDays aligns SecretID rotation with the 90-day
+// rotation of the S3 access key.
+const DefaultAppRoleSecretIDTTLDays = 90
+
+func (r TenantAppRole) KVReadPaths() []string {
+	if len(r.KVRead) > 0 {
+		return r.KVRead
+	}
+	return []string{"storage-*"}
+}
+
+func (r TenantAppRole) SecretIDTTL() int {
+	if r.SecretIDTTLDays > 0 {
+		return r.SecretIDTTLDays
+	}
+	return DefaultAppRoleSecretIDTTLDays
+}
+
+// AppRoleName is the OpenBao role (and policy) name for this tenant's role.
+// svc-<id>-<name>, so it shares the `svc-` prefix with the Transit-only tier.
+func (r TenantAppRole) AppRoleName(tenantID string) string {
+	return "svc-" + tenantID + "-" + r.Name
 }
 
 // TenantDNSRecord is one record mksrv writes into the tenant's own hosted zone
