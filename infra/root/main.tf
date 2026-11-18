@@ -684,7 +684,7 @@ resource "aws_s3_bucket_policy" "tenant_tls_only" {
       Effect    = "Deny"
       Principal = "*"
       Action    = "s3:*"
-      Resource  = [
+      Resource = [
         aws_s3_bucket.tenant[each.key].arn,
         "${aws_s3_bucket.tenant[each.key].arn}/*",
       ]
