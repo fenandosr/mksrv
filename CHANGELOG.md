@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fix (openbao, ADR 0042): OpenBao runs with host networking. tailscaled's
+  `ts-postrouting` MASQUERADE rewrote every tailnet client's source to the podman
+  bridge gateway (`10.89.1.1`), so `token_bound_cidrs`/`secret_id_bound_cidrs`
+  rejected legitimate logins and the audit log lost real addresses. Listeners now
+  bind explicit addresses (VPC, loopback, tailnet) and a rendered `firewall.sh`
+  (ExecStartPre) opens 8200/8201 in firewalld with source-scoped rich rules. The
+  bridge network unit is no longer rendered. Roll out one node at a time.
+
 - Add (storage, ADR 0041): a tenant may declare `storage:` — `s3` creates a
   bucket (Block Public Access, BucketOwnerEnforced, SSE-S3, TLS-only policy,
   CORS from `cors_origins`, lifecycle that only aborts incomplete multipart

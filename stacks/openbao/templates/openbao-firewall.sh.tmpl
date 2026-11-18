@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Rendered by mksrv; run by mksrv-openbao.service as ExecStartPre (ADR 0042).
+#
+# OpenBao runs with host networking, so its ports are ordinary INPUT traffic and
+# firewalld's `public` zone (ssh only) would drop them. This opens exactly:
+#   8200/tcp  from the fleet's VPC addresses and the tailnet range
+#   8201/tcp  from the other OpenBao (Raft) nodes only
+# Rich rules with a source, not a bare port, so nothing else gains access.
+# Idempotent: re-adding an existing rule is a no-op (exit 0). Both the runtime
+# and the permanent configuration are written, so a `firewall-cmd --reload` or a
+# reboot keeps them.
+set -euo pipefail
+
+if ! systemctl is-active --quiet firewalld; then
+  echo "firewalld not active; nothing to open"
+  exit 0
+fi
+
+rule() {
+  firewall-cmd --zone=public --add-rich-rule="$1" >/dev/null
+  firewall-cmd --permanent --zone=public --add-rich-rule="$1" >/dev/null
+}
+
+# API: every fleet host (VPC) — Prometheus, the mksrv operator, other nodes.
+{{- range $name, $ip := .Peers }}
+rule 'rule family="ipv4" source address="{{ $ip }}" port port="8200" protocol="tcp" accept'
+{{- end }}
+# API: the tailnet (tenant nodes such as ome; Headscale ACL is the real gate).
+rule 'rule family="ipv4" source address="100.64.0.0/10" port port="8200" protocol="tcp" accept'
+# Raft cluster traffic: only the other OpenBao nodes.
+{{- range .StackPeers "openbao" }}
+rule 'rule family="ipv4" source address="{{ .PrivateIP }}" port port="8201" protocol="tcp" accept'
+{{- end }}
+echo "openbao firewall rules in place"
