@@ -843,6 +843,11 @@ func TestStackRendersOpenBaoCluster(t *testing.T) {
 		`region     = "us-east-1"`,
 		`kms_key_id = "arn:aws:kms:us-east-1:0:key/abc-123"`,
 		`api_addr     = "http://10.20.0.22:8200"`,
+		// Host networking (ADR 0042): explicit listeners, never 0.0.0.0.
+		`address         = "10.20.0.22:8200"`,
+		`cluster_address = "10.20.0.22:8201"`,
+		`address     = "127.0.0.1:8200"`,
+		`address     = "100.64.0.22:8200"`,
 		`unauthenticated_metrics_access = true`,
 		`prometheus_retention_time = "24h"`,
 	} {
@@ -853,16 +858,51 @@ func TestStackRendersOpenBaoCluster(t *testing.T) {
 	if strings.Count(hcl, "retry_join") != 3 {
 		t.Fatalf("openbao.hcl want 3 retry_join, got %d:\n%s", strings.Count(hcl, "retry_join"), hcl)
 	}
+	if strings.Contains(hcl, `"0.0.0.0`) {
+		t.Fatalf("openbao.hcl must not bind 0.0.0.0:\n%s", hcl)
+	}
+	if n := strings.Count(hcl, `listener "tcp"`); n != 3 {
+		t.Fatalf("openbao.hcl want 3 listeners (vpc, loopback, tailnet), got %d", n)
+	}
 	unit := string(files["/etc/containers/systemd/mksrv-openbao.container"])
 	for _, want := range []string{
 		"AddCapability=IPC_LOCK",
 		"Volume=/var/lib/mksrv/vol/baoraft:/openbao/data:Z,U",
-		"PublishPort=10.20.0.22:8200:8200",
-		"PublishPort=100.64.0.22:8200:8200",
+		"Network=host",
+		"ExecStartPre=/usr/bin/bash /var/lib/mksrv/stacks/openbao/firewall.sh",
 	} {
 		if !strings.Contains(unit, want) {
 			t.Fatalf("openbao unit missing %q:\n%s", want, unit)
 		}
+	}
+	// A published port is DNAT'd and then MASQUERADEd by tailscaled for tailnet
+	// clients; the unit must not publish anything or use the bridge network.
+	for _, bad := range []string{"PublishPort=", "mksrv-openbao.network"} {
+		if strings.Contains(unit, bad) {
+			t.Fatalf("openbao unit must not contain %q:\n%s", bad, unit)
+		}
+	}
+	if _, ok := files["/etc/containers/systemd/mksrv-openbao.network"]; ok {
+		t.Fatal("openbao must not render a bridge network unit any more")
+	}
+
+	fw := string(files["/var/lib/mksrv/stacks/openbao/firewall.sh"])
+	for _, want := range []string{
+		// Raft only from the other two OpenBao nodes, never from this host or anyone else.
+		`source address="10.20.0.21" port port="8201" protocol="tcp" accept`,
+		`source address="10.20.0.23" port port="8201" protocol="tcp" accept`,
+		`source address="100.64.0.0/10" port port="8200" protocol="tcp" accept`,
+		"--add-rich-rule", "--permanent",
+	} {
+		if !strings.Contains(fw, want) {
+			t.Fatalf("firewall.sh missing %q:\n%s", want, fw)
+		}
+	}
+	if strings.Contains(fw, `source address="10.20.0.22" port port="8201"`) {
+		t.Fatalf("firewall.sh must not open 8201 to this host itself:\n%s", fw)
+	}
+	if strings.Contains(fw, "--add-port") {
+		t.Fatalf("firewall.sh must use source-scoped rich rules, not bare ports:\n%s", fw)
 	}
 }
 

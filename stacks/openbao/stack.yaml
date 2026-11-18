@@ -8,7 +8,6 @@ depends_on: [identity]
 apps:
   - name: openbao
     image: ghcr.io/openbao/openbao:2.6.1
-networks: [mksrv-openbao]
 tailnet_ports: [8200]
 resources:
   min_ram_mb: 512
@@ -17,8 +16,8 @@ storage:
   - name: baoraft
     gb: 10
 templates:
-  - src: templates/mksrv-openbao.network.tmpl
-    dst: /etc/containers/systemd/mksrv-openbao.network
+  - src: templates/openbao-firewall.sh.tmpl
+    dst: /var/lib/mksrv/stacks/openbao/firewall.sh
     scope: shared
   - src: templates/openbao.hcl.tmpl
     dst: /var/lib/mksrv/stacks/openbao/openbao.hcl

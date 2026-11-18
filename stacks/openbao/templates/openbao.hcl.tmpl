@@ -16,16 +16,43 @@ storage "raft" {
 {{- end }}
 }
 
+# The container runs with host networking (ADR 0042), so each listener must bind
+# an explicit address instead of 0.0.0.0: the VPC address (fleet + Raft), the
+# tailnet address (mesh clients) and loopback (`mksrv` runs `bao` inside the
+# container against 127.0.0.1). With host networking the client's real source
+# address reaches OpenBao, which token_bound_cidrs / secret_id_bound_cidrs and
+# the audit log depend on — a published port behind tailscaled's MASQUERADE
+# showed every tailnet client as the podman bridge gateway.
+#
+# /v1/sys/metrics without a token — acceptable on the same intra-VPC boundary
+# that already makes the rest of these listeners plaintext (M23 phase 2);
+# Prometheus has no other way to reach a scoped metrics token.
 listener "tcp" {
-  address     = "0.0.0.0:8200"
-  tls_disable = 1
-  # /v1/sys/metrics without a token — acceptable on the same intra-VPC
-  # boundary that already makes the rest of this listener plaintext (M23
-  # phase 2); Prometheus has no other way to reach a scoped metrics token.
+  address         = "{{ .Host.PrivateIP }}:8200"
+  cluster_address = "{{ .Host.PrivateIP }}:8201"
+  tls_disable     = 1
   telemetry {
     unauthenticated_metrics_access = true
   }
 }
+
+listener "tcp" {
+  address     = "127.0.0.1:8200"
+  tls_disable = 1
+  telemetry {
+    unauthenticated_metrics_access = true
+  }
+}
+{{- if .Host.TailnetIP }}
+
+listener "tcp" {
+  address     = "{{ .Host.TailnetIP }}:8200"
+  tls_disable = 1
+  telemetry {
+    unauthenticated_metrics_access = true
+  }
+}
+{{- end }}
 
 telemetry {
   prometheus_retention_time = "24h"
