@@ -268,6 +268,9 @@ storage:
 		"approle without cidr": {"cidrs: [100.64.0.11/32]", "cidrs: []"},
 		"kv_read escapes":      {`kv_read: ["storage-*"]`, `kv_read: ["../other/*"]`},
 		"kv_read mid glob":     {`kv_read: ["storage-*"]`, `kv_read: ["st*age"]`},
+		"kv_read slash":        {`kv_read: ["storage-*"]`, `kv_read: ["a/b"]`},
+		"kv_read upper":        {`kv_read: ["storage-*"]`, `kv_read: ["Storage"]`},
+		"kv_read leading _":    {`kv_read: ["storage-*"]`, `kv_read: ["_x"]`},
 	} {
 		bad := strings.Replace(doc, repl[0], repl[1], 1)
 		_, issues, err := validator.ValidateYAML("tenant.v1.json", []byte(bad))
@@ -277,5 +280,26 @@ storage:
 		if len(issues) == 0 {
 			t.Errorf("%s: expected a validation issue", name)
 		}
+	}
+}
+
+func TestValidateTenantKVReadUnderscore(t *testing.T) {
+	t.Parallel()
+	doc := `
+version: 1
+id: hgstg
+display_name: HG staging
+base_domain: hgstg.example.com
+stacks: [openbao]
+storage:
+  approles:
+    - { name: airflow, cidrs: [100.64.0.11/32], kv_read: ["database-hgstg_airflow", "airflow-api", "storage-*"] }
+`
+	_, issues, err := New().ValidateYAML("tenant.v1.json", []byte(doc))
+	if err != nil {
+		t.Fatalf("ValidateYAML() error = %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("a database service-role secret name must validate: %#v", issues)
 	}
 }

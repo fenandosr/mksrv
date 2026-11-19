@@ -526,7 +526,10 @@ type TenantAppRole struct {
 	// outside the tailnet node it was issued for cannot use a leaked SecretID).
 	CIDRs []string `json:"cidrs"`
 	// KVRead lists secret names (a trailing `*` allowed) under
-	// kv/tenants/<id>/ the role may read. Empty means ["storage-*"].
+	// kv/tenants/<id>/ the role may read. Names are [a-z0-9_-] (underscore
+	// because a database service role's secret is `database-<role>`, e.g.
+	// `database-hgstg_airflow`). Empty means ["storage-*"]; an explicit list
+	// replaces that default, so include "storage-*" to keep it.
 	KVRead []string `json:"kv_read,omitempty"`
 	// SecretIDTTLDays is the default lifetime of a SecretID minted for this
 	// role. Zero means the default (90).

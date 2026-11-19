@@ -128,3 +128,22 @@ func TestTenantHasAppRole(t *testing.T) {
 		t.Fatal("tenantHasAppRole mismatch")
 	}
 }
+
+func TestTenantAppRolePolicyMultipleNamesWithUnderscore(t *testing.T) {
+	t.Parallel()
+	r := model.TenantAppRole{Name: "airflow", CIDRs: []string{"100.64.0.11/32"},
+		KVRead: []string{"database-hgstg_airflow", "airflow-api"}}
+	hcl := tenantAppRolePolicyHCL("hgstg", r)
+	for _, want := range []string{
+		"path \"kv/data/tenants/hgstg/database-hgstg_airflow\" {\n  capabilities = [\"read\"]\n}\n",
+		"path \"kv/data/tenants/hgstg/airflow-api\" {\n  capabilities = [\"read\"]\n}\n",
+	} {
+		if !strings.Contains(hcl, want) {
+			t.Fatalf("policy missing %q:\n%s", want, hcl)
+		}
+	}
+	// An explicit list replaces the storage-* default.
+	if strings.Contains(hcl, "storage-") {
+		t.Fatalf("explicit kv_read must replace the default:\n%s", hcl)
+	}
+}

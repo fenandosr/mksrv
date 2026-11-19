@@ -12,7 +12,7 @@ Schema: `schemas/tenant.v1.json`. Not the stack-descriptor `storage:` of
 | `storage.s3.abort_multipart_days` | abort incomplete multipart uploads after N days | 3 |
 | `storage.approles[].name` | role is `svc-<tenant>-<name>` | required |
 | `storage.approles[].cidrs` | bind SecretID and tokens to these IPv4 CIDRs (≤ /16 wide) | required |
-| `storage.approles[].kv_read` | secret names under `kv/tenants/<id>/` the role may read; trailing `*` allowed | `["storage-*"]` |
+| `storage.approles[].kv_read` | secret names (`[a-z0-9_-]`, trailing `*` allowed) under `kv/tenants/<id>/` the role may read, e.g. `database-hgstg_airflow`; an explicit list **replaces** the default, so keep `storage-*` if you still need it | `["storage-*"]` |
 | `storage.approles[].secret_id_ttl_days` | lifetime of a minted SecretID | 90 |
 
 ## Workflow
