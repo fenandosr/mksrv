@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add (database, ADR 0039 addendum): opt-in `database.postgrest.publish_authenticator`
+  mirrors the PostgREST authenticator credential (`<id>_auth`) to
+  `kv/tenants/<id>/database-<id>_auth` (deleted again when turned off). Off by
+  default: the authenticator can `SET ROLE` to every tenant role, admin included.
+
 - Fix (openbao, ADR 0042): OpenBao runs with host networking. tailscaled's
   `ts-postrouting` MASQUERADE rewrote every tailnet client's source to the podman
   bridge gateway (`10.89.1.1`), so `token_bound_cidrs`/`secret_id_bound_cidrs`

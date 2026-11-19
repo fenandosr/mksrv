@@ -349,6 +349,20 @@ type PostgRESTConfig struct {
 	// current_setting('app.settings.<key>', true). `oidc_issuer` defaults to the
 	// tenant realm's issuer; declaring it here overrides that default.
 	AppSettings map[string]string `json:"app_settings,omitempty"`
+	// PublishAuthenticator mirrors the PostgREST authenticator's credential
+	// (<id>_auth) to kv/tenants/<id>/database-<id>_auth. Opt-in and off by
+	// default: that role is LOGIN NOINHERIT and the only one granted membership
+	// in every NOLOGIN role of the tenant (admin included), so whoever holds it
+	// can SET ROLE to any of them. Only for a tenant service that must act as
+	// PostgREST does (connect, then SET ROLE per request).
+	PublishAuthenticator bool `json:"publish_authenticator,omitempty"`
+}
+
+// PublishesAuthenticator reports whether the tenant opted in to publishing its
+// PostgREST authenticator credential to OpenBao. Requires PostgREST enabled:
+// without it the <id>_auth role does not exist.
+func (t Tenant) PublishesAuthenticator() bool {
+	return t.PostgRESTEnabled() && t.PostgRESTSettings().PublishAuthenticator
 }
 
 // UnmarshalJSON accepts `true`/`false` or an object.

@@ -303,3 +303,31 @@ storage:
 		t.Fatalf("a database service-role secret name must validate: %#v", issues)
 	}
 }
+
+func TestValidateTenantPublishAuthenticator(t *testing.T) {
+	t.Parallel()
+	validator := New()
+	doc := `
+version: 1
+id: hgstg
+display_name: HG staging
+base_domain: hgstg.example.com
+stacks: [database]
+database:
+  postgrest:
+    schemas: [api]
+    publish_authenticator: true
+`
+	_, issues, err := validator.ValidateYAML("tenant.v1.json", []byte(doc))
+	if err != nil || len(issues) != 0 {
+		t.Fatalf("publish_authenticator must validate: err=%v issues=%#v", err, issues)
+	}
+	bad := strings.Replace(doc, "publish_authenticator: true", "publish_authenticator: yes please", 1)
+	_, issues, err = validator.ValidateYAML("tenant.v1.json", []byte(bad))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) == 0 {
+		t.Fatal("a non-boolean publish_authenticator must be rejected")
+	}
+}
