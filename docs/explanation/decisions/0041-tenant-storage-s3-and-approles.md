@@ -76,7 +76,7 @@ redeployed. No mksrv command wraps the replace step yet.
 
 Each entry creates policy and AppRole `svc-<tenant>-<name>` (the `svc-` prefix
 shared with the Transit-only tier): read-only on `kv/data/tenants/<id>/<name>`
-for each `kv_read` entry (the schema forbids anything but `[a-z0-9-]` and an
+for each `kv_read` entry (the schema forbids anything but `[a-z0-9_-]` and an
 optional trailing `*`, so a role cannot leave the tenant's own subtree), tokens
 1 h / 4 h, and **both** `token_bound_cidrs` and `secret_id_bound_cidrs` set to
 the declared CIDRs, `secret_id_ttl` 90 d (aligned with the key rotation),
