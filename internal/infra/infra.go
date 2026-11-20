@@ -143,6 +143,14 @@ type TenantStorageS3Output struct {
 	SecretAccessKey string `json:"secret_access_key"`
 }
 
+// TenantZoneOutput is a Route 53 hosted zone mksrv created for a tenant
+// (dns_override.create_zone, ADR 0043): its id, and the name servers the
+// domain's registrar must delegate to.
+type TenantZoneOutput struct {
+	ZoneID      string   `json:"zone_id"`
+	NameServers []string `json:"name_servers"`
+}
+
 // Outputs is the decoded outputs.json.
 type Outputs struct {
 	Hosts          map[string]HostOutput           `json:"hosts"`
@@ -150,6 +158,8 @@ type Outputs struct {
 	TenantMailSMTP map[string]TenantMailSMTPOutput `json:"tenant_mail_smtp"`
 	// TenantStorageS3 is keyed by tenant id (ADR 0041).
 	TenantStorageS3 map[string]TenantStorageS3Output `json:"tenant_storage_s3"`
+	// TenantZones is keyed by tenant id; only tenants with create_zone (ADR 0043).
+	TenantZones map[string]TenantZoneOutput `json:"tenant_zones"`
 }
 
 // LoadOutputs reads and decodes <root>/.mksrv/infra/outputs.json.

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fenandosr/mksrv/internal/infra"
 	"github.com/fenandosr/mksrv/internal/model"
 )
 
@@ -179,5 +180,23 @@ func TestAuthenticatorSecretFieldsUseTheAuthRole(t *testing.T) {
 		if !strings.Contains(fields, want) {
 			t.Fatalf("fields missing %q: %s", want, fields)
 		}
+	}
+}
+
+func TestTenantZoneIDPrefersDeclaredThenCreated(t *testing.T) {
+	t.Parallel()
+	f := &fleet{outputs: infra.Outputs{TenantZones: map[string]infra.TenantZoneOutput{"scinugget": {ZoneID: "ZCREATED"}}}}
+	if got := f.tenantZoneID("x", model.Tenant{}); got != "" {
+		t.Fatalf("no override = %q", got)
+	}
+	if got := f.tenantZoneID("hg", model.Tenant{DNSOverride: &model.DNSOverride{Provider: "route53", ZoneID: "ZDECL"}}); got != "ZDECL" {
+		t.Fatalf("declared = %q", got)
+	}
+	if got := f.tenantZoneID("scinugget", model.Tenant{DNSOverride: &model.DNSOverride{Provider: "route53", CreateZone: true}}); got != "ZCREATED" {
+		t.Fatalf("created = %q", got)
+	}
+	// create_zone set but the zone does not exist yet (infra not applied): empty, not a panic.
+	if got := f.tenantZoneID("other", model.Tenant{DNSOverride: &model.DNSOverride{Provider: "route53", CreateZone: true}}); got != "" {
+		t.Fatalf("not yet created = %q", got)
 	}
 }

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add (dns, ADR 0043): `dns_override.create_zone: true` makes mksrv create and
+  own the Route 53 hosted zone for a tenant's domain (route53 only, exclusive
+  with `zone_id`, `prevent_destroy`). `web:`, `mail:` and `dns:` accept a created
+  zone; the name servers to delegate at the registrar are printed by `apply` and
+  written to the `tenant_zones` output. Existing tenants are unchanged.
+
 - Add (database, ADR 0039 addendum): opt-in `database.postgrest.publish_authenticator`
   mirrors the PostgREST authenticator credential (`<id>_auth`) to
   `kv/tenants/<id>/database-<id>_auth` (deleted again when turned off). Off by

@@ -180,6 +180,7 @@ func semanticChecks(data *Data, report *Report, options ValidateOptions) {
 			}
 		}
 		checkTenantForwards(report, tenantFile, tenant)
+		checkTenantDNSOverride(report, tenantFile, tenant)
 		checkTenantDNS(report, tenantFile, tenant)
 		checkTenantMeshRoutes(report, tenantFile, tenant)
 		checkTenantWeb(report, tenantFile, tenant)
@@ -341,12 +342,27 @@ func checkSSHHostKeys(report *Report, file, path string, keys []string) {
 	}
 }
 
+// checkTenantDNSOverride validates dns_override.create_zone (ADR 0043): only
+// with route53, never together with an explicit zone_id.
+func checkTenantDNSOverride(report *Report, file string, tenant model.Tenant) {
+	o := tenant.DNSOverride
+	if o == nil || !o.CreateZone {
+		return
+	}
+	if o.Provider != "route53" {
+		semanticError(report, file, "$.dns_override.create_zone", "tenant.dns.create_zone_provider", "create_zone is only supported with provider route53")
+	}
+	if strings.TrimSpace(o.ZoneID) != "" {
+		semanticError(report, file, "$.dns_override.create_zone", "tenant.dns.create_zone_conflict", "create_zone and zone_id are mutually exclusive: mksrv either adopts an existing zone or creates one")
+	}
+}
+
 func checkTenantDNS(report *Report, file string, tenant model.Tenant) {
 	if len(tenant.DNS) == 0 {
 		return
 	}
-	if tenant.DNSOverride == nil || tenant.DNSOverride.Provider != "route53" || strings.TrimSpace(tenant.DNSOverride.ZoneID) == "" {
-		semanticError(report, file, "$.dns", "tenant.dns.no_zone", "dns records require dns_override with provider route53 and a zone_id")
+	if !tenant.DNSOverride.HasZone() {
+		semanticError(report, file, "$.dns", "tenant.dns.no_zone", "dns records require dns_override with provider route53 and a zone_id (or create_zone: true)")
 		return
 	}
 	for i, rec := range tenant.DNS {
@@ -383,8 +399,8 @@ func checkTenantWeb(report *Report, file string, tenant model.Tenant) {
 	// A tenant with no dns_override at all lives under the operator root domain
 	// (domain.outside_root enforces it) and its web hostnames are published in
 	// the operator zone. Any other override must be a route53 zone mksrv writes.
-	if tenant.DNSOverride != nil && (tenant.DNSOverride.Provider != "route53" || strings.TrimSpace(tenant.DNSOverride.ZoneID) == "") {
-		semanticError(report, file, "$.web", "tenant.web.no_zone", "web endpoints require either no dns_override (hostnames published in the operator zone) or dns_override with provider route53 and a zone_id")
+	if tenant.DNSOverride != nil && !tenant.DNSOverride.HasZone() {
+		semanticError(report, file, "$.web", "tenant.web.no_zone", "web endpoints require either no dns_override (hostnames published in the operator zone) or dns_override with provider route53 and a zone_id (or create_zone: true)")
 		return
 	}
 	dnsNames := make(map[string]bool, len(tenant.DNS))
@@ -449,8 +465,8 @@ func checkTenantMail(report *Report, file string, tenant model.Tenant, mailStack
 		semanticError(report, file, "$.mail.mailboxes", "tenant.mail.no_domain", "mailboxes require at least one domain in mail.domains")
 		return
 	}
-	if tenant.DNSOverride == nil || tenant.DNSOverride.Provider != "route53" || strings.TrimSpace(tenant.DNSOverride.ZoneID) == "" {
-		semanticError(report, file, "$.mail", "tenant.mail.no_zone", "mail requires dns_override with provider route53 and a zone_id")
+	if !tenant.DNSOverride.HasZone() {
+		semanticError(report, file, "$.mail", "tenant.mail.no_zone", "mail requires dns_override with provider route53 and a zone_id (or create_zone: true)")
 		return
 	}
 	if !mailStackAssigned {

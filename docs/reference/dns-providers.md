@@ -15,5 +15,12 @@ A tenant whose `base_domain` is an independent apex sets `dns_override:
 tenant's declared `dns` records into its own zone with `allow_overwrite = false`
 (ADR 0011). Cloudflare and RFC2136 `dns_override` providers remain deferred.
 
+A tenant that brings a domain with no zone yet can ask mksrv to create it with
+`dns_override: {provider: route53, create_zone: true}` instead of a `zone_id`
+([ADR 0043](../explanation/decisions/0043-tenant-managed-dns-zone.md)). After
+`mksrv apply --infra-only` the name servers to set at the registrar are printed
+and written to the `tenant_zones` output. The zone is protected from deletion
+(`prevent_destroy`).
+
 Secrets such as Cloudflare tokens and RFC2136 keys are references only; values
 must resolve from SSM at runtime and must not enter Terraform state or logs.
