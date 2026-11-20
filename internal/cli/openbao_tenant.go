@@ -102,13 +102,23 @@ func dbSecretFields(pg postgresCluster, env, id, user, password string) []string
 	}
 	// The human login role is <id>_login (ADR 0026); the mirrored credential is
 	// the same one in SSM tenant_<id>_password.
-	return []string{
+	fields := []string{
 		"dbname=db_" + id,
 		"username=" + user,
 		"password=" + password,
 		"hosts=" + host,
 		"url=postgres://" + user + ":" + password + "@" + host + "/db_" + id + suffix,
 	}
+	// ADR 0044: on a cluster with a `pgproxy` stack, also publish a single-host
+	// address that always reaches the leader, for clients (an ORM with no
+	// multi-host support) that cannot use `url`.
+	if len(pg.Nodes) > 0 && pg.LeaderProxy != "" {
+		fields = append(fields,
+			"host_single="+pg.LeaderProxy,
+			"url_single=postgres://"+user+":"+password+"@"+pg.LeaderProxy+"/db_"+id,
+		)
+	}
+	return fields
 }
 
 // authenticatorSecretName is the KV entry (under kv/tenants/<id>/) holding the
@@ -148,11 +158,32 @@ func baoKVField(stdout, field string) string {
 	return doc.Data.Data[field]
 }
 
+// kvFieldsCurrent reports whether the stored entry (a `bao kv get -format=json`
+// document) already holds the password AND every `key=value` field. A field that
+// is new (for example `url_single`, ADR 0044) or changed makes the entry stale,
+// so it is rewritten once; otherwise nothing is written (KV v2 keeps a version
+// per write).
+func kvFieldsCurrent(stdout, password string, fields []string) bool {
+	if baoKVPasswordField(stdout) != password {
+		return false
+	}
+	for _, f := range fields {
+		k, v, ok := strings.Cut(f, "=")
+		if !ok {
+			continue
+		}
+		if baoKVField(stdout, k) != v {
+			return false
+		}
+	}
+	return true
+}
+
 // mirrorTenantSecret writes fields to kv/tenants/<id>/<name>, skipping the write
-// when the stored `password` already matches (KV v2 keeps a version per write).
+// when the stored entry already matches (see kvFieldsCurrent).
 func mirrorTenantSecret(ctx context.Context, client *sshx.Client, token, id, name, password string, fields []string) error {
 	path := "kv/tenants/" + id + "/" + name
-	if cur, _ := client.Run(ctx, baoExec(token, "kv", "get", "-format=json", path)); baoKVPasswordField(cur.Stdout) == password {
+	if cur, _ := client.Run(ctx, baoExec(token, "kv", "get", "-format=json", path)); kvFieldsCurrent(cur.Stdout, password, fields) {
 		return nil
 	}
 	if _, err := client.Run(ctx, baoExec(token, append([]string{"kv", "put", path}, fields...)...)); err != nil {

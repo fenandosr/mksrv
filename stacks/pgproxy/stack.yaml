@@ -1,0 +1,34 @@
+name: pgproxy
+title: Postgres leader endpoint
+description: "HAProxy that follows the Patroni leader (health via Patroni's REST, inside the VPC) so a client that accepts a single host:port always reaches the primary (ADR 0044)"
+targets: [cloud]
+per_tenant: false
+depends_on: [postgres]
+apps:
+  - name: pgproxy
+    image: docker.io/library/haproxy:3.0.30-alpine
+networks: [mksrv-pgproxy]
+secrets: []
+tailnet_ports: [5433]
+resources:
+  min_ram_mb: 64
+  disk_gb: 1
+templates:
+  - src: templates/mksrv-pgproxy.network.tmpl
+    dst: /etc/containers/systemd/mksrv-pgproxy.network
+    scope: shared
+  - src: templates/haproxy.cfg.tmpl
+    dst: /var/lib/mksrv/stacks/pgproxy/haproxy.cfg
+    scope: shared
+  - src: templates/pgproxy.container.tmpl
+    dst: /etc/containers/systemd/mksrv-pgproxy.container
+    scope: shared
+hooks:
+  post_deploy:
+    - run: hooks/restart-on-change.sh
+      scope: shared
+health:
+  - app: pgproxy
+    type: http
+    path: /healthz
+    port: 8404

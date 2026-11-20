@@ -1,0 +1,28 @@
+[Unit]
+Description=mksrv Postgres leader proxy (HAProxy)
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=mksrv-pgproxy
+Image={{ .Image "pgproxy" | default "docker.io/library/haproxy:3.0.30-alpine" }}
+Network=mksrv-pgproxy.network
+# Published like the other tailnet-reachable services: the VPC address (fleet
+# hosts), the tailnet address (tenant nodes) and loopback. Never 0.0.0.0.
+PublishPort={{ .Host.PrivateIP }}:5433:5433
+{{- if .Host.TailnetIP }}
+PublishPort={{ .Host.TailnetIP }}:5433:5433
+{{- end }}
+PublishPort=127.0.0.1:5433:5433
+PublishPort=127.0.0.1:8404:8404
+Volume=/var/lib/mksrv/stacks/pgproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:Z,ro
+HealthCmd=wget -q -O /dev/null http://127.0.0.1:8404/healthz
+HealthInterval=30s
+HealthRetries=3
+HealthStartPeriod=10s
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

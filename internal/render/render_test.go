@@ -1058,3 +1058,71 @@ func TestContextHelpers(t *testing.T) {
 		t.Fatal("Image wrong")
 	}
 }
+
+func TestStackRendersPgproxyFollowingTheLeader(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatalf("Catalog() error = %v", err)
+	}
+	st, ok := catalog["pgproxy"]
+	if !ok {
+		t.Fatal("pgproxy stack missing from the catalog")
+	}
+	if st.PerTenant {
+		t.Fatal("pgproxy is fleet-wide, not per tenant")
+	}
+	ctx := baseContext()
+	ctx.Host.Name = "appd"
+	ctx.Host.PrivateIP = "10.20.100.135"
+	ctx.Host.TailnetIP = "100.64.0.1"
+	ctx.Host.Stacks = []string{"pgproxy"}
+	ctx.StackMembers = map[string][]Member{"postgres": {
+		{Name: "core1", PrivateIP: "10.20.101.188"},
+		{Name: "core2", PrivateIP: "10.20.102.19"},
+		{Name: "core3", PrivateIP: "10.20.100.5"},
+	}}
+	files, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), st, ctx)
+	if err != nil {
+		t.Fatalf("Stack(pgproxy) error = %v", err)
+	}
+
+	cfg := string(files["/var/lib/mksrv/stacks/pgproxy/haproxy.cfg"])
+	for _, want := range []string{
+		"bind *:5433",
+		"option httpchk GET /primary",
+		"http-check expect status 200",
+		"on-marked-down shutdown-sessions",
+		// Data goes to PostgreSQL, the leader is decided by Patroni's REST port.
+		"server core1 10.20.101.188:5432 check port 8008",
+		"server core2 10.20.102.19:5432 check port 8008",
+		"server core3 10.20.100.5:5432 check port 8008",
+		"monitor fail if { nbsrv(postgres_leader) lt 1 }",
+	} {
+		if !strings.Contains(cfg, want) {
+			t.Fatalf("haproxy.cfg missing %q:\n%s", want, cfg)
+		}
+	}
+	if n := strings.Count(cfg, "\n    server "); n != 3 {
+		t.Fatalf("want 3 backend servers, got %d:\n%s", n, cfg)
+	}
+
+	unit := string(files["/etc/containers/systemd/mksrv-pgproxy.container"])
+	for _, want := range []string{
+		"haproxy:3.0.30-alpine",
+		"PublishPort=10.20.100.135:5433:5433",
+		"PublishPort=100.64.0.1:5433:5433",
+		"PublishPort=127.0.0.1:5433:5433",
+		"PublishPort=127.0.0.1:8404:8404",
+	} {
+		if !strings.Contains(unit, want) {
+			t.Fatalf("pgproxy unit missing %q:\n%s", want, unit)
+		}
+	}
+	// Never published on every interface, and Patroni's REST port is not published at all.
+	for _, bad := range []string{"PublishPort=0.0.0.0", "PublishPort=5433", ":8008"} {
+		if strings.Contains(unit, bad) {
+			t.Fatalf("pgproxy unit must not contain %q:\n%s", bad, unit)
+		}
+	}
+}

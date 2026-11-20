@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add (postgres, ADR 0044): the `pgproxy` stack — HAProxy that follows the Patroni
+  leader (health via Patroni's REST, inside the VPC) on port 5433 — for clients that
+  accept only one `host:port` (Prisma). The `database` secrets gain `host_single` and
+  `url_single` when a host carries the stack; the KV mirror now rewrites an entry when
+  any field is new or changed. Port 5433 joins the ports tenants may reach on the fleet.
+  Not deployed until the operator adds the stack to a host.
+
 - Add (database, ADR 0039 addendum): opt-in `database.postgrest.publish_authenticator`
   mirrors the PostgREST authenticator credential (`<id>_auth`) to
   `kv/tenants/<id>/database-<id>_auth` (deleted again when turned off). Off by

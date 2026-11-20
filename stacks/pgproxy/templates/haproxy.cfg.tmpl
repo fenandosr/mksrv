@@ -1,0 +1,41 @@
+# Rendered by mksrv (ADR 0044). Routes every connection on 5433 to the Patroni
+# LEADER, for clients that accept only one host:port (an ORM with no multi-host
+# support). The leader is found with Patroni's REST health endpoint, which is only
+# reachable inside the VPC (it is unauthenticated and must never be exposed to
+# tenants): GET /primary answers 200 on the leader and 503 on a replica. Data
+# traffic goes to PostgreSQL on 5432, so the database sees this host's VPC
+# address as the client.
+global
+    log stdout format raw daemon
+    maxconn 1000
+
+defaults
+    log     global
+    mode    tcp
+    option  tcplog
+    option  clitcpka
+    option  srvtcpka
+    timeout connect 5s
+    # Long on purpose: a pooled connection that sits idle for hours must not be
+    # cut by the proxy. A failover closes the old leader's sessions explicitly
+    # (on-marked-down shutdown-sessions below).
+    timeout client  8h
+    timeout server  8h
+    timeout check   3s
+
+listen postgres_leader
+    bind *:5433
+    option httpchk GET /primary
+    http-check expect status 200
+    default-server inter 2s fall 2 rise 2 on-marked-down shutdown-sessions
+{{- range .StackNodes "postgres" }}
+    server {{ .Name }} {{ .PrivateIP }}:5432 check port 8008
+{{- end }}
+
+# Local health, published on the host's loopback only: 200 while a leader is
+# known, 503 otherwise.
+frontend healthz
+    bind *:8404
+    mode http
+    monitor-uri /healthz
+    monitor fail if { nbsrv(postgres_leader) lt 1 }

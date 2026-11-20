@@ -23,6 +23,7 @@ A `storage:` block requests dedicated EBS volumes mounted at
 | `analytics` | service | cloud/local | yes | database, identity | descriptor |
 | `agent` | service | cloud/local | no | — | implemented (auto-assigned, ADR 0019) |
 | `monitor` | service | cloud/local | yes | identity, agent | implemented |
+| `pgproxy` | service | cloud | no | postgres | implemented, not deployed (ADR 0044): HAProxy on :5433 that follows the Patroni leader, for single-host clients |
 | `logs` | service | cloud/local | yes | monitor | implemented (opt-in) |
 | `security` | service | cloud/local | no | logs, monitor | implemented (opt-in) |
 | `backup` | service | cloud | no | — | implemented (opt-in) |

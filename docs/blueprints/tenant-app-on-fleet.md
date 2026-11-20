@@ -148,4 +148,4 @@ Collected from the cases; each links to where it was found.
 | A reusable deploy-agent kit (the HG-LIMS agent is tied to `web` and `worker`) | Open | both |
 | Rendering OpenBao secrets into the environment of an app with no OpenBao client | Open | [SciNugget](cases/scinugget.md) |
 | Logs and metrics from tenant nodes | Open | both |
-| A leader-aware Postgres endpoint for clients that accept a single host | **To verify** | [SciNugget](cases/scinugget.md) |
+| A leader-aware Postgres endpoint for clients that accept a single host | Designed and implemented, **not deployed** ([ADR 0044](../explanation/decisions/0044-postgres-leader-endpoint.md)) | [SciNugget](cases/scinugget.md) |
