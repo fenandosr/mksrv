@@ -147,3 +147,37 @@ func TestTenantAppRolePolicyMultipleNamesWithUnderscore(t *testing.T) {
 		t.Fatalf("explicit kv_read must replace the default:\n%s", hcl)
 	}
 }
+
+func TestAuthenticatorPublicationIsOptInAndNamed(t *testing.T) {
+	t.Parallel()
+	if got := authenticatorSecretName("hgstg"); got != "database-hgstg_auth" {
+		t.Fatalf("authenticatorSecretName = %q", got)
+	}
+	mk := func(pg *model.PostgRESTConfig) model.Tenant {
+		return model.Tenant{ID: "hgstg", Database: &model.TenantDatabase{PostgREST: pg}}
+	}
+	if mk(nil).PublishesAuthenticator() {
+		t.Fatal("must be off by default")
+	}
+	if mk(&model.PostgRESTConfig{}).PublishesAuthenticator() {
+		t.Fatal("must be off unless publish_authenticator is set")
+	}
+	if !mk(&model.PostgRESTConfig{PublishAuthenticator: true}).PublishesAuthenticator() {
+		t.Fatal("publish_authenticator: true must publish")
+	}
+	// Without PostgREST the <id>_auth role does not exist, so nothing to publish.
+	off := false
+	if mk(&model.PostgRESTConfig{Enabled: &off, PublishAuthenticator: true}).PublishesAuthenticator() {
+		t.Fatal("PostgREST disabled: no authenticator to publish")
+	}
+}
+
+func TestAuthenticatorSecretFieldsUseTheAuthRole(t *testing.T) {
+	t.Parallel()
+	fields := strings.Join(dbSecretFields(postgresCluster{}, "prod", "hgstg", "hgstg_auth", "pw"), " ")
+	for _, want := range []string{"username=hgstg_auth", "dbname=db_hgstg", "password=pw", "url=postgres://hgstg_auth:pw@"} {
+		if !strings.Contains(fields, want) {
+			t.Fatalf("fields missing %q: %s", want, fields)
+		}
+	}
+}

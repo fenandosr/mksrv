@@ -327,3 +327,23 @@ the semantic pass.
 - Confirm which Keycloak 26 admin endpoints cover the proposed `settings` keys.
 - Whether to later migrate every tenant's pre-request function to the `mksrv`
   schema.
+
+## Addendum (2026-11-19): publishing the authenticator's credential, opt-in
+
+`database.postgrest.publish_authenticator: true` makes `mksrv tenant apply`
+mirror the PostgREST authenticator's credential (`<id>_auth`, SSM
+`tenant_<id>_authpw`) to `kv/tenants/<id>/database-<id>_auth`, with the same
+fields as the other database secrets (`username`, `password`, `dbname`, `hosts`,
+`url`). Default **off**; setting it back to `false` deletes the KV entry on the
+next apply.
+
+It exists for a tenant service that must behave like PostgREST: connect as the
+authenticator and `SET ROLE` to a tenant role per request. The trade-off is
+deliberate and visible: `<id>_auth` is `LOGIN NOINHERIT` and the **only** role
+granted membership in every NOLOGIN role of the tenant (admin included), so
+whoever reads the secret can assume any of them. Prefer a dedicated service role
+(`service_roles`, ADR 0039 §3) whenever a fixed set of privileges is enough. To
+read it, an AppRole needs `database-<id>_auth` in its `storage.approles[].kv_read`
+(ADR 0041); note the tenant's `-dev` policy already reads the whole subtree, so
+`dev` group members can read it too.
+

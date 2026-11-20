@@ -111,6 +111,10 @@ func dbSecretFields(pg postgresCluster, env, id, user, password string) []string
 	}
 }
 
+// authenticatorSecretName is the KV entry (under kv/tenants/<id>/) holding the
+// PostgREST authenticator's credential, database-<id>_auth, when published.
+func authenticatorSecretName(id string) string { return "database-" + id + "_auth" }
+
 // tenantCacheSecretFields returns the KV fields for a tenant's Redis
 // connection. cacheHost is the `cache` stack host's mesh name (or "" to fall
 // back to the container name for a single-host/dev layout).
@@ -506,6 +510,24 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 					dbSecretFields(f.postgres, env, id, role, spw)); err != nil {
 					return err
 				}
+			}
+		}
+		if slices.Contains(stacks, "database") {
+			// Opt-in (database.postgrest.publish_authenticator): the PostgREST
+			// authenticator's credential at kv/tenants/<id>/database-<id>_auth.
+			// Turning the flag off removes the entry again.
+			authPath := "kv/tenants/" + id + "/" + authenticatorSecretName(id)
+			if f.data.Tenants[id].PublishesAuthenticator() {
+				apw, err := f.resolver.Get(ctx, "/mksrv/{env}/database/tenant_"+id+"_authpw")
+				if err != nil {
+					return fmt.Errorf("openbao %s: authenticator password: %w (provision databases first)", id, err)
+				}
+				if err := mirrorTenantSecret(ctx, client, rootToken, id, authenticatorSecretName(id), apw,
+					dbSecretFields(f.postgres, env, id, id+"_auth", apw)); err != nil {
+					return err
+				}
+			} else {
+				_, _ = client.Run(ctx, baoExec(rootToken, "kv", "metadata", "delete", authPath))
 			}
 		}
 		if slices.Contains(stacks, "cache") {
