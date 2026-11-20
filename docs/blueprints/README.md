@@ -13,6 +13,7 @@ abstract.
 | Document | What it is |
 |---|---|
 | [Tenant app on the fleet](tenant-app-on-fleet.md) | The generic blueprint: actors, service catalog, steps 0–9, deploying **without a staging environment**, migrations, rollback, known traps |
+| [The call to action](agent-call-to-action.md) | What to hand a tenant's developer or agent before anything is deployed: context, steps, rights and obligations, and the request/answer protocol |
 | [Case: HG-LIMS](cases/hg-lims.md) | The first deployment, as a retrospective: what we did, what broke, what we changed in mksrv |
 | [Case: SciNugget](cases/scinugget.md) | The second one, in progress: a Next.js app with a queue worker, mapped step by step, with the gaps found before deploying |
 
