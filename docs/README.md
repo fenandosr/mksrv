@@ -14,6 +14,8 @@ vs. studying, and practical skill vs. theoretical knowledge.
   rotate a secret, restore a backup)? Check [how-to/](how-to/).
 - **Need the exact shape of something** (a stack's fields, what's scraped,
   an instance's RAM)? Check [reference/](reference/).
+- **Putting your own application on the fleet?** Read the
+  [blueprints](blueprints/): a repeatable path distilled from real deployments.
 - **Want to understand why mksrv is built this way**, or what's implemented
   so far? Check [explanation/](explanation/), including the
   [decision records](explanation/decisions/).
