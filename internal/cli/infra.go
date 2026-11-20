@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -387,6 +388,7 @@ func (a *App) writeInfraOutputs(ctx context.Context, printer ui.Printer, session
 	if hosts, ok := outputs["hosts"]; ok {
 		printer.Info("hosts: %s", string(hosts))
 	}
+	printNameServers(printer, blob)
 	printer.Success("outputs written to %s", path)
 	return nil
 }
@@ -500,5 +502,25 @@ func isAffirmative(answer string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// printNameServers tells the operator which name servers to set at the
+// registrar for each zone mksrv created (dns_override.create_zone, ADR 0043):
+// the domain does not resolve until its registrar delegates to them.
+func printNameServers(printer ui.Printer, outputsJSON []byte) {
+	var out infra.Outputs
+	if json.Unmarshal(outputsJSON, &out) != nil || len(out.TenantZones) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(out.TenantZones))
+	for id := range out.TenantZones {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		z := out.TenantZones[id]
+		printer.Info("tenant %s: hosted zone %s — set these name servers at the domain's registrar: %s",
+			id, z.ZoneID, strings.Join(z.NameServers, " "))
 	}
 }

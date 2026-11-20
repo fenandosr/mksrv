@@ -831,3 +831,48 @@ func TestCheckTenantStorage(t *testing.T) {
 		assertIssueCode(t, check(bad, names()), "tenant.storage.cidr")
 	}
 }
+
+func TestCheckTenantDNSOverrideCreateZone(t *testing.T) {
+	t.Parallel()
+	check := func(o *model.DNSOverride) Report {
+		var r Report
+		checkTenantDNSOverride(&r, "t.yaml", model.Tenant{ID: "scinugget", BaseDomain: "scinugget.example.com", DNSOverride: o})
+		return r
+	}
+	if r := check(nil); len(r.Issues) != 0 {
+		t.Fatalf("no override rejected: %#v", r.Issues)
+	}
+	if r := check(&model.DNSOverride{Provider: "route53", CreateZone: true}); len(r.Issues) != 0 {
+		t.Fatalf("route53 create_zone rejected: %#v", r.Issues)
+	}
+	assertIssueCode(t, check(&model.DNSOverride{Provider: "route53", CreateZone: true, ZoneID: "Z123"}), "tenant.dns.create_zone_conflict")
+	assertIssueCode(t, check(&model.DNSOverride{Provider: "cloudflare", CreateZone: true}), "tenant.dns.create_zone_provider")
+}
+
+func TestHasZoneCountsACreatedZone(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct {
+		o    *model.DNSOverride
+		want bool
+	}{
+		"nil":                {nil, false},
+		"route53 no zone":    {&model.DNSOverride{Provider: "route53"}, false},
+		"route53 zone id":    {&model.DNSOverride{Provider: "route53", ZoneID: "Z1"}, true},
+		"route53 created":    {&model.DNSOverride{Provider: "route53", CreateZone: true}, true},
+		"cloudflare created": {&model.DNSOverride{Provider: "cloudflare", CreateZone: true}, false},
+	} {
+		if got := c.o.HasZone(); got != c.want {
+			t.Errorf("%s: HasZone() = %v, want %v", name, got, c.want)
+		}
+	}
+	// web, mail and dns accept a created zone (they previously demanded a zone_id).
+	var r Report
+	checkTenantWeb(&r, "t.yaml", model.Tenant{ID: "scinugget", BaseDomain: "scinugget.example.com",
+		DNSOverride: &model.DNSOverride{Provider: "route53", CreateZone: true},
+		Web:         []model.TenantWebEndpoint{{Hostname: "scinugget.example.com", Target: "100.64.0.11:8201"}}})
+	for _, i := range r.Issues {
+		if i.Code == "tenant.web.no_zone" {
+			t.Fatalf("a created zone must satisfy web: %#v", r.Issues)
+		}
+	}
+}

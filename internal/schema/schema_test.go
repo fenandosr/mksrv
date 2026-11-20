@@ -331,3 +331,26 @@ database:
 		t.Fatal("a non-boolean publish_authenticator must be rejected")
 	}
 }
+
+func TestValidateTenantCreateZone(t *testing.T) {
+	t.Parallel()
+	doc := `
+version: 1
+id: scinugget
+display_name: SciNugget
+base_domain: scinugget.example.com
+dns_override:
+  provider: route53
+  create_zone: true
+stacks: [database]
+`
+	_, issues, err := New().ValidateYAML("tenant.v1.json", []byte(doc))
+	if err != nil || len(issues) != 0 {
+		t.Fatalf("create_zone must validate: err=%v issues=%#v", err, issues)
+	}
+	bad := strings.Replace(doc, "create_zone: true", "create_zone: maybe", 1)
+	_, issues, err = New().ValidateYAML("tenant.v1.json", []byte(bad))
+	if err != nil || len(issues) == 0 {
+		t.Fatalf("a non-boolean create_zone must be rejected: err=%v issues=%#v", err, issues)
+	}
+}
