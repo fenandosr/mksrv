@@ -38,14 +38,14 @@ and port are placeholders to be chosen.
 version: 1
 id: scinugget
 display_name: "SciNugget"
-base_domain: scinugget.cloud-it.click
+base_domain: scinugget.example.com
 keycloak:
   realm: scinugget
   clients:
     - id: scinugget-web
       public: false          # Auth.js here requires a client secret (G1)
-      redirect_uris: [https://scinugget.cloud-it.click/api/auth/callback/keycloak]
-      post_logout_redirect_uris: [https://scinugget.cloud-it.click/]
+      redirect_uris: [https://scinugget.example.com/api/auth/callback/keycloak]
+      post_logout_redirect_uris: [https://scinugget.example.com/]
 stacks: [database, openbao]  # no `cache`: the queue's Redis is not the fleet cache (G2)
 device_limit: 5
 database:
@@ -55,13 +55,13 @@ database:
 storage:
   s3:
     bucket: scinugget-prod-data
-    cors_origins: [https://scinugget.cloud-it.click]
+    cors_origins: [https://scinugget.example.com]
   approles:
     - name: app              # role svc-scinugget-app
       cidrs: [100.64.0.11/32]
       kv_read: ["database", "storage-s3", "app-*"]
 web:
-  - hostname: scinugget.cloud-it.click
+  - hostname: scinugget.example.com
     target: 100.64.0.11:8201   # step 8 only; omit during the dark launch
 ```
 
@@ -75,7 +75,7 @@ The app reads plain environment variables and has no OpenBao client (**G9**).
 | `AUTH_SECRET` | `kv/tenants/scinugget/app-auth` (the tenant admin writes it) |
 | `AUTH_DEV_BYPASS*` | Not set. The README says it is forced off when `NODE_ENV=production`; the checklist still requires it |
 | `DATABASE_URL` | `kv/tenants/scinugget/database` → `url`, plus `?schema=scinugget` (**G3**, **G8**) |
-| `KEYCLOAK_ISSUER` | `https://auth.cloud-it.click/realms/scinugget` |
+| `KEYCLOAK_ISSUER` | `https://auth.example.com/realms/scinugget` |
 | `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET` | `scinugget-web`; the secret per **G1** |
 | `REDIS_URL`, `QUEUE_DISABLED`, `WORKER_CONCURRENCY` | A Redis owned by the app's own package on the node (**G2**) |
 | `S3_*` | `kv/tenants/scinugget/storage-s3` (region and bucket are configuration) |
