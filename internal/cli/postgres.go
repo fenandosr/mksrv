@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,6 +27,31 @@ type postgresCluster struct {
 	Scope   string         `json:"scope"`
 	Primary string         `json:"primary"`
 	Nodes   []postgresNode `json:"nodes"`
+	// LeaderProxy is host:port of the `pgproxy` stack (ADR 0044) when one is
+	// deployed: a single address that always reaches the Patroni leader, for
+	// clients that accept only one host. Derived from deployment.yaml on every
+	// run, never persisted in postgres.json.
+	LeaderProxy string `json:"-"`
+}
+
+// leaderProxyPort is where the pgproxy stack listens (stacks/pgproxy).
+const leaderProxyPort = "5433"
+
+// leaderProxyEndpoint returns host:port of the first host (by name) that carries
+// the `pgproxy` stack, using its mesh name like the cluster nodes, or "" when no
+// host does.
+func (f *fleet) leaderProxyEndpoint() string {
+	names := make([]string, 0, len(f.data.Deployment.Hosts))
+	for name, h := range f.data.Deployment.Hosts {
+		if slices.Contains(h.Stacks, "pgproxy") {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	return meshHostFQDN(f.data.Deployment.Env, names[0]) + ":" + leaderProxyPort
 }
 
 type postgresNode struct {
@@ -50,6 +76,7 @@ func (f *fleet) loadPostgres() {
 		return
 	}
 	_ = json.Unmarshal(blob, &f.postgres)
+	f.postgres.LeaderProxy = f.leaderProxyEndpoint()
 }
 
 func (f *fleet) writePostgres(c postgresCluster) error {
@@ -134,6 +161,7 @@ func (a *App) runPostgresBootstrap(ctx context.Context, printer ui.Printer, glob
 	if err := f.writePostgres(cluster); err != nil {
 		printer.Warn("could not write %s: %v", postgresFile, err)
 	}
+	cluster.LeaderProxy = f.leaderProxyEndpoint()
 	f.postgres = cluster
 
 	ips := make([]string, 0, len(cluster.Nodes))

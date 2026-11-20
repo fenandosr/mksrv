@@ -45,3 +45,4 @@ unanswered.
 - [ADR 0040: Dedicated per-app Postgres databases, and the `files` stack for real](0040-dedicated-app-databases-and-files-stack.md)
 - [ADR 0041: Tenant `storage:` — a declarative S3 bucket, its credential, and a narrow AppRole](0041-tenant-storage-s3-and-approles.md)
 - [ADR 0042: OpenBao runs with host networking, so it sees its clients' real addresses](0042-openbao-host-networking.md)
+- [ADR 0044: A single-host endpoint that follows the Patroni leader](0044-postgres-leader-endpoint.md)

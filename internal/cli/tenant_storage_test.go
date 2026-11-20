@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fenandosr/mksrv/internal/model"
+	"github.com/fenandosr/mksrv/internal/workspace"
 )
 
 func testWorkerRole() model.TenantAppRole {
@@ -179,5 +180,71 @@ func TestAuthenticatorSecretFieldsUseTheAuthRole(t *testing.T) {
 		if !strings.Contains(fields, want) {
 			t.Fatalf("fields missing %q: %s", want, fields)
 		}
+	}
+}
+
+func TestDBSecretFieldsPublishASingleHostWhenAProxyExists(t *testing.T) {
+	t.Parallel()
+	cluster := postgresCluster{
+		Nodes:       []postgresNode{{Host: "core1", IP: "10.20.0.1"}, {Host: "core2", IP: "10.20.0.2"}},
+		LeaderProxy: "proxy.example.com:5433",
+	}
+	fields := strings.Join(dbSecretFields(cluster, "prod", "scinugget", "scinugget_login", "pw"), " ")
+	for _, want := range []string{
+		"host_single=proxy.example.com:5433",
+		"url_single=postgres://scinugget_login:pw@proxy.example.com:5433/db_scinugget",
+		// The multi-host url stays as it was.
+		"target_session_attrs=read-write",
+	} {
+		if !strings.Contains(fields, want) {
+			t.Fatalf("fields missing %q: %s", want, fields)
+		}
+	}
+	if strings.Contains(fields, "url_single=postgres://scinugget_login:pw@proxy.example.com:5433/db_scinugget?") {
+		t.Fatalf("url_single must have no query string (the app adds its own): %s", fields)
+	}
+	// No proxy, or a standalone instance: nothing new is published.
+	for name, c := range map[string]postgresCluster{
+		"no proxy":   {Nodes: cluster.Nodes},
+		"standalone": {LeaderProxy: "proxy.example.com:5433"},
+	} {
+		if strings.Contains(strings.Join(dbSecretFields(c, "prod", "x", "x_login", "pw"), " "), "_single") {
+			t.Fatalf("%s: url_single must not be published", name)
+		}
+	}
+}
+
+func TestKVFieldsCurrentDetectsANewOrChangedField(t *testing.T) {
+	t.Parallel()
+	stored := `{"data":{"data":{"password":"pw","url":"u1","hosts":"h"}}}`
+	same := []string{"password=pw", "url=u1", "hosts=h"}
+	if !kvFieldsCurrent(stored, "pw", same) {
+		t.Fatal("identical entry must be current")
+	}
+	if kvFieldsCurrent(stored, "pw", append(same, "url_single=s")) {
+		t.Fatal("a field that is not stored yet must make the entry stale")
+	}
+	if kvFieldsCurrent(stored, "pw", []string{"password=pw", "url=u2"}) {
+		t.Fatal("a changed field must make the entry stale")
+	}
+	if kvFieldsCurrent(stored, "other", same) {
+		t.Fatal("a changed password must make the entry stale")
+	}
+}
+
+func TestLeaderProxyEndpointPicksTheHostCarryingPgproxy(t *testing.T) {
+	t.Parallel()
+	mk := func(hosts map[string][]string) *fleet {
+		d := model.Deployment{Env: "prod", Hosts: map[string]model.Host{}}
+		for n, st := range hosts {
+			d.Hosts[n] = model.Host{Stacks: st}
+		}
+		return &fleet{data: workspace.Data{Deployment: d}}
+	}
+	if got := mk(map[string][]string{"core1": {"postgres"}, "appd": {"database"}}).leaderProxyEndpoint(); got != "" {
+		t.Fatalf("no pgproxy host = %q", got)
+	}
+	if got := mk(map[string][]string{"core1": {"postgres"}, "appd": {"database", "pgproxy"}}).leaderProxyEndpoint(); got != "prod-appd.prod.mksrv:5433" {
+		t.Fatalf("endpoint = %q (mesh names carry the env prefix: prod-<host>.<env>.mksrv)", got)
 	}
 }

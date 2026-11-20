@@ -26,7 +26,7 @@ func TestValidateExampleWorkspace(t *testing.T) {
 	if !report.Valid {
 		t.Fatalf("report invalid: %#v", report.Issues)
 	}
-	if report.Hosts != 2 || report.Tenants != 1 || report.Users != 2 || report.CatalogStacks != 18 {
+	if report.Hosts != 2 || report.Tenants != 1 || report.Users != 2 || report.CatalogStacks != 19 {
 		t.Fatalf("counts = hosts:%d tenants:%d users:%d stacks:%d", report.Hosts, report.Tenants, report.Users, report.CatalogStacks)
 	}
 }
