@@ -595,7 +595,8 @@ func mailTenantRelayFiles(tenants map[string]model.Tenant, tenantSMTP map[string
 // never regenerated, so rotation is a deliberate operator action, not a side
 // effect of `tenant apply`.
 func (f *fleet) reconcileDKIM(ctx context.Context, printer ui.Printer, client *sshx.Client, id string, t model.Tenant) error {
-	if t.DNSOverride == nil || t.DNSOverride.Provider != "route53" || t.DNSOverride.ZoneID == "" {
+	zoneID := f.tenantZoneID(id, t)
+	if t.DNSOverride == nil || t.DNSOverride.Provider != "route53" || zoneID == "" {
 		return nil // caught by checkTenantMail; defensive no-op here
 	}
 	for _, domain := range t.Mail.Domains {
@@ -624,7 +625,7 @@ func (f *fleet) reconcileDKIM(ctx context.Context, printer ui.Printer, client *s
 		if value == "" {
 			return fmt.Errorf("mail %s: could not parse DKIM record for %s", id, domain)
 		}
-		if err := f.awsClients.UpsertTXT(ctx, t.DNSOverride.ZoneID, "mail._domainkey."+domain+".", value); err != nil {
+		if err := f.awsClients.UpsertTXT(ctx, zoneID, "mail._domainkey."+domain+".", value); err != nil {
 			return fmt.Errorf("mail %s: publish DKIM for %s: %w", id, domain, err)
 		}
 		printer.Success("tenant %s: DKIM published for %s", id, domain)
@@ -739,4 +740,20 @@ func (f *fleet) provisionMTASTS(ctx context.Context, printer ui.Printer, edgeCli
 		return fmt.Errorf("reload edge caddy for mta-sts: %w", err)
 	}
 	return nil
+}
+
+// tenantZoneID is the Route 53 zone mksrv writes the tenant's records into: the
+// declared zone_id, or the zone it created (dns_override.create_zone, ADR 0043)
+// as recorded in the infra outputs. Empty when the tenant has neither.
+func (f *fleet) tenantZoneID(id string, t model.Tenant) string {
+	if t.DNSOverride == nil {
+		return ""
+	}
+	if z := strings.TrimSpace(t.DNSOverride.ZoneID); z != "" {
+		return z
+	}
+	if t.DNSOverride.CreateZone {
+		return f.outputs.TenantZones[id].ZoneID
+	}
+	return ""
 }

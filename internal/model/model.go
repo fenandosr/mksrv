@@ -668,6 +668,17 @@ type DNSOverride struct {
 	Provider string `json:"provider"`
 	ZoneID   string `json:"zone_id,omitempty"`
 	Server   string `json:"server,omitempty"`
+	// CreateZone makes mksrv create (and own) the Route 53 hosted zone for the
+	// tenant's base_domain, instead of requiring a pre-existing zone_id
+	// (ADR 0043). Mutually exclusive with ZoneID; route53 only.
+	CreateZone bool `json:"create_zone,omitempty"`
+}
+
+// HasZone reports whether mksrv has a Route 53 zone to write into for this
+// override: a declared zone_id, or one it creates itself. The zone id of a
+// created zone is only known after the infra apply (infra.Outputs.TenantZones).
+func (d *DNSOverride) HasZone() bool {
+	return d != nil && d.Provider == "route53" && (strings.TrimSpace(d.ZoneID) != "" || d.CreateZone)
 }
 
 // BaseTenantGroups is the per-tenant RBAC group set every realm gets (ADR 0016).

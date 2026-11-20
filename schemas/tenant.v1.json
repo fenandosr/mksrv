@@ -15,6 +15,7 @@
       "properties": {
         "provider": {"type": "string", "enum": ["route53", "cloudflare", "rfc2136", "manual"]},
         "zone_id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "create_zone": {"type": "boolean", "default": false},
         "server": {"type": "string", "minLength": 1, "maxLength": 255}
       }
     },
