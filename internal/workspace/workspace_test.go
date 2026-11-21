@@ -860,7 +860,7 @@ func TestCheckTenantMailAliases(t *testing.T) {
 	// Duplicate alias.
 	assertIssueCode(t, base(ok, ok), "tenant.mail.alias_duplicate")
 	// Only the tenant's own mailboxes: no outside address, no other alias (so no loops).
-	assertIssueCode(t, base(model.TenantMailAlias{Address: "app@scinugget.example.com", To: []string{"someone@gmail.example.net"}}), "tenant.mail.alias_target")
+	assertIssueCode(t, base(model.TenantMailAlias{Address: "app@scinugget.example.com", To: []string{"someone@outside.example.com"}}), "tenant.mail.alias_target")
 	assertIssueCode(t, base(ok, model.TenantMailAlias{Address: "x@scinugget.example.com", To: []string{"app@scinugget.example.com"}}), "tenant.mail.alias_target")
 	assertIssueCode(t, base(model.TenantMailAlias{Address: "not-an-address", To: []string{"admin@scinugget.example.com"}}), "tenant.mail.alias_address")
 }
