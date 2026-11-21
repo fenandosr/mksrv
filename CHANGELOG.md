@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix (backup, ADR 0018 addendum): the OpenBao raft-snapshot token is no longer minted on every
+  `tenant apply` (twenty piled up, never revoked). It is stored in SSM and renewed with the root token on
+  each run; a new one is minted only when the stored one is gone, and then every other backup-only token is
+  revoked. The old churn was also the only thing renewing the token, which the policy cannot renew itself.
+
 - Fix (security): errors that quote a command no longer print credentials. mksrv builds
   commands whose text carries secrets (an OpenBao token in `-e BAO_TOKEN=…`, `kv put …
   password=…`, a connection URL), and the ssh and local runners quoted the whole command in

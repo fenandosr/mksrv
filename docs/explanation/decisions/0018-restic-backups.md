@@ -47,3 +47,17 @@ host), on a systemd timer, snapshotting to an S3 bucket.
   a deliberate guard so a destroy never silently drops backups.
 - Deferred: pgBackRest / WAL archiving for PITR; per-tenant restic repos;
   cross-region replication; a `mksrv backup restore` command.
+
+## Addendum (2026-11-21): the snapshot token is reused, not re-minted
+
+`mksrv tenant apply` used to mint a new periodic token on every run and never revoked the old ones: twenty
+were live when it was noticed. That churn was, by accident, the only renewal the token had: the `backup`
+policy grants no `renew-self`, so a periodic token that nobody renews dies after its period (30 days) and the
+snapshots would start failing without a message.
+
+Now the token is kept in SSM (`/mksrv/<env>/openbao/backup_token`) and **renewed with the root token on each
+run** (it travels on stdin). A new token is minted only when the stored one is missing or no longer renews;
+at that moment every other token whose only policy is `backup` is revoked (a token with any other policy,
+root included, is never touched). Still true, and not addressed here: if no `tenant apply` runs for 30 days
+the token expires; the renewal is performed by `apply`, not by the backup job.
+
