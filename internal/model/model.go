@@ -633,6 +633,19 @@ type TenantMail struct {
 	MTASTS bool `json:"mta_sts,omitempty"`
 	// Mailboxes are add/remove-only; mksrv generates each password.
 	Mailboxes []TenantMailbox `json:"mailboxes,omitempty"`
+	// Aliases make an address deliver into one or more of this tenant's own
+	// mailboxes, without an inbox of its own (ADR 0032 addendum). mksrv owns
+	// the shared server's postfix-virtual.cf.
+	Aliases []TenantMailAlias `json:"aliases,omitempty"`
+}
+
+// TenantMailAlias is one alias: mail sent to Address is delivered to every
+// address in To. Both must be addresses of the tenant: Address on one of its
+// mail.domains, each To one of its own mailboxes (external forwarding is
+// deliberately not supported yet).
+type TenantMailAlias struct {
+	Address string   `json:"address"`
+	To      []string `json:"to"`
 }
 
 // TenantMailbox is one mailbox `mksrv tenant apply` provisions on the shared

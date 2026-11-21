@@ -248,3 +248,29 @@ func TestLeaderProxyEndpointPicksTheHostCarryingPgproxy(t *testing.T) {
 		t.Fatalf("endpoint = %q (mesh names carry the env prefix: prod-<host>.<env>.mksrv)", got)
 	}
 }
+
+func TestMailAliasFileIsSortedLowercasedAndEmptyWithoutAliases(t *testing.T) {
+	t.Parallel()
+	mk := func(aliases ...model.TenantMailAlias) model.Tenant {
+		return model.Tenant{Mail: &model.TenantMail{Hosted: true, Aliases: aliases}}
+	}
+	tenants := map[string]model.Tenant{
+		"b": mk(model.TenantMailAlias{Address: "Zeta@B.example.com", To: []string{"Admin@b.example.com"}}),
+		"a": mk(
+			model.TenantMailAlias{Address: "info@a.example.com", To: []string{"z@a.example.com", "ADMIN@a.example.com"}},
+			model.TenantMailAlias{Address: "app@a.example.com", To: []string{"admin@a.example.com"}},
+		),
+		"none": mk(),
+	}
+	got := mailAliasFile(tenants, []string{"a", "b", "none"})
+	want := mailAliasFileHeader +
+		"app@a.example.com admin@a.example.com\n" +
+		"info@a.example.com admin@a.example.com z@a.example.com\n" +
+		"zeta@b.example.com admin@b.example.com\n"
+	if got != want {
+		t.Fatalf("alias file =\n%s\nwant\n%s", got, want)
+	}
+	if got := mailAliasFile(tenants, []string{"none"}); got != "" {
+		t.Fatalf("no aliases must render nothing, got %q", got)
+	}
+}

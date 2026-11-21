@@ -478,6 +478,43 @@ func checkTenantMail(report *Report, file string, tenant model.Tenant, mailStack
 			seen[addr] = i
 		}
 	}
+	checkTenantMailAliases(report, file, tenant, domains, seen)
+}
+
+// checkTenantMailAliases validates mail.aliases (ADR 0032 addendum). `mailboxes`
+// maps each lower-cased mailbox address to its index. An alias lives on one of
+// the tenant's domains, cannot be the address of a mailbox (it would be
+// ambiguous which wins) or of another alias, and delivers only to the tenant's
+// own mailboxes: that also rules out alias loops, and keeps a tenant from
+// forwarding mail to an outside address through the shared server.
+func checkTenantMailAliases(report *Report, file string, tenant model.Tenant, domains map[string]bool, mailboxes map[string]int) {
+	seen := make(map[string]int, len(tenant.Mail.Aliases))
+	for i, al := range tenant.Mail.Aliases {
+		path := fmt.Sprintf("$.mail.aliases[%d]", i)
+		addr := strings.ToLower(strings.TrimSpace(al.Address))
+		at := strings.LastIndexByte(addr, '@')
+		if at <= 0 || at == len(addr)-1 {
+			semanticError(report, file, path+".address", "tenant.mail.alias_address", fmt.Sprintf("%q is not a valid alias address", al.Address))
+			continue
+		}
+		if !domains[addr[at+1:]] {
+			semanticError(report, file, path+".address", "tenant.mail.alias_domain", fmt.Sprintf("alias domain %q is not in mail.domains", addr[at+1:]))
+		}
+		if _, isBox := mailboxes[addr]; isBox {
+			semanticError(report, file, path+".address", "tenant.mail.alias_conflict", fmt.Sprintf("%q is also a mailbox; an address is either a mailbox or an alias", al.Address))
+		}
+		if first, dup := seen[addr]; dup {
+			semanticError(report, file, path+".address", "tenant.mail.alias_duplicate", fmt.Sprintf("alias %q duplicates aliases[%d]", al.Address, first))
+		} else {
+			seen[addr] = i
+		}
+		for j, to := range al.To {
+			target := strings.ToLower(strings.TrimSpace(to))
+			if _, ok := mailboxes[target]; !ok {
+				semanticError(report, file, fmt.Sprintf("%s.to[%d]", path, j), "tenant.mail.alias_target", fmt.Sprintf("%q is not a mailbox of this tenant; an alias can only deliver to the tenant's own mailboxes", to))
+			}
+		}
+	}
 }
 
 // allowedDBExtensions are the contrib extensions a tenant may request in its

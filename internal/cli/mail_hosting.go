@@ -20,6 +20,7 @@ import (
 
 const (
 	mailConfigPath     = "/var/lib/mksrv/stacks/mail/config/postfix-accounts.cf"
+	mailVirtualPath    = "/var/lib/mksrv/stacks/mail/config/postfix-virtual.cf"
 	mailTLSDir         = "/var/lib/mksrv/stacks/mail/tls"
 	mailRelayMapPath   = "/var/lib/mksrv/stacks/mail/config/postfix-relaymap.cf"
 	mailSASLPasswdPath = "/var/lib/mksrv/stacks/mail/config/postfix-sasl-password.cf"
@@ -106,7 +107,11 @@ func (f *fleet) provisionMail(ctx context.Context, printer ui.Printer, selected 
 	}
 	defer client.Close()
 
-	if err := f.reconcileMailboxes(ctx, printer, client, all); err != nil {
+	restarted, err := f.reconcileMailboxes(ctx, printer, client, all)
+	if err != nil {
+		return err
+	}
+	if err := f.reconcileMailAliases(ctx, printer, client, all, restarted); err != nil {
 		return err
 	}
 	if err := f.reconcileMailCert(ctx, printer, client); err != nil {
@@ -128,8 +133,10 @@ func (f *fleet) provisionMail(ctx context.Context, printer ui.Printer, selected 
 }
 
 // reconcileMailboxes writes postfix-accounts.cf for every mailbox across every
-// mail-consuming tenant and restarts the server only if it changed.
-func (f *fleet) reconcileMailboxes(ctx context.Context, printer ui.Printer, client *sshx.Client, tenantIDs []string) error {
+// mail-consuming tenant and restarts the server only if it changed. It reports
+// whether it restarted the server, so the alias reconcile that follows does not
+// restart it a second time in the same run.
+func (f *fleet) reconcileMailboxes(ctx context.Context, printer ui.Printer, client *sshx.Client, tenantIDs []string) (restarted bool, err error) {
 	type line struct {
 		address, hash string
 	}
@@ -140,17 +147,17 @@ func (f *fleet) reconcileMailboxes(ctx context.Context, printer ui.Printer, clie
 			hash, err := f.resolver.Get(ctx, mailPasswordHashRef(id, mb.Address))
 			if err != nil {
 				if !secretsx.IsNotFound(err) {
-					return fmt.Errorf("mail %s: password hash for %s: %w", id, mb.Address, err)
+					return false, fmt.Errorf("mail %s: password hash for %s: %w", id, mb.Address, err)
 				}
 				// No pre-seeded hash (the common case: a brand-new mailbox,
 				// not a migrated one) — generate and hash a fresh password.
 				pass, passErr := f.resolver.EnsureRandom(ctx, mailPasswordRef(id, mb.Address), 24)
 				if passErr != nil {
-					return fmt.Errorf("mail %s: password for %s: %w", id, mb.Address, passErr)
+					return false, fmt.Errorf("mail %s: password for %s: %w", id, mb.Address, passErr)
 				}
 				res, hashErr := client.RunInput(ctx, "openssl passwd -6 -stdin", []byte(pass))
 				if hashErr != nil {
-					return fmt.Errorf("mail %s: hash password for %s: %w", id, mb.Address, hashErr)
+					return false, fmt.Errorf("mail %s: hash password for %s: %w", id, mb.Address, hashErr)
 				}
 				hash = strings.TrimSpace(res.Stdout)
 			}
@@ -170,15 +177,70 @@ func (f *fleet) reconcileMailboxes(ctx context.Context, printer ui.Printer, clie
 
 	old, _ := client.Run(ctx, "sudo cat "+mailConfigPath+" 2>/dev/null || true")
 	if old.Stdout == content {
-		return nil
+		return false, nil
 	}
 	if err := client.WriteFileSudo(ctx, mailConfigPath, []byte(content), 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", mailConfigPath, err)
+		return false, fmt.Errorf("write %s: %w", mailConfigPath, err)
 	}
 	if _, err := client.Run(ctx, "sudo systemctl restart mksrv-mailserver.service"); err != nil {
-		return fmt.Errorf("restart mailserver: %w", err)
+		return false, fmt.Errorf("restart mailserver: %w", err)
 	}
 	printer.Success("mail: %d mailbox(es) across %d tenant(s)", len(lines), len(tenantIDs))
+	return true, nil
+}
+
+// mailAliasFileHeader marks the file as owned by mksrv: a hand-made alias added
+// on the server is overwritten at the next `tenant apply`.
+const mailAliasFileHeader = "# Managed by mksrv (tenants' mail.aliases, ADR 0032 addendum). Manual edits are overwritten.\n"
+
+// mailAliasFile renders postfix-virtual.cf for every alias of every
+// mail-consuming tenant: `alias@domain target1 target2`, lower-cased, sorted by
+// alias. Empty when no tenant declares an alias.
+func mailAliasFile(tenants map[string]model.Tenant, tenantIDs []string) string {
+	var lines []string
+	for _, id := range tenantIDs {
+		for _, al := range tenants[id].Mail.Aliases {
+			to := make([]string, 0, len(al.To))
+			for _, t := range al.To {
+				to = append(to, strings.ToLower(strings.TrimSpace(t)))
+			}
+			sort.Strings(to)
+			lines = append(lines, strings.ToLower(strings.TrimSpace(al.Address))+" "+strings.Join(to, " "))
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	sort.Strings(lines)
+	return mailAliasFileHeader + strings.Join(lines, "\n") + "\n"
+}
+
+// reconcileMailAliases writes postfix-virtual.cf (ADR 0032 addendum) and restarts
+// the shared server only when the file changed AND the mailbox reconcile did not
+// already restart it in this run. With no aliases anywhere and no file on the
+// server it does nothing; once aliases have existed, removing them all rewrites
+// the file with only its header so the old ones stop delivering.
+func (f *fleet) reconcileMailAliases(ctx context.Context, printer ui.Printer, client *sshx.Client, tenantIDs []string, alreadyRestarted bool) error {
+	content := mailAliasFile(f.data.Tenants, tenantIDs)
+	old, _ := client.Run(ctx, "sudo cat "+mailVirtualPath+" 2>/dev/null || true")
+	if content == "" {
+		if strings.TrimSpace(old.Stdout) == "" {
+			return nil // never had aliases: nothing to create
+		}
+		content = mailAliasFileHeader // all aliases removed
+	}
+	if old.Stdout == content {
+		return nil
+	}
+	if err := client.WriteFileSudo(ctx, mailVirtualPath, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", mailVirtualPath, err)
+	}
+	if !alreadyRestarted {
+		if _, err := client.Run(ctx, "sudo systemctl restart mksrv-mailserver.service"); err != nil {
+			return fmt.Errorf("restart mailserver: %w", err)
+		}
+	}
+	printer.Success("mail: %d alias(es) across %d tenant(s)", strings.Count(content, "\n")-strings.Count(mailAliasFileHeader, "\n"), len(tenantIDs))
 	return nil
 }
 
