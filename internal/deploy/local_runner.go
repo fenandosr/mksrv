@@ -54,7 +54,7 @@ func runLocal(ctx context.Context, command string, input []byte) (ssh.Result, er
 		result.ExitCode = exitErr.ExitCode()
 		return result, fmt.Errorf("local: command exited %d: %s", result.ExitCode, strings.TrimSpace(stderr.String()))
 	}
-	return result, fmt.Errorf("local: run %q: %w", command, err)
+	return result, fmt.Errorf("local: run %q: %w", ssh.RedactCommand(command), err)
 }
 
 // WriteFileSudo writes content to path as root via an atomic temp-file
