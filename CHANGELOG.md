@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add (editor help, ADR 0045 phase 1): `mksrv schema deployment|tenant|users|stack` prints the JSON
+  Schema an editor should use, generated from the binary: stack names become real enums (a typo is
+  flagged, the catalog suggested), `instance_type` gets suggested sizes without rejecting other types,
+  and the main fields get a description. `mksrv init` writes the `# yaml-language-server: $schema=…`
+  header on `deployment.yaml` and the files under `.mksrv/schemas/`; `mksrv validate` refreshes them and
+  prints one hint line for a file with no header (never editing it, never on `--json`).
+
 - Fix (backup, ADR 0018 addendum): the OpenBao raft-snapshot token is no longer minted on every
   `tenant apply` (twenty piled up, never revoked). It is stored in SSM and renewed with the root token on
   each run; a new one is minted only when the stored one is gone, and then every other backup-only token is

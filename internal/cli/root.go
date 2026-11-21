@@ -134,6 +134,7 @@ func (a *App) newRootCommand(opts *globalOptions) *cobra.Command {
 		a.newVersionCommand(opts),
 		a.newInitCommand(opts),
 		a.newValidateCommand(opts),
+		a.newSchemaCommand(opts),
 		a.newDoctorCommand(opts),
 		a.newPlanCommand(opts),
 		a.newApplyCommand(opts),

@@ -22,5 +22,9 @@ mksrv.lock           engine version of the last successful apply
    host layout, and adjust `mgmt_cidr` to your operator network.
 2. Add tenant documents under `tenants/`.
 3. Validate: `mksrv validate` and `mksrv doctor`.
+   `mksrv validate` also refreshes `.mksrv/schemas/` (git-ignored, regenerated from the
+   installed binary). The header on the first line of `deployment.yaml` points an editor
+   with a YAML language server at it for completion and typo checks; add the same kind
+   of header to tenant files (`mksrv validate` prints the exact line).
 4. Provision infrastructure: `mksrv plan --infra-only` then
    `mksrv apply --infra-only`.

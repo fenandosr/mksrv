@@ -25,3 +25,5 @@ specific thing.
 - [Tenant local hosts](tenant-local-hosts.md) — run `meshnode`/`gitea`/
   `codeserver` on a tenant's own laptop or workstation, no SSH, no cloud
   provisioning.
+- [Completion and typo checks for the YAML in your editor](editor-completion.md) — the schema header
+  and what `mksrv schema` generates.

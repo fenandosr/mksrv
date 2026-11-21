@@ -2,7 +2,10 @@
 
 package model
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // burstableRAMMB maps a t-family size to MiB. Sizes large and up follow the
 // general-purpose (m) sizing in familyRAMMB.
@@ -20,6 +23,54 @@ var familyRAMMB = map[string]int{
 	// r7g / r6g / r6i / r5 — 8 GiB per vCPU
 	"r.large": 16384, "r.xlarge": 32768, "r.2xlarge": 65536, "r.4xlarge": 131072,
 }
+
+// suggestedGenerations are the instance families offered as completions: the
+// generations operators actually pick, by their letter family. The SIZES come
+// from the RAM tables above, so a size mksrv can plan capacity for is the only
+// kind suggested. It is a suggestion list, not a whitelist: any other type that
+// matches the schema's pattern is still accepted.
+var suggestedGenerations = []string{
+	"t3", "t3a", "t4g",
+	"m5", "m6g", "m6i", "m7g", "m7i",
+	"c5", "c6g", "c6i", "c7g",
+	"r5", "r6g", "r6i", "r7g",
+}
+
+// SuggestedInstanceTypes returns the instance types to offer as completions
+// (e.g. "t4g.small", "m7g.large"), sorted. Every entry is one InstanceRAMMB
+// knows, so mksrv can size swap and warn about overcommit for it.
+func SuggestedInstanceTypes() []string {
+	var out []string
+	for _, gen := range suggestedGenerations {
+		var sizes []string
+		if gen[0] == 't' {
+			for size := range burstableRAMMB {
+				sizes = append(sizes, size)
+			}
+			// t3 and t4g also come in large and up, sized like the m family.
+			for key := range familyRAMMB {
+				if fam, size, _ := strings.Cut(key, "."); fam == "m" && size != "medium" {
+					sizes = append(sizes, size)
+				}
+			}
+		} else {
+			for key := range familyRAMMB {
+				if fam, size, _ := strings.Cut(key, "."); fam == gen[:1] {
+					sizes = append(sizes, size)
+				}
+			}
+		}
+		for _, size := range sizes {
+			if t := gen + "." + size; knownInstanceType(t) {
+				out = append(out, t)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func knownInstanceType(t string) bool { _, ok := InstanceRAMMB(t); return ok }
 
 // InstanceRAMMB returns an EC2 instance type's memory in MiB and whether the
 // type is known to mksrv.

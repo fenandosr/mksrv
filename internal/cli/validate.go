@@ -26,7 +26,7 @@ func (a *App) runValidate(ctx context.Context, printer ui.Printer, globals *glob
 		}
 		return err
 	}
-	_, report, err := workspace.Validate(ctx, root, workspace.ValidateOptions{RunningVersion: fallback(a.build.Version, "dev"), AllowDowngrade: globals.AllowDowngrade})
+	data, report, err := workspace.Validate(ctx, root, workspace.ValidateOptions{RunningVersion: fallback(a.build.Version, "dev"), AllowDowngrade: globals.AllowDowngrade})
 	if err != nil {
 		return err
 	}
@@ -46,6 +46,7 @@ func (a *App) runValidate(ctx context.Context, printer ui.Printer, globals *glob
 				printer.Error("%s [%s] %s", location, issue.Code, issue.Message)
 			}
 		}
+		editorSchemaHint(printer, root, data.Catalog)
 		if report.Valid {
 			printer.Success("workspace valid: %s", report.Workspace)
 			printer.Info("checked %d files; %d hosts, %d tenants, %d users, %d catalog stacks", report.FilesChecked, report.Hosts, report.Tenants, report.Users, report.CatalogStacks)

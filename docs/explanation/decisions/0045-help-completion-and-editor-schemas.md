@@ -1,6 +1,6 @@
 # ADR 0045: Command help, shell completion and editor schemas, in three phases
 
-- Status: Proposed (no code yet; each phase is its own change)
+- Status: Accepted. Phase 1 (B) implemented; phases 2 (A) and 3 (C) proposed. Each phase is its own change.
 - Date: 2026-11-21
 
 ## Context
@@ -33,8 +33,8 @@ change, mergeable and useful alone.
 - A new command `mksrv schema <deployment|tenant|stack|users>` prints the **effective** JSON Schema: the
   embedded base schema with values injected at run time from the embedded sources — `hosts[].stacks` items
   become an `enum` of the catalog's stack names (and a tenant's `stacks`, only the tenant-consumable ones),
-  `instance_type` an `enum` of the types in the capacity table — plus a `description` (and
-  `markdownDescription`) on the fields people look up most.
+  `instance_type` a list of suggested sizes — plus a `description` (and `markdownDescription`) on the
+  fields people look up most.
 - `mksrv init` writes the files it scaffolds with the header
   `# yaml-language-server: $schema=<path>` and refreshes `.mksrv/schemas/<name>.json` (that directory is
   already disposable, regenerated state). `mksrv validate` refreshes the same files and, for a file with no
@@ -43,6 +43,29 @@ change, mergeable and useful alone.
 - **Acceptance:** the generated schema is valid; the synthetic example workspace validates against it; the
   stack `enum` equals the catalog (a test fails when a stack is added without being suggested); a typo in a
   stack name is flagged by an editor using the schema as well as by `validate`.
+
+**Implemented (phase 1), and what the implementation corrected in this text:**
+
+- The capacity table is not a list of instance types: it maps a *family letter and size* to RAM
+  (`m.large`, plus the burstable `nano`…`medium`). Offering it as an `enum` would have made an editor reject a
+  valid `t2.micro`. `instance_type` is therefore `anyOf [enum of suggestions, the original pattern]`:
+  suggested, never enforced. The suggestions are a curated list of generations (`t4g`, `m7g`, `c6i`, …)
+  combined with the sizes the tables can size, 93 types today (`model.SuggestedInstanceTypes`).
+- Stack names **are** a strict `enum`, because `validate` already rejects an unknown stack. A host's list
+  is every stack that is not local-only; a tenant's is the per-tenant ones; `local_hosts[].stacks` the
+  local-only ones.
+- The base schemas are not rewritten (they are hand-formatted); the enums and the descriptions are applied
+  to the decoded document at generation time, and a path that no longer exists is an error, so a schema
+  change cannot silently drop a completion. Descriptions live in a Go table in `internal/engine`.
+- `mksrv schema NAME` prints it; `init` writes the header on `deployment.yaml` and the files; `validate`
+  refreshes `.mksrv/schemas/` and prints **one** hint line when a file has no header (never on `--json`,
+  never editing a file). The generated directory is git-ignored, so a fresh clone needs one `mksrv validate`.
+- Verified: the generated schemas compile; the enums equal the catalog (a test fails when a stack is added
+  without being suggested); a misspelled stack is flagged at the right index; the synthetic example workspace
+  and all twelve files of a real production workspace validate against them with an independent validator
+  (no false positives).
+- Pre-existing and not changed here: the base `instance_type` pattern (`^[a-z][a-z0-9.]+$`) rejects types
+  with a hyphen such as `m7i-flex.large`.
 
 ### Phase 2 — A: shell completion and better `--help`
 
@@ -82,5 +105,4 @@ change, mergeable and useful alone.
 ## Not verified
 
 That a given editor honours the schema header and the enums (the YAML language server in the common editors
-does; no editor was tried), how many instance types the capacity table holds, and whether the tenant,
-stack and users schemas follow exactly the same pattern as the deployment schema.
+does; no editor was tried: only an independent JSON Schema validator was), and phases 2 and 3.
