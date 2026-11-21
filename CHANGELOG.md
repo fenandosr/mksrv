@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fix (backup, ADR 0018 addendum): the job could not collect the OpenBao raft snapshot or any Keycloak realm
+  (a GET where the Admin API needs a POST; a CLI call that never wrote a snapshot) and hid it: it ended with
+  `done`, moved the freshness metric and kept `BackupStale` quiet, in every run since at least 2026-11-12. Both
+  collections are fixed; a failed component is now counted, explained in the journal, kept out of
+  `mksrv_backup_last_success_seconds` (which keeps its last good value), exported as
+  `mksrv_backup_component_ok`, alerted by the new `BackupComponentFailed`, and makes the unit exit 1 after the
+  snapshot is written. Tests run the rendered script with stubbed `podman` and `curl`.
+
 - Add (editor help, ADR 0045 phase 1): `mksrv schema deployment|tenant|users|stack` prints the JSON
   Schema an editor should use, generated from the binary: stack names become real enums (a typo is
   flagged, the catalog suggested), `instance_type` gets suggested sizes without rejecting other types,

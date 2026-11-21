@@ -626,7 +626,7 @@ func TestStackRendersMonitorFleetWide(t *testing.T) {
 	rules := string(files["/var/lib/mksrv/stacks/monitor/prometheus-rules.yml"])
 	for _, want := range []string{
 		"alert: TargetDown", "alert: PatroniNoLeader", "alert: OpenBaoSealed",
-		"alert: EndpointDown", "alert: CertExpiringSoon", "alert: BackupStale",
+		"alert: EndpointDown", "alert: CertExpiringSoon", "alert: BackupStale", "alert: BackupComponentFailed",
 		"{{ $labels.host }}", "mksrv_backup_last_success_seconds",
 	} {
 		if !strings.Contains(rules, want) {
@@ -788,12 +788,14 @@ func TestStackRendersBackup(t *testing.T) {
 	for _, want := range []string{
 		"pg_dump -Fc",
 		"restic cat config >/dev/null 2>&1",
-		"bao operator raft snapshot save",
+		"/v1/sys/storage/raft/snapshot",
+		"curl -fsS -X POST --max-time 60",
 		"partial-export?exportClients=true",
 		"restic forget --tag mksrv --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune",
 		"--secret mksrv-backup-restic_password,type=env,target=RESTIC_PASSWORD",
-		"mksrv_backup_last_success_seconds $(date +%s)",
-		`mv "$METRICS_DIR/backup.prom.$$" "$METRICS_DIR/backup.prom"`,
+		"mksrv_backup_last_success_seconds $last_success",
+		`mv "$PROM.$$" "$PROM"`,
+		`mksrv_backup_component_ok{component=\"postgres\"}`,
 	} {
 		if !strings.Contains(sh, want) {
 			t.Fatalf("backup.sh missing %q", want)

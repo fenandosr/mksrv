@@ -3,16 +3,30 @@
 # Non-secret config comes from backup.env (written by `mksrv tenant apply`); the
 # restic repo password is a podman secret; S3 credentials come from the instance
 # role over IMDS (--network host). Every collection step is best-effort so one
-# failure never skips the restic run.
+# failure never skips the restic run, but a failure is never silent: it is
+# counted, explained in the journal, kept out of the success metric, and makes
+# the job exit non-zero once the snapshot is written (an incomplete snapshot is
+# still better than none, and must not look complete).
 set -uo pipefail
 
 ENV_FILE=/var/lib/mksrv/stacks/backup/backup.env
 STAGE=/var/lib/mksrv/backup-staging
 RESTIC_IMAGE="docker.io/restic/restic:0.19.1"
 PG_IMAGE="docker.io/library/postgres:16"
-BAO_IMAGE="ghcr.io/openbao/openbao:2.6.1"
 
 log() { printf '[mksrv-backup] %s\n' "$*"; }
+
+# fail COMPONENT MESSAGE [ERROR_FILE]: count one failure, mark the component, say why
+# and show the first lines of its error file (it is deleted at the end of the run, so
+# the journal is the only place the reason survives).
+FAILED=0
+PG_OK=1; BAO_OK=1; KC_OK=1
+fail() {
+  FAILED=$((FAILED + 1))
+  case "$1" in pg) PG_OK=0 ;; bao) BAO_OK=0 ;; kc) KC_OK=0 ;; esac
+  log "$2"
+  if [ -n "${3:-}" ] && [ -s "$3" ]; then head -n 5 "$3" | sed 's/^/[mksrv-backup]   /'; fi
+}
 
 if [ ! -f "$ENV_FILE" ]; then
   log "missing $ENV_FILE — run 'mksrv tenant apply' first"
@@ -38,7 +52,7 @@ if [ -n "${PG_PRIMARY_IP:-}" ] && [ -n "${PG_SUPERPASS:-}" ]; then
     log "pg_dump $db"
     if ! podman run --rm --network host -e PGPASSWORD="$PG_SUPERPASS" "$PG_IMAGE" \
         pg_dump -Fc -h "$PG_PRIMARY_IP" -U postgres "$db" > "$STAGE/pg/$db.dump" 2>>"$STAGE/pg/errors.log"; then
-      log "pg_dump $db failed (see errors.log)"
+      fail pg "pg_dump $db failed" "$STAGE/pg/errors.log"
     fi
   done
 fi
@@ -46,9 +60,12 @@ fi
 # 2. OpenBao raft snapshot (backup-scoped token).
 if [ -n "${BAO_ADDR:-}" ] && [ -n "${BAO_TOKEN:-}" ]; then
   log "openbao raft snapshot"
-  if ! podman run --rm --network host -e BAO_ADDR="$BAO_ADDR" -e BAO_TOKEN="$BAO_TOKEN" "$BAO_IMAGE" \
-      bao operator raft snapshot save - > "$STAGE/bao/raft.snap" 2>>"$STAGE/bao/errors.log"; then
-    log "raft snapshot failed"
+  # Through the HTTP API: `bao operator raft snapshot save -` never produced a snapshot (the CLI
+  # takes a file path, not stdout) and every run since at least 2026-11-12 failed silently.
+  if ! curl -fsS --max-time 300 -H "X-Vault-Token: $BAO_TOKEN" \
+        "$BAO_ADDR/v1/sys/storage/raft/snapshot" -o "$STAGE/bao/raft.snap" 2>>"$STAGE/bao/errors.log" \
+      || [ ! -s "$STAGE/bao/raft.snap" ]; then
+    fail bao "raft snapshot failed" "$STAGE/bao/errors.log"
   fi
 fi
 
@@ -61,12 +78,15 @@ if [ -n "${KC_URL:-}" ] && [ -n "${KC_ADMIN_PASSWORD:-}" ]; then
   if [ -n "$tok" ]; then
     for r in master ${REALMS:-}; do
       log "keycloak export $r"
-      curl -fsS --max-time 60 -H "Authorization: Bearer $tok" \
+      # POST: the Admin API answers 404 to a GET on partial-export, which is why no realm
+      # was ever exported.
+      curl -fsS -X POST --max-time 60 -H "Authorization: Bearer $tok" \
         "$KC_URL/admin/realms/$r/partial-export?exportClients=true&exportGroupsAndRoles=true" \
-        > "$STAGE/keycloak/$r.json" 2>>"$STAGE/keycloak/errors.log" || log "export $r failed"
+        > "$STAGE/keycloak/$r.json" 2>>"$STAGE/keycloak/errors.log" \
+        && [ -s "$STAGE/keycloak/$r.json" ] || fail kc "export $r failed" "$STAGE/keycloak/errors.log"
     done
   else
-    log "keycloak admin token request failed"
+    fail kc "keycloak admin token request failed"
   fi
 fi
 
@@ -96,17 +116,41 @@ fi
 restic forget --tag mksrv --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune \
   || log "restic forget failed"
 
-# 6. freshness metric for node-exporter's textfile collector (M23 phase 4):
-# the `BackupStale` alert fires off this. Atomic write (temp + rename) so the
-# collector never reads a half-written file.
+# 6. metrics for node-exporter's textfile collector (M23 phase 4), written atomically (temp +
+# rename) so the collector never reads a half-written file.
+#   mksrv_backup_last_success_seconds moves ONLY when every component was collected, and keeps
+#   its previous value after a failed run: if the series vanished, `BackupStale` (which compares
+#   it to now) would have nothing to compare and never fire.
+#   mksrv_backup_component_ok / mksrv_backup_failures say which part failed (BackupComponentFailed).
 METRICS_DIR=/var/lib/mksrv/metrics
+PROM="$METRICS_DIR/backup.prom"
 mkdir -p "$METRICS_DIR"
+now=$(date +%s)
+last_success=$(sed -n 's/^mksrv_backup_last_success_seconds \([0-9][0-9]*\)$/\1/p' "$PROM" 2>/dev/null | head -n 1)
+if [ "$FAILED" -eq 0 ]; then last_success=$now; fi
 {
-  echo "# HELP mksrv_backup_last_success_seconds Unix time of the last successful mksrv-backup run."
-  echo "# TYPE mksrv_backup_last_success_seconds gauge"
-  echo "mksrv_backup_last_success_seconds $(date +%s)"
-} > "$METRICS_DIR/backup.prom.$$"
-mv "$METRICS_DIR/backup.prom.$$" "$METRICS_DIR/backup.prom"
+  echo "# HELP mksrv_backup_last_run_seconds Unix time of the last mksrv-backup run, complete or not."
+  echo "# TYPE mksrv_backup_last_run_seconds gauge"
+  echo "mksrv_backup_last_run_seconds $now"
+  if [ -n "$last_success" ]; then
+    echo "# HELP mksrv_backup_last_success_seconds Unix time of the last mksrv-backup run in which every component was collected."
+    echo "# TYPE mksrv_backup_last_success_seconds gauge"
+    echo "mksrv_backup_last_success_seconds $last_success"
+  fi
+  echo "# HELP mksrv_backup_failures Collection steps that failed in the last run."
+  echo "# TYPE mksrv_backup_failures gauge"
+  echo "mksrv_backup_failures $FAILED"
+  echo "# HELP mksrv_backup_component_ok 1 when a component was collected in the last run, 0 when it failed."
+  echo "# TYPE mksrv_backup_component_ok gauge"
+  echo "mksrv_backup_component_ok{component=\"postgres\"} $PG_OK"
+  echo "mksrv_backup_component_ok{component=\"openbao\"} $BAO_OK"
+  echo "mksrv_backup_component_ok{component=\"keycloak\"} $KC_OK"
+} > "$PROM.$$"
+mv "$PROM.$$" "$PROM"
 
 rm -rf "$STAGE"/pg "$STAGE"/bao "$STAGE"/keycloak
+if [ "$FAILED" -gt 0 ]; then
+  log "completed WITH $FAILED FAILURE(S): the snapshot was written but it is INCOMPLETE"
+  exit 1
+fi
 log "done"

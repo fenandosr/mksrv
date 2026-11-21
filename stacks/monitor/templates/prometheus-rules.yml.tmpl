@@ -110,3 +110,11 @@ groups:
         annotations:
           summary: "No successful mksrv backup in over 26 hours"
           description: "mksrv-backup.timer runs daily; check `mksrv backup run` / `journalctl -u mksrv-backup.service`."
+      - alert: BackupComponentFailed
+        expr: mksrv_backup_component_ok == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "mksrv backup could not collect {{`{{ $labels.component }}`}}"
+          description: "The last backup wrote a snapshot WITHOUT {{`{{ $labels.component }}`}}: it is incomplete. See `journalctl -u mksrv-backup.service` on the backup host."
