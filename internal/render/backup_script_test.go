@@ -22,6 +22,7 @@ const stubPodman = `#!/usr/bin/env bash
 # restic and pg_dump run through podman in the script.
 args="$*"
 case "$args" in
+  *" ls "*) [ -n "$STUB_EMPTY_SNAPSHOT" ] || echo "/stage/pg/db_a.dump"; exit 0 ;;
   *pg_dump*) [ -n "$STUB_FAIL_PG" ] && { echo "pg_dump: error: connection failed" >&2; exit 1; }; echo "DUMP"; exit 0 ;;
 esac
 exit 0
@@ -164,5 +165,16 @@ func TestBackupScriptFlagsAFailedPostgresDump(t *testing.T) {
 	}
 	if !strings.Contains(prom, `component="postgres"} 0`) || strings.Contains(prom, "mksrv_backup_last_success_seconds") {
 		t.Fatalf("postgres must be marked failed and no success recorded when there never was one:\n%s", prom)
+	}
+}
+
+func TestBackupScriptFailsWhenTheSnapshotLacksTheStagedDumps(t *testing.T) {
+	t.Parallel()
+	out, code, prom := runBackupScript(t, []string{"STUB_EMPTY_SNAPSHOT=1"}, "mksrv_backup_last_success_seconds 111\n")
+	if code != 1 || !strings.Contains(out, "does not contain the staged dumps") {
+		t.Fatalf("a snapshot without the dumps must fail the run, got %d:\n%s", code, out)
+	}
+	if !strings.Contains(prom, "mksrv_backup_last_success_seconds 111\n") {
+		t.Fatalf("last success must not move:\n%s", prom)
 	}
 }
