@@ -58,3 +58,35 @@ func TestSwapForStacks(t *testing.T) {
 		t.Fatalf("unknown-type no-identity swap = %d, want 0", got)
 	}
 }
+
+func TestSuggestedInstanceTypesAreAllKnownAndSorted(t *testing.T) {
+	t.Parallel()
+	got := SuggestedInstanceTypes()
+	if len(got) < 40 {
+		t.Fatalf("suspiciously few suggestions: %d", len(got))
+	}
+	seen := map[string]bool{}
+	for i, typ := range got {
+		if _, ok := InstanceRAMMB(typ); !ok {
+			t.Errorf("%s is suggested but InstanceRAMMB does not know it", typ)
+		}
+		if seen[typ] {
+			t.Errorf("%s is suggested twice", typ)
+		}
+		seen[typ] = true
+		if i > 0 && got[i-1] > typ {
+			t.Errorf("not sorted at %s", typ)
+		}
+	}
+	for _, want := range []string{"t4g.small", "t4g.medium", "t3.large", "m7g.large", "c6i.xlarge", "r6g.2xlarge"} {
+		if !seen[want] {
+			t.Errorf("%s should be suggested", want)
+		}
+	}
+	// A size the tables do not size must never be offered.
+	for _, bad := range []string{"t4g.huge", "m7g.nano", "c6i.small"} {
+		if seen[bad] {
+			t.Errorf("%s must not be suggested", bad)
+		}
+	}
+}

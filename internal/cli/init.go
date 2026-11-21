@@ -92,12 +92,19 @@ func (a *App) runInit(ctx context.Context, printer ui.Printer, globals *globalOp
 		return &ExitError{Code: 2, Err: err}
 	}
 
-	_, report, err := workspace.Validate(ctx, absolute, workspace.ValidateOptions{
+	data, report, err := workspace.Validate(ctx, absolute, workspace.ValidateOptions{
 		RunningVersion: fallback(a.build.Version, "dev"),
 		AllowDowngrade: globals.AllowDowngrade,
 	})
 	if err != nil {
 		return err
+	}
+	// Editor schemas (ADR 0045): generated from this binary so deployment.yaml's
+	// header resolves from the first moment. Best effort; never fails an init.
+	if n, schemaErr := refreshEditorSchemas(absolute, data.Catalog); schemaErr == nil && n > 0 {
+		for _, name := range workspaceSchemas {
+			created = append(created, editorSchemaDir+"/"+name+".json")
+		}
 	}
 
 	result := initResult{Workspace: absolute, Created: created, Valid: report.Valid}
