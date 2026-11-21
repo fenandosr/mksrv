@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix (backup): the restic container could not read `/stage` or `/vol` (no SELinux label, Enforcing), so no
+  snapshot ever held the Postgres dumps, the OpenBao snapshot or the Keycloak exports, only `/podvol`; restic's
+  exit 3 was treated as a warning. The container now runs with `--security-opt label=disable`, and a run fails
+  if staged files are not in the snapshot.
+
 - Fix (backup, ADR 0018 addendum): the job could not collect the OpenBao raft snapshot or any Keycloak realm
   (a GET where the Admin API needs a POST; a CLI call that never wrote a snapshot) and hid it: it ended with
   `done`, moved the freshness metric and kept `BackupStale` quiet, in every run since at least 2026-11-12. Both

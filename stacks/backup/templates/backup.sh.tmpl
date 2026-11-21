@@ -35,8 +35,11 @@ fi
 # shellcheck disable=SC1090
 . "$ENV_FILE"   # RESTIC_REPOSITORY PG_PRIMARY_IP PG_SUPERPASS BAO_ADDR BAO_TOKEN KC_URL KC_ADMIN_PASSWORD REALMS DBS
 
+# label=disable: /stage and /vol carry no container SELinux label, and under Enforcing the
+# restic container could not read them (every snapshot held only /podvol). The mounts are
+# read-only and the image is pinned, so lifting the label confinement here costs little.
 restic() {
-  podman run --rm --network host \
+  podman run --rm --network host --security-opt label=disable \
     --secret mksrv-backup-restic_password,type=env,target=RESTIC_PASSWORD \
     -e RESTIC_REPOSITORY="$RESTIC_REPOSITORY" \
     -v "$STAGE":/stage:ro -v /var/lib/mksrv/vol:/vol:ro \
@@ -110,6 +113,12 @@ if [ "$rc" = 3 ]; then
 elif [ "$rc" != 0 ]; then
   log "restic backup failed (exit $rc)"
   exit 1
+fi
+# Exit 3 hid for weeks that restic could not read the staged dumps at all. Whatever was
+# staged must be IN the snapshot, or the run is not a backup of it.
+if [ -n "$(find "$STAGE" -type f -size +0 2>/dev/null | head -n 1)" ] \
+   && ! restic ls latest --tag mksrv --host "$(hostname -s)" /stage 2>/dev/null | grep -q '^/stage/.'; then
+  fail snapshot "the snapshot does not contain the staged dumps (restic could not read /stage)"
 fi
 
 # 5. retention.
