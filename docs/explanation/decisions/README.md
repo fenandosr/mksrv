@@ -46,3 +46,4 @@ unanswered.
 - [ADR 0041: Tenant `storage:` — a declarative S3 bucket, its credential, and a narrow AppRole](0041-tenant-storage-s3-and-approles.md)
 - [ADR 0042: OpenBao runs with host networking, so it sees its clients' real addresses](0042-openbao-host-networking.md)
 - [ADR 0044: A single-host endpoint that follows the Patroni leader](0044-postgres-leader-endpoint.md)
+- [ADR 0045: Command help, shell completion and editor schemas, in three phases](0045-help-completion-and-editor-schemas.md)
