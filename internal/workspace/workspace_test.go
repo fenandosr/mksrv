@@ -831,3 +831,36 @@ func TestCheckTenantStorage(t *testing.T) {
 		assertIssueCode(t, check(bad, names()), "tenant.storage.cidr")
 	}
 }
+
+func TestCheckTenantMailAliases(t *testing.T) {
+	t.Parallel()
+	base := func(aliases ...model.TenantMailAlias) Report {
+		var r Report
+		checkTenantMail(&r, "t.yaml", model.Tenant{
+			ID: "scinugget", BaseDomain: "scinugget.example.com",
+			DNSOverride: &model.DNSOverride{Provider: "route53", ZoneID: "Z1"},
+			Mail: &model.TenantMail{
+				Domains: []string{"scinugget.example.com"},
+				Mailboxes: []model.TenantMailbox{
+					{Address: "admin@scinugget.example.com"}, {Address: "ops@scinugget.example.com"},
+				},
+				Aliases: aliases,
+			},
+		}, true)
+		return r
+	}
+	ok := model.TenantMailAlias{Address: "app@scinugget.example.com", To: []string{"admin@scinugget.example.com", "OPS@scinugget.example.com"}}
+	if r := base(ok); len(r.Issues) != 0 {
+		t.Fatalf("a valid alias was rejected: %#v", r.Issues)
+	}
+	// Domain not declared for the tenant.
+	assertIssueCode(t, base(model.TenantMailAlias{Address: "app@other.example.com", To: []string{"admin@scinugget.example.com"}}), "tenant.mail.alias_domain")
+	// An address cannot be both a mailbox and an alias.
+	assertIssueCode(t, base(model.TenantMailAlias{Address: "admin@scinugget.example.com", To: []string{"ops@scinugget.example.com"}}), "tenant.mail.alias_conflict")
+	// Duplicate alias.
+	assertIssueCode(t, base(ok, ok), "tenant.mail.alias_duplicate")
+	// Only the tenant's own mailboxes: no outside address, no other alias (so no loops).
+	assertIssueCode(t, base(model.TenantMailAlias{Address: "app@scinugget.example.com", To: []string{"someone@gmail.example.net"}}), "tenant.mail.alias_target")
+	assertIssueCode(t, base(ok, model.TenantMailAlias{Address: "x@scinugget.example.com", To: []string{"app@scinugget.example.com"}}), "tenant.mail.alias_target")
+	assertIssueCode(t, base(model.TenantMailAlias{Address: "not-an-address", To: []string{"admin@scinugget.example.com"}}), "tenant.mail.alias_address")
+}

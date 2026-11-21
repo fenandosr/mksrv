@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add (mail, ADR 0032 addendum): `mail.aliases` — an address that delivers into one or
+  more of the tenant's own mailboxes, with no inbox of its own. mksrv owns the shared
+  server's `postfix-virtual.cf` and restarts the server at most once per run, only on
+  change. Targets must be the tenant's own mailboxes (no outside forwarding yet).
+
 - Add (postgres, ADR 0044): the `pgproxy` stack — HAProxy that follows the Patroni
   leader (health via Patroni's REST, inside the VPC) on port 5433 — for clients that
   accept only one `host:port` (Prisma). The `database` secrets gain `host_single` and

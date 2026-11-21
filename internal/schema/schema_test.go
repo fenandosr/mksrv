@@ -331,3 +331,41 @@ database:
 		t.Fatal("a non-boolean publish_authenticator must be rejected")
 	}
 }
+
+func TestValidateTenantMailAliases(t *testing.T) {
+	t.Parallel()
+	doc := `
+version: 1
+id: scinugget
+display_name: SciNugget
+base_domain: scinugget.example.com
+dns_override: {provider: route53, zone_id: Z1}
+stacks: [database]
+mail:
+  domains: [scinugget.example.com]
+  hosted: true
+  mailboxes:
+    - {address: admin@scinugget.example.com}
+  aliases:
+    - {address: app@scinugget.example.com, to: [admin@scinugget.example.com]}
+`
+	_, issues, err := New().ValidateYAML("tenant.v1.json", []byte(doc))
+	if err != nil || len(issues) != 0 {
+		t.Fatalf("aliases must validate: err=%v issues=%#v", err, issues)
+	}
+	for name, repl := range map[string][2]string{
+		"empty to":      {"to: [admin@scinugget.example.com]", "to: []"},
+		"missing to":    {", to: [admin@scinugget.example.com]", ""},
+		"not an email":  {"address: app@scinugget.example.com", "address: app"},
+		"unknown field": {"to: [admin@scinugget.example.com]}", "to: [admin@scinugget.example.com], keep: true}"},
+	} {
+		bad := strings.Replace(doc, repl[0], repl[1], 1)
+		_, issues, err := New().ValidateYAML("tenant.v1.json", []byte(bad))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(issues) == 0 {
+			t.Errorf("%s: expected a validation issue", name)
+		}
+	}
+}

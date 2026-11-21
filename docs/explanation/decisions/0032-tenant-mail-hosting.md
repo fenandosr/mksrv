@@ -197,3 +197,25 @@ and never gets corrected, so Dovecot can't write its own index files
 (`ExecStartPost`) on every start, since the upstream image can't be
 patched without forking it. See `CHANGELOG.md` (Unreleased) for the exact
 mechanics.
+
+## Addendum (2026-11-20): aliases
+
+`mail.aliases` (`{address, to: [...]}`) makes an address deliver into one or more of the
+tenant's own mailboxes without an inbox of its own. mksrv renders the shared server's
+`postfix-virtual.cf` from every mail-hosted tenant's aliases (`alias@domain target1 target2`,
+lower-cased and sorted), **owns that file** (a hand-made alias on the server is overwritten at
+the next `tenant apply`), and restarts the shared server only when it changed, and at most
+once per run together with the mailbox reconcile. With no aliases anywhere and no file on the
+server nothing is created; once aliases have existed, removing them all rewrites the file with
+only its header.
+
+Validation (`mksrv validate`): the alias is on one of the tenant's `domains`; it is not also a
+mailbox and not a duplicate; every target is a mailbox of the **same tenant**. External targets
+are deliberately refused for now: forwarding to an outside address through a shared server needs
+sender rewriting (SRS) and DMARC care this ADR does not take on, and restricting targets to the
+tenant's own mailboxes also rules out alias loops.
+
+**Not verified:** sending *as* the alias address from the target's mail client (depends on the
+server's sender-login rules), and that the server picks the file up on restart exactly as it does
+`postfix-accounts.cf` (it is the same mechanism; the first deploy will show).
+
