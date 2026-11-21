@@ -274,3 +274,50 @@ func TestMailAliasFileIsSortedLowercasedAndEmptyWithoutAliases(t *testing.T) {
 		t.Fatalf("no aliases must render nothing, got %q", got)
 	}
 }
+
+func TestStaleBackupAccessorsOnlyPicksBackupOnlyTokens(t *testing.T) {
+	t.Parallel()
+	got := staleBackupAccessors(map[string][]string{
+		"keep":      {"backup"},
+		"old1":      {"backup"},
+		"old2":      {"backup"},
+		"root":      {"root"},
+		"mixed":     {"backup", "default"},
+		"app":       {"svc-hgstg-lims-worker"},
+		"nopolicy":  nil,
+		"backupish": {"backup-admin"},
+	}, "keep")
+	want := []string{"old1", "old2"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("stale = %v, want %v (never root, never a token with more than the backup policy, never the one to keep)", got, want)
+	}
+	if got := staleBackupAccessors(map[string][]string{"only": {"backup"}}, "only"); len(got) != 0 {
+		t.Fatalf("the token to keep must survive, got %v", got)
+	}
+}
+
+func TestParseTokenAuthAndRenewalSucceeded(t *testing.T) {
+	t.Parallel()
+	tok, acc, err := parseTokenAuth(`{"auth":{"client_token":"s.abc","accessor":"acc1"}}`)
+	if err != nil || tok != "s.abc" || acc != "acc1" {
+		t.Fatalf("parseTokenAuth = %q %q %v", tok, acc, err)
+	}
+	if _, _, err := parseTokenAuth(`{"auth":{}}`); err == nil {
+		t.Fatal("a response with no client token must be an error")
+	}
+	for name, c := range map[string]struct {
+		in   string
+		want bool
+	}{
+		"same token back":           {`{"auth":{"client_token":"s.stored","accessor":"a","lease_duration":2592000}}`, true},
+		"a different token":         {`{"auth":{"client_token":"s.other","accessor":"a","lease_duration":2592000}}`, false},
+		"no token, accessor, lease": {`{"auth":{"accessor":"a","lease_duration":2592000}}`, true},
+		"no token, zero lease":      {`{"auth":{"accessor":"a","lease_duration":0}}`, false},
+		"empty auth":                {`{"auth":{}}`, false},
+		"not json":                  {`permission denied`, false},
+	} {
+		if got := renewalSucceeded(c.in, "s.stored"); got != c.want {
+			t.Errorf("%s: renewalSucceeded = %v, want %v", name, got, c.want)
+		}
+	}
+}
