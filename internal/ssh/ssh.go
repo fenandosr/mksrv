@@ -174,7 +174,7 @@ func (c *Client) Run(ctx context.Context, command string) (Result, error) {
 			result.ExitCode = exitErr.ExitStatus()
 			return result, fmt.Errorf("%s: command exited %d: %s", c.target.Host, result.ExitCode, strings.TrimSpace(stderr.String()))
 		}
-		return result, fmt.Errorf("%s: run %q: %w", c.target.Host, command, err)
+		return result, fmt.Errorf("%s: run %q: %w", c.target.Host, RedactCommand(command), err)
 	}
 }
 
@@ -206,7 +206,7 @@ func (c *Client) RunInput(ctx context.Context, command string, input []byte) (Re
 		if errors.As(err, &exitErr) {
 			result.ExitCode = exitErr.ExitStatus()
 		}
-		return result, fmt.Errorf("%s: %q: %s", c.target.Host, command, strings.TrimSpace(stderr.String()))
+		return result, fmt.Errorf("%s: %q: %s", c.target.Host, RedactCommand(command), strings.TrimSpace(stderr.String()))
 	}
 }
 

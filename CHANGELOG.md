@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fix (security): errors that quote a command no longer print credentials. mksrv builds
+  commands whose text carries secrets (an OpenBao token in `-e BAO_TOKEN=…`, `kv put …
+  password=…`, a connection URL), and the ssh and local runners quoted the whole command in
+  their error message, so a failed OpenBao call printed the root token. `RedactCommand` now
+  masks those values in all three error sites; the rest of the command stays readable.
+
 - Add (mail, ADR 0032 addendum): `mail.aliases` — an address that delivers into one or
   more of the tenant's own mailboxes, with no inbox of its own. mksrv owns the shared
   server's `postfix-virtual.cf` and restarts the server at most once per run, only on
