@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fix (mail): the mail certificate was force-reissued, and the shared mail server restarted, whenever the
+  issuance script text changed, because "the SAN list changed" was decided by comparing the whole script with
+  the installed one (the exit-status fix of the previous change triggered it). It now compares the DNS names the
+  installed certificate covers with the wanted ones; a missing certificate is issued, an unreadable one is left
+  to the daily timer.
+
 - Fix (mail): `mksrv-mail-cert.service` was marked failed every day. `acme.sh --issue` exits 2 when the
   certificate is not due for renewal, and the script (`set -e`) aborted on it, so `mksrv status` always showed the
   edge as failed and a real renewal failure could not be told apart. Status 2 is now success and the certificate

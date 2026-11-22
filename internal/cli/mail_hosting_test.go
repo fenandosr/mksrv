@@ -323,3 +323,64 @@ func TestMailCertScriptFailsOnARealIssueError(t *testing.T) {
 		t.Errorf("nothing must be installed after a failed issue, calls=%q", calls)
 	}
 }
+
+func TestCertSANsParsesOpensslOutput(t *testing.T) {
+	t.Parallel()
+	out := "X509v3 Subject Alternative Name: \n    DNS:mail.cloud-it.click, DNS:Mail.Mcps-Epcm.org\n"
+	got := certSANs(out)
+	if len(got) != 2 || got[0] != "mail.cloud-it.click" || got[1] != "mail.mcps-epcm.org" {
+		t.Fatalf("certSANs = %v", got)
+	}
+	if len(certSANs("")) != 0 || len(certSANs("unable to load certificate")) != 0 {
+		t.Error("output without DNS names must parse to nothing")
+	}
+	if len(certSANs("IP Address:10.0.0.1, email:a@b.example")) != 0 {
+		t.Error("only DNS names count")
+	}
+}
+
+func TestSanSetChanged(t *testing.T) {
+	t.Parallel()
+	wanted := []string{"mail.cloud-it.click", "mail.mcps-epcm.org"}
+	cases := []struct {
+		name      string
+		installed []string
+		want      bool
+	}{
+		{"same names, other order", []string{"mail.mcps-epcm.org", "mail.cloud-it.click"}, false},
+		{"same names, other case", []string{"MAIL.cloud-it.click", "mail.mcps-epcm.org"}, false},
+		{"a name is missing", []string{"mail.cloud-it.click"}, true},
+		{"an extra name", []string{"mail.cloud-it.click", "mail.mcps-epcm.org", "mail.new.example"}, true},
+		{"a different name", []string{"mail.cloud-it.click", "mail.other.example"}, true},
+		{"unreadable certificate must not force a reissue", nil, false},
+	}
+	for _, c := range cases {
+		if got := sanSetChanged(c.installed, wanted); got != c.want {
+			t.Errorf("%s: sanSetChanged = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestMailCertDecision(t *testing.T) {
+	t.Parallel()
+	wanted := []string{"mail.cloud-it.click", "mail.mcps-epcm.org"}
+	san := "X509v3 Subject Alternative Name: \n    DNS:mail.cloud-it.click, DNS:mail.mcps-epcm.org\n"
+	pem := "-----BEGIN CERTIFICATE-----\nMII\n-----END CERTIFICATE-----\n"
+	cases := []struct {
+		name            string
+		cert, sanOutput string
+		wantIssue       bool
+		wantForce       bool
+	}{
+		{"cert covers exactly the wanted names: leave it alone", pem, san, false, false},
+		{"no certificate yet: issue, but not forced", "", "", true, false},
+		{"a wanted name is missing from the cert: forced reissue", pem, "DNS:mail.cloud-it.click", true, true},
+		{"cert present but its names unreadable: do not force anything", pem, "", false, false},
+	}
+	for _, c := range cases {
+		issue, force := mailCertDecision(c.cert, c.sanOutput, wanted)
+		if issue != c.wantIssue || force != c.wantForce {
+			t.Errorf("%s: issue=%v force=%v, want issue=%v force=%v", c.name, issue, force, c.wantIssue, c.wantForce)
+		}
+	}
+}
