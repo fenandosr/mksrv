@@ -110,6 +110,7 @@ func DeployStack(ctx context.Context, client Runner, opts Options) (StackResult,
 	// TimeoutStartSec / restart rate limiter (best-effort, with retries).
 	prePull(ctx, client, stack)
 
+	bindSources := bindMountedFiles(files)
 	quadletChanged := false
 	edgeFragmentChanged := false
 	for _, dst := range render.SortedPaths(files) {
@@ -123,7 +124,7 @@ func DeployStack(ctx context.Context, client Runner, opts Options) (StackResult,
 			result.Unchanged++
 			continue
 		}
-		if err := target.WriteFileSudo(ctx, dst, content, fileMode(dst)); err != nil {
+		if err := writeStackFile(ctx, target, dst, content, !isEdgeFragment && bindSources[dst]); err != nil {
 			return result, err
 		}
 		result.Changed = append(result.Changed, dst)
@@ -321,4 +322,55 @@ func runHealthCheck(ctx context.Context, client Runner, check model.StackHealth)
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// bindMountedFiles returns the host paths that a rendered Quadlet mounts into a container with
+// `Volume=<host path>:<container path>`, and that this deploy also renders. Only these need care
+// when rewritten, see writeStackFile.
+func bindMountedFiles(files map[string][]byte) map[string]bool {
+	out := map[string]bool{}
+	for dst, content := range files {
+		if !strings.HasPrefix(dst, quadletDir) {
+			continue
+		}
+		for _, line := range strings.Split(string(content), "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "Volume=") {
+				continue
+			}
+			src, _, ok := strings.Cut(strings.TrimPrefix(line, "Volume="), ":")
+			if ok && strings.HasPrefix(src, "/") {
+				if _, rendered := files[src]; rendered {
+					out[src] = true
+				}
+			}
+		}
+	}
+	return out
+}
+
+// writeStackFile writes one rendered file. A file a container bind-mounts as a single file must
+// keep its inode: the usual write (temp file, then rename) gives the path a new inode, and a
+// running container keeps seeing the old one, so a config change is silently not applied (a
+// reload re-reads the stale file and reports success). Prometheus ran with a ten-week-old
+// rules.yml that way. Such files are therefore rewritten in place; everything else keeps the
+// atomic rename.
+func writeStackFile(ctx context.Context, client Runner, dst string, content []byte, keepInode bool) error {
+	if !keepInode {
+		return client.WriteFileSudo(ctx, dst, content, fileMode(dst))
+	}
+	res, err := client.RunInput(ctx, "sudo -n sh -c "+shellQuote(keepInodeScript(dst, fileMode(dst))), content)
+	if err != nil {
+		return fmt.Errorf("write %s: %s", dst, strings.TrimSpace(res.Stderr+" "+err.Error()))
+	}
+	return nil
+}
+
+// keepInodeScript reads the new content from stdin. An existing file is overwritten in place
+// (same inode, so every bind mount sees it); a missing one is created the usual atomic way.
+func keepInodeScript(path string, mode fs.FileMode) string {
+	return fmt.Sprintf(
+		`set -e; p=%s; m=%s; mkdir -p "$(dirname "$p")"; if [ -f "$p" ]; then cat > "$p"; chmod "$m" "$p"; else t="$p.mksrv.tmp"; cat > "$t"; chmod "$m" "$t"; mv -f "$t" "$p"; fi`,
+		shellQuote(path), fmt.Sprintf("%04o", mode.Perm()),
+	)
 }
