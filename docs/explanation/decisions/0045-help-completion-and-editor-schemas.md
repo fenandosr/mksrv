@@ -1,6 +1,6 @@
 # ADR 0045: Command help, shell completion and editor schemas, in three phases
 
-- Status: Accepted. Phases 1 (B) and 2 (A) implemented; phase 3 (C) proposed. Each phase is its own change.
+- Status: Accepted. All three phases implemented. Each phase was its own change.
 - Date: 2026-11-21
 
 ## Context
@@ -115,4 +115,17 @@ does; no editor was tried: only an independent JSON Schema validator was), and p
 `--list`/`--revoke` are declared mutually exclusive; the stale root text is gone. Differences from the plan: no completer
 for a mail alias or mailbox (no command takes one today). A completion call took about 35 ms on a real workspace. Not
 verified: the generated scripts in an interactive shell (only the `__complete` machinery they call was exercised).
+
+
+## Phase 3 as built (2026-11-22)
+
+`defaultSnippets` are injected into the generated schemas from a table in `internal/engine/schema.go`: a tenant
+skeleton, an `aws` and an `existing` host, `web`, hosted `mail`, `storage` (bucket; bucket plus AppRole) and a
+`database.service_roles` entry. Two tests: each snippet is validated against the effective schema, and each is
+put into a copy of the example workspace and the **whole workspace** must pass `validate` (semantic rules
+included). The second test found four snippets the schema alone had accepted and `validate` rejected (a host
+carrying `base` twice, `base` on an `existing` host, a service role not prefixed by the tenant id, AppRoles
+without the `openbao` stack); they were fixed. The AppRole snippet still depends on a precondition the example
+fleet cannot meet (an `openbao` cluster), so its test accepts that one error and no other. Not verified: how an
+editor presents the snippets (no editor was tried).
 

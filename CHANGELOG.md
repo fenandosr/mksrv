@@ -10,6 +10,10 @@
   commands; `--service`/`--approle` and `--list`/`--revoke` are now rejected together; the root help text is no
   longer stale. See `docs/how-to/shell-completion.md`.
 
+- Feat (ADR 0045 phase 3): the generated schemas carry insertable templates (`defaultSnippets`): a tenant
+  skeleton, an `aws` and an `existing` host, `web`, hosted `mail`, `storage`, and a `database.service_roles`
+  entry. Each is validated against the schema and as part of a whole example workspace.
+
 - Fix (backup): the restic container could not read `/stage` or `/vol` (no SELinux label, Enforcing), so no
   snapshot ever held the Postgres dumps, the OpenBao snapshot or the Keycloak exports, only `/podvol`; restic's
   exit 3 was treated as a warning. The container now runs with `--security-opt label=disable`, and a run fails
