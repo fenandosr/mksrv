@@ -167,7 +167,7 @@ hosts:
 		err := validateYAMLAgainst(t, compiled, strings.Replace(base, "%s", typ, 1))
 		return err != nil && strings.Contains(err.Error(), "instance_type")
 	}
-	for _, ok := range []string{"t4g.small", "m7g.large", "t2.micro", "x2gd.xlarge", "c7a.4xlarge"} {
+	for _, ok := range []string{"t4g.small", "m7g.large", "t2.micro", "x2gd.xlarge", "c7a.4xlarge", "m7i-flex.large", "u-6tb1.metal"} {
 		if mentions(ok) {
 			t.Errorf("%s must be accepted (suggested or matching the pattern)", ok)
 		}

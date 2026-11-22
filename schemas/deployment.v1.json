@@ -132,7 +132,7 @@
       "required": ["provider", "stacks"],
       "properties": {
         "provider": {"type": "string", "enum": ["aws", "existing"]},
-        "instance_type": {"type": "string", "pattern": "^[a-z][a-z0-9.]+$"},
+        "instance_type": {"type": "string", "pattern": "^[a-z][a-z0-9.-]+$"},
         "root_gb": {"type": "integer", "minimum": 8, "maximum": 16384, "default": 30},
         "data_gb": {"type": "integer", "minimum": 8, "maximum": 16384, "default": 40},
         "address": {"type": "string", "minLength": 1, "maxLength": 255},
