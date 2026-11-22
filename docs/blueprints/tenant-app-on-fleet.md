@@ -137,6 +137,26 @@ Checklist before step 8:
   `semanage fcontext -a -e /var/lib/containers <home>/.local/share/containers`.
 - **A queue is not a cache.** Job queues that require `noeviction` cannot share
   the `cache` stack's `allkeys-lru` Redis.
+- **A Redis image with its default entrypoint may drop to a uid that cannot read a `0600` file of the
+  service user** (and a first failed attempt can leave `redis-data` owned by a mapped uid). Run it with
+  `UserNS=keep-id` and `User=<the service user's uid>`. *Reported by the SciNugget agent, seen on its node.*
+- **Podman with OCI-format images ignores the Dockerfile `HEALTHCHECK`.** Define the health check in the
+  Quadlet (`HealthCmd`). *Reported by the SciNugget agent.*
+- **`sudo -u <svc> -H` inherits the caller's working directory**, and `podman` then fails with `cannot chdir`.
+  `cd ~` first. *Reported by the SciNugget agent.*
+- **Latency to the database is not local latency.** Through the leader endpoint a query costs on the order of
+  100 ms or more, so Prisma's default 5 s interactive-transaction limit can expire in a script that was fine
+  locally; raise it. Do the S3 upload *after* the transaction, or delete the object when the transaction fails:
+  an upload first and a failed save leaves an orphan. *Reported by the SciNugget agent (its measurement).*
+- **The tenant's S3 key cannot delete objects, on purpose** (see
+  [ADR 0041](../explanation/decisions/0041-tenant-storage-s3-and-approles.md): deletion waits for retention
+  classes). A delete from the app fails with `AccessDenied`; an app that tolerates it leaves orphans for the
+  operator to clean. *Verified: the policy omits `DeleteObject` by design.*
+- **A backup is not proven by the job's exit status.** Until 2026-11-22 the restic container could not read the
+  staged dumps (no SELinux label under Enforcing) and restic's "some files unreadable" exit was treated as a
+  warning: no snapshot held a database dump. Check a snapshot's contents (`restic ls`), and try a restore.
+  The job now fails when staged files are not in the snapshot
+  ([ADR 0018 addendum](../explanation/decisions/0018-restic-backups.md)). *Verified.*
 
 ## 9. Known gaps in mksrv
 
@@ -148,4 +168,4 @@ Collected from the cases; each links to where it was found.
 | A reusable deploy-agent kit (the HG-LIMS agent is tied to `web` and `worker`) | Open | both |
 | Rendering OpenBao secrets into the environment of an app with no OpenBao client | Open | [SciNugget](cases/scinugget.md) |
 | Logs and metrics from tenant nodes | Open | both |
-| A leader-aware Postgres endpoint for clients that accept a single host | Designed and implemented, **not deployed** ([ADR 0044](../explanation/decisions/0044-postgres-leader-endpoint.md)) | [SciNugget](cases/scinugget.md) |
+| A leader-aware Postgres endpoint for clients that accept a single host | Deployed (`url_single`, port 5433) ([ADR 0044](../explanation/decisions/0044-postgres-leader-endpoint.md)); a real failover and the added latency are **not yet measured** | [SciNugget](cases/scinugget.md) |
