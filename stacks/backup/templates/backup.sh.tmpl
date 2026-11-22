@@ -116,9 +116,13 @@ elif [ "$rc" != 0 ]; then
 fi
 # Exit 3 hid for weeks that restic could not read the staged dumps at all. Whatever was
 # staged must be IN the snapshot, or the run is not a backup of it.
-if [ -n "$(find "$STAGE" -type f -size +0 2>/dev/null | head -n 1)" ] \
-   && ! restic ls latest --tag mksrv --host "$(hostname -s)" /stage 2>/dev/null | grep -q '^/stage/.'; then
-  fail snapshot "the snapshot does not contain the staged dumps (restic could not read /stage)"
+# (grep -c reads to the end: `grep -q` would close the pipe early and, under pipefail, make
+# restic's SIGPIPE look like an empty snapshot.)
+if [ -n "$(find "$STAGE" -type f -size +0 2>/dev/null | head -n 1)" ]; then
+  staged_in_snapshot=$(restic ls latest --tag mksrv --host "$(hostname -s)" /stage 2>/dev/null | grep -c '^/stage/.')
+  if [ "${staged_in_snapshot:-0}" -eq 0 ]; then
+    fail snapshot "the snapshot does not contain the staged dumps (restic could not read /stage)"
+  fi
 fi
 
 # 5. retention.
