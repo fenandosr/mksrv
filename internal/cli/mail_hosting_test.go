@@ -334,7 +334,7 @@ func TestCertSANsParsesOpensslOutput(t *testing.T) {
 	if len(certSANs("")) != 0 || len(certSANs("unable to load certificate")) != 0 {
 		t.Error("output without DNS names must parse to nothing")
 	}
-	if len(certSANs("IP Address:10.0.0.1, email:a@b.example")) != 0 {
+	if len(certSANs("IP Address:10.0.0.1, email:a@example.com")) != 0 {
 		t.Error("only DNS names count")
 	}
 }
