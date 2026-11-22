@@ -327,7 +327,16 @@ ISSUE_ARGS=(--issue --server letsencrypt --dns dns_aws%[4]s)
 if [ "$FORCE" = "--force" ]; then
 	ISSUE_ARGS+=(--force)
 fi
-acme "${ISSUE_ARGS[@]}"
+# acme.sh --issue exits 2 ("renewal skipped") when the certificate is not due yet. That is the
+# normal answer on almost every daily run, not a failure: under set -e it used to abort the
+# script and mark the unit failed every day, which hid real failures. Any other status is still
+# fatal. The install below then runs every time, as the comment further down already assumed.
+rc=0
+acme "${ISSUE_ARGS[@]}" || rc=$?
+if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+	echo "acme.sh --issue failed with status $rc" >&2
+	exit "$rc"
+fi
 
 # --install-cert alone, with its own TLS_DIR mount -- :z (shared, lowercase)
 # because mksrv-mailserver.container also bind-mounts this same host
