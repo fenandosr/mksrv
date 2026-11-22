@@ -11,6 +11,11 @@
   failed before (the Quadlet file is gone, so nothing clears it), and `mksrv status` reported it indefinitely
   (mcps, ten days). The teardown now reloads systemd and runs `reset-failed`.
 
+- Fix (deploy): a config file that a container bind-mounts as a single file was replaced by rename, so the
+  running container kept the old inode and never saw the change (Prometheus ran with a ten-week-old `rules.yml`,
+  and `/-/reload` re-read it and reported success). Such files are now rewritten in place; others keep the atomic
+  rename. A container already holding an old inode needs one restart.
+
 - Fix (schema): `instance_type` rejected EC2 types that contain a hyphen (`m7i-flex.large`, `u-6tb1.metal`);
   the pattern now allows it.
 
