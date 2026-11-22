@@ -51,11 +51,13 @@ var vpnRedirectURIs = []string{
 func (a *App) newTenantCommand(opts *globalOptions) *cobra.Command {
 	cmd := &cobra.Command{Use: "tenant", Short: "Reconcile tenant realms, mesh users, and the VPN broker"}
 	cmd.AddCommand(&cobra.Command{
-		Use:   "apply [ID...]",
-		Short: "Create/update realms, groups, OIDC clients, and configd",
+		Use:     "apply [ID...]",
+		Short:   "Create/update realms, groups, OIDC clients, and configd",
+		Example: "  mksrv tenant apply            # every tenant of the workspace\n  mksrv tenant apply acme       # just one",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.runTenantApply(cmd.Context(), a.printer(opts), opts, args)
 		},
+		ValidArgsFunction: a.tenantIDsCompleter(opts, 0),
 	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "list",
@@ -66,9 +68,10 @@ func (a *App) newTenantCommand(opts *globalOptions) *cobra.Command {
 		},
 	})
 	mesh := &cobra.Command{
-		Use:   "mesh ID",
-		Short: "Mint a Headscale pre-auth key so a tenant-owned node can join the mesh",
-		Args:  cobra.ExactArgs(1),
+		Use:               "mesh ID",
+		Short:             "Mint a Headscale pre-auth key so a tenant-owned node can join the mesh",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.tenantIDsCompleter(opts, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			hostname, _ := cmd.Flags().GetString("hostname")
 			reusable, _ := cmd.Flags().GetBool("reusable")
@@ -84,7 +87,11 @@ func (a *App) newTenantCommand(opts *globalOptions) *cobra.Command {
 	secretID := &cobra.Command{
 		Use:   "secret-id ID",
 		Short: "Mint a wrapped OpenBao AppRole SecretID for a tenant's service (Django, Celery, …)",
-		Args:  cobra.ExactArgs(1),
+		Example: "  mksrv tenant secret-id acme                      # the tenant's own AppRole\n" +
+			"  mksrv tenant secret-id acme --approle app        # a storage.approles entry (svc-acme-app)\n" +
+			"  mksrv tenant secret-id acme --list               # issued SecretID accessors",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.tenantIDsCompleter(opts, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o := tenantSecretIDOptions{}
 			o.Name, _ = cmd.Flags().GetString("name")
@@ -108,6 +115,9 @@ func (a *App) newTenantCommand(opts *globalOptions) *cobra.Command {
 	secretID.Flags().StringSlice("cidr", nil, "bind the SecretID and its tokens to these source CIDRs")
 	secretID.Flags().Bool("list", false, "list issued SecretID accessors instead of minting")
 	secretID.Flags().String("revoke", "", "destroy a SecretID by accessor")
+	secretID.MarkFlagsMutuallyExclusive("service", "approle")
+	secretID.MarkFlagsMutuallyExclusive("list", "revoke")
+	_ = secretID.RegisterFlagCompletionFunc("approle", a.approleNamesCompleter(opts))
 	cmd.AddCommand(secretID)
 	return cmd
 }

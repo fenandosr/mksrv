@@ -1,6 +1,6 @@
 # ADR 0045: Command help, shell completion and editor schemas, in three phases
 
-- Status: Accepted. Phase 1 (B) implemented; phases 2 (A) and 3 (C) proposed. Each phase is its own change.
+- Status: Accepted. Phases 1 (B) and 2 (A) implemented; phase 3 (C) proposed. Each phase is its own change.
 - Date: 2026-11-21
 
 ## Context
@@ -67,7 +67,7 @@ change, mergeable and useful alone.
 - Pre-existing and not changed here: the base `instance_type` pattern (`^[a-z][a-z0-9.]+$`) rejects types
   with a hyphen such as `m7i-flex.large`.
 
-### Phase 2 — A: shell completion and better `--help`
+### Phase 2 — A: shell completion and better `--help` (implemented)
 
 - Remove `DisableDefaultCmd`, so `mksrv completion bash|zsh|fish|powershell` exists.
 - **Dynamic completion** read from the workspace (found the same way as for any command, silently empty
@@ -106,3 +106,13 @@ change, mergeable and useful alone.
 
 That a given editor honours the schema header and the enums (the YAML language server in the common editors
 does; no editor was tried: only an independent JSON Schema validator was), and phases 2 and 3.
+
+## Phase 2 as built (2026-11-22)
+
+`mksrv completion` exists; completers for tenant ids, host names, `--stack` (from the embedded catalog) and a tenant's
+`--approle` read the workspace quietly and are covered by a test each, plus a test that no workspace means no output.
+`Example:` is on `deploy`, `tenant apply`, `tenant secret-id`, `users apply` and `backup run`; `--service`/`--approle` and
+`--list`/`--revoke` are declared mutually exclusive; the stale root text is gone. Differences from the plan: no completer
+for a mail alias or mailbox (no command takes one today). A completion call took about 35 ms on a real workspace. Not
+verified: the generated scripts in an interactive shell (only the `__complete` machinery they call was exercised).
+

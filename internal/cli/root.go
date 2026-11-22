@@ -80,8 +80,8 @@ type globalOptions struct {
 const rootLong = `mksrv — Service stacks as code — deploy anywhere, wired by the mesh.
 
 Machine-readable results are written as JSON to stdout; human diagnostics stay on
-stderr. Commands for infrastructure, deploy, tenants, users, DNS, and secrets are
-added in milestones M1–M6.`
+stderr. Run "mksrv <command> --help" for a command's flags and examples, and
+"mksrv completion --help" to set up shell completion.`
 
 // Execute parses args and runs one command.
 func (a *App) Execute(ctx context.Context, args []string) error {
@@ -104,12 +104,11 @@ func (a *App) Execute(ctx context.Context, args []string) error {
 
 func (a *App) newRootCommand(opts *globalOptions) *cobra.Command {
 	root := &cobra.Command{
-		Use:               "mksrv",
-		Short:             "Service stacks as code — deploy anywhere, wired by the mesh.",
-		Long:              rootLong,
-		SilenceUsage:      true,
-		SilenceErrors:     true,
-		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
+		Use:           "mksrv",
+		Short:         "Service stacks as code — deploy anywhere, wired by the mesh.",
+		Long:          rootLong,
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if opts.Quiet && opts.Verbose > 0 {
 				return fmt.Errorf("--quiet and --verbose cannot be used together")
