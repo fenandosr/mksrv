@@ -184,3 +184,29 @@ func TestPostgrestTemplateAppSettings(t *testing.T) {
 		t.Fatalf("oidc_issuer override wrong:\n%s", over)
 	}
 }
+
+func TestPostgrestTeardownClearsAFailedUnit(t *testing.T) {
+	t.Parallel()
+	cmds := postgrestTeardownCommands("acme")
+	index := func(sub string) int {
+		for i, c := range cmds {
+			if strings.Contains(c, sub) {
+				return i
+			}
+		}
+		return -1
+	}
+	rm, reload, reset := index("rm -f /etc/containers/systemd/mksrv-postgrest-acme.container"), index("daemon-reload"), index("reset-failed mksrv-postgrest-acme.service")
+	if rm < 0 || reload < 0 || reset < 0 {
+		t.Fatalf("teardown must remove the Quadlet, reload systemd and clear the failed state, got %q", cmds)
+	}
+	if !(rm < reload && reload < reset) {
+		t.Errorf("order must be remove, reload, reset-failed (a failed unit lingers otherwise), got %q", cmds)
+	}
+	if !strings.HasSuffix(cmds[reset], "|| true") {
+		t.Errorf("reset-failed must tolerate a unit that no longer exists: %q", cmds[reset])
+	}
+	if !strings.Contains(cmds[0], "disable --now mksrv-postgrest-acme.service") {
+		t.Errorf("the unit must still be stopped first: %q", cmds[0])
+	}
+}
