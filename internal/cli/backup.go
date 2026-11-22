@@ -252,9 +252,10 @@ func (f *fleet) revokeStaleBackupTokens(ctx context.Context, client *sshx.Client
 func (a *App) newBackupCommand(opts *globalOptions) *cobra.Command {
 	cmd := &cobra.Command{Use: "backup", Short: "Run and inspect restic backups"}
 	cmd.AddCommand(&cobra.Command{
-		Use:   "run",
-		Short: "Trigger a backup now and wait for it",
-		Args:  cobra.NoArgs,
+		Use:     "run",
+		Example: "  mksrv backup run   # take a snapshot now; see the result with: mksrv backup list",
+		Short:   "Trigger a backup now and wait for it",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runBackup(cmd.Context(), a.printer(opts), opts, "run")
 		},

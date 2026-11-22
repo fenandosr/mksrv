@@ -5,6 +5,11 @@
 - Fix (schema): `instance_type` rejected EC2 types that contain a hyphen (`m7i-flex.large`, `u-6tb1.metal`);
   the pattern now allows it.
 
+- Feat (ADR 0045 phase 2): `mksrv completion bash|zsh|fish|powershell`; dynamic completion of tenant ids, host
+  names, `--stack` and a tenant's `--approle` from the workspace (quiet and local-only); `Example:` on the most-used
+  commands; `--service`/`--approle` and `--list`/`--revoke` are now rejected together; the root help text is no
+  longer stale. See `docs/how-to/shell-completion.md`.
+
 - Fix (backup): the restic container could not read `/stage` or `/vol` (no SELinux label, Enforcing), so no
   snapshot ever held the Postgres dumps, the OpenBao snapshot or the Keycloak exports, only `/podvol`; restic's
   exit 3 was treated as a warning. The container now runs with `--security-opt label=disable`, and a run fails

@@ -371,11 +371,15 @@ func (a *App) newDeployCommand(opts *globalOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "deploy [HOST...]",
 		Short: "Render and deploy stacks to their hosts",
+		Example: "  mksrv deploy                      # every stack on every host\n" +
+			"  mksrv deploy appd --stack backup  # one stack on one host",
+		ValidArgsFunction: a.hostNamesCompleter(opts),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.runDeploy(cmd.Context(), a.printer(opts), opts, args, stackNames)
 		},
 	}
 	cmd.Flags().StringSliceVar(&stackNames, "stack", nil, "Limit to these stacks (default: every stack on the selected hosts)")
+	_ = cmd.RegisterFlagCompletionFunc("stack", stackNamesCompleter)
 	return cmd
 }
 

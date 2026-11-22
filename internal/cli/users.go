@@ -15,11 +15,13 @@ import (
 func (a *App) newUsersCommand(opts *globalOptions) *cobra.Command {
 	cmd := &cobra.Command{Use: "users", Short: "Reconcile declarative tenant users"}
 	cmd.AddCommand(&cobra.Command{
-		Use:   "apply [ID...]",
-		Short: "Create/update Keycloak users from tenants/<id>.users.yaml",
+		Use:     "apply [ID...]",
+		Short:   "Create/update Keycloak users from tenants/<id>.users.yaml",
+		Example: "  mksrv users apply acme",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.runUsersApply(cmd.Context(), a.printer(opts), opts, args)
 		},
+		ValidArgsFunction: a.tenantIDsCompleter(opts, 0),
 	})
 	return cmd
 }
