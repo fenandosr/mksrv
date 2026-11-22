@@ -133,6 +133,22 @@ func (f *fleet) postgrestPorts() (map[string]int, error) {
 	return ports, nil
 }
 
+// postgrestTeardownCommands are the commands, in order, that remove a tenant's PostgREST from the
+// data host. The last two matter when the unit had failed before it was torn down: with the Quadlet
+// file gone, a failed unit lingers in systemd's memory (and `mksrv status` reports it) until the
+// units are reloaded and its failed state is cleared; mcps carried one for ten days. Every step
+// tolerates the unit or secret not existing, because this runs on every tenant apply.
+func postgrestTeardownCommands(id string) []string {
+	unit := "mksrv-postgrest-" + id + ".service"
+	return []string{
+		"sudo systemctl disable --now " + unit + " 2>/dev/null || true",
+		"sudo rm -f /etc/containers/systemd/mksrv-postgrest-" + id + ".container",
+		"sudo podman secret rm mksrv-database-postgrest-" + id + "-dburi mksrv-database-postgrest-" + id + "-jwt 2>/dev/null || true",
+		"sudo systemctl daemon-reload",
+		"sudo systemctl reset-failed " + unit + " 2>/dev/null || true",
+	}
+}
+
 // reconcilePostgREST deploys one PostgREST container per tenant that consumes
 // the database stack. Each instance connects to db_<id> as the <id>_auth
 // authenticator, verifies Keycloak tokens against the tenant realm's JWKS, and
@@ -178,9 +194,9 @@ func (f *fleet) reconcilePostgREST(ctx context.Context, printer ui.Printer, edge
 
 	// Tear down PostgREST for tenants that turned it off.
 	for _, id := range disabled {
-		_, _ = client.Run(ctx, "sudo systemctl disable --now mksrv-postgrest-"+id+".service 2>/dev/null || true")
-		_, _ = client.Run(ctx, "sudo rm -f /etc/containers/systemd/mksrv-postgrest-"+id+".container")
-		_, _ = client.Run(ctx, "sudo podman secret rm mksrv-database-postgrest-"+id+"-dburi mksrv-database-postgrest-"+id+"-jwt 2>/dev/null || true")
+		for _, cmd := range postgrestTeardownCommands(id) {
+			_, _ = client.Run(ctx, cmd)
+		}
 		_, _ = edgeClient.Run(ctx, "sudo rm -f /var/lib/mksrv/caddy.d/21-postgrest-"+id+".caddy")
 		printer.Success("tenant %s: postgrest disabled (torn down)", id)
 	}

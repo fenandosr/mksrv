@@ -7,6 +7,10 @@
   edge as failed and a real renewal failure could not be told apart. Status 2 is now success and the certificate
   is installed on every run; any other status still fails and says so.
 
+- Fix (postgrest): tearing down a tenant's PostgREST left a failed unit in systemd's memory when the unit had
+  failed before (the Quadlet file is gone, so nothing clears it), and `mksrv status` reported it indefinitely
+  (mcps, ten days). The teardown now reloads systemd and runs `reset-failed`.
+
 - Fix (schema): `instance_type` rejected EC2 types that contain a hyphen (`m7i-flex.large`, `u-6tb1.metal`);
   the pattern now allows it.
 
