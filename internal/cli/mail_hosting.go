@@ -378,9 +378,64 @@ Persistent=true
 WantedBy=timers.target
 `
 
+// certSANs parses the DNS names out of `openssl x509 -noout -ext subjectAltName` output, for
+// example "X509v3 Subject Alternative Name: \n    DNS:mail.a.example, DNS:mail.b.example".
+func certSANs(out string) []string {
+	var names []string
+	for _, part := range strings.FieldsFunc(out, func(r rune) bool { return r == ',' || r == '\n' }) {
+		part = strings.TrimSpace(part)
+		if name, ok := strings.CutPrefix(part, "DNS:"); ok && name != "" {
+			names = append(names, strings.ToLower(name))
+		}
+	}
+	return names
+}
+
+// sanSetChanged reports whether the installed certificate's names differ from the wanted ones
+// (as sets, ignoring order and case). When the certificate's names could not be read at all
+// (no certificate yet, no openssl), it reports no change: an absent certificate is handled by
+// the caller, and an unreadable one must not trigger a forced reissuance.
+func sanSetChanged(installed, wanted []string) bool {
+	if len(installed) == 0 {
+		return false
+	}
+	have := map[string]bool{}
+	for _, n := range installed {
+		have[strings.ToLower(n)] = true
+	}
+	want := map[string]bool{}
+	for _, n := range wanted {
+		want[strings.ToLower(n)] = true
+	}
+	if len(have) != len(want) {
+		return true
+	}
+	for n := range want {
+		if !have[n] {
+			return true
+		}
+	}
+	return false
+}
+
+// mailCertDecision says whether to run the issuance script now, and whether to force it. A missing
+// certificate is issued normally; a certificate that does not cover the wanted names is reissued
+// by force (a tenant that just turned on a branded hostname should not wait for the next tick);
+// anything else is left to the daily timer. It deliberately takes no part of the script text.
+func mailCertDecision(installedCert, sanOutput string, wanted []string) (issue, force bool) {
+	if strings.TrimSpace(installedCert) == "" {
+		return true, false
+	}
+	if sanSetChanged(certSANs(sanOutput), wanted) {
+		return true, true
+	}
+	return false, false
+}
+
 // reconcileMailCert ensures the issuance script + its systemd timer are in
 // place, and runs the script immediately (forcing reissuance) whenever the
-// SAN list changed since the last run — rather than waiting for the next
+// names the installed certificate covers differ from the wanted SAN list —
+// rather than waiting for the next
 // scheduled tick — then restarts the mailserver only if the cert actually
 // changed. See mailCertIssueScript for why this exists instead of copying a
 // cert from Caddy.
@@ -388,8 +443,11 @@ func (f *fleet) reconcileMailCert(ctx context.Context, printer ui.Printer, clien
 	hostnames := mailCertHostnames(f.data.Deployment.DNS.RootDomain, f.data.Tenants)
 	script := mailCertIssueScript(hostnames)
 
-	oldScript, _ := client.Run(ctx, "sudo cat "+mailCertScript+" 2>/dev/null || true")
-	sanListChanged := strings.TrimSpace(oldScript.Stdout) != strings.TrimSpace(script)
+	// Reissue only when the names the installed certificate covers differ from the names wanted.
+	// This used to compare the whole script text, so ANY edit of the script template (a fix to its
+	// exit-status handling, say) counted as "the SAN list changed", forced a Let's Encrypt
+	// reissuance and restarted the shared mail server on the next tenant apply.
+	sanOut, _ := client.Run(ctx, "sudo openssl x509 -noout -ext subjectAltName -in "+mailTLSDir+"/fullchain.pem 2>/dev/null || true")
 
 	if err := client.WriteFileSudo(ctx, mailCertScript, []byte(script), 0o700); err != nil {
 		return fmt.Errorf("write %s: %w", mailCertScript, err)
@@ -405,10 +463,10 @@ func (f *fleet) reconcileMailCert(ctx context.Context, printer ui.Printer, clien
 	}
 
 	oldCert, _ := client.Run(ctx, "sudo cat "+mailTLSDir+"/fullchain.pem 2>/dev/null || true")
-	needIssue := sanListChanged || strings.TrimSpace(oldCert.Stdout) == ""
+	needIssue, forceIssue := mailCertDecision(oldCert.Stdout, sanOut.Stdout, hostnames)
 	if needIssue {
 		force := ""
-		if sanListChanged {
+		if forceIssue {
 			force = " --force"
 		}
 		printer.Info("mail: issuing certificate for %s (this can take a minute)", strings.Join(hostnames, ", "))
