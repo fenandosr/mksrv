@@ -5,6 +5,8 @@ package engine
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -266,5 +268,107 @@ func TestDescriptionsAreInjectedAndTheBaseSchemaIsUntouched(t *testing.T) {
 	}
 	if !strings.Contains(doc["$comment"].(string), "mksrv schema tenant") {
 		t.Fatalf("the generated file must say how to regenerate it, got %v", doc["$comment"])
+	}
+}
+
+// snippetTarget returns where a snippet's body lands in a document: the keys that lead to it,
+// from a schema path like /properties/database/properties/service_roles.
+func snippetTarget(path string) []string {
+	var keys []string
+	segs := strings.Split(strings.Trim(path, "/"), "/")
+	for i := 0; i < len(segs); i++ {
+		if segs[i] == "properties" && i+1 < len(segs) {
+			keys = append(keys, segs[i+1])
+			i++
+		}
+	}
+	return keys
+}
+
+// putAt sets doc[keys...] = value, creating the maps on the way.
+func putAt(doc map[string]any, keys []string, value any) {
+	cur := doc
+	for _, k := range keys[:len(keys)-1] {
+		next, ok := cur[k].(map[string]any)
+		if !ok {
+			next = map[string]any{}
+			cur[k] = next
+		}
+		cur = next
+	}
+	cur[keys[len(keys)-1]] = value
+}
+
+// TestEverySnippetIsValidAsInserted instantiates each default snippet into a minimal document and
+// validates it against the effective schema it is offered from (ADR 0045 phase 3).
+func TestEverySnippetIsValidAsInserted(t *testing.T) {
+	t.Parallel()
+	catalog := testCatalog(t)
+	tenantBase := `{"version":1,"id":"acme","display_name":"ACME","base_domain":"acme.example.com","stacks":["database"]}`
+	// A VALID deployment, so any error is the snippet's: the example workspace's own file.
+	deploymentBase, err := os.ReadFile(filepath.Join("..", "..", "examples", "workspace", "deployment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for name, byPath := range schemaSnippets {
+		compiled := compileEffective(t, name, catalog)
+		for path, list := range byPath {
+			for _, sn := range list {
+				count++
+				var body any
+				if err := json.Unmarshal([]byte(sn.Body), &body); err != nil {
+					t.Fatalf("%s %q: body is not JSON: %v", name, sn.Label, err)
+				}
+				var doc map[string]any
+				switch {
+				case name == "tenant" && path == "":
+					doc, _ = body.(map[string]any)
+				case name == "tenant":
+					_ = json.Unmarshal([]byte(tenantBase), &doc)
+					putAt(doc, snippetTarget(path), body)
+				default:
+					raw, err := yaml.YAMLToJSON(deploymentBase)
+					if err != nil {
+						t.Fatal(err)
+					}
+					_ = json.Unmarshal(raw, &doc)
+					doc["hosts"] = map[string]any{} // the snippet is a host to ADD, so start from none
+					putAt(doc, snippetTarget(path), body)
+				}
+				out, _ := yaml.Marshal(doc)
+				if err := validateYAMLAgainst(t, compiled, string(out)); err != nil {
+					t.Errorf("%s snippet %q (at %q) is not valid as inserted:\n%s\n%v", name, sn.Label, path, out, err)
+				}
+			}
+		}
+	}
+	if count < 7 {
+		t.Fatalf("expected the planned snippets, found %d", count)
+	}
+}
+
+func TestSnippetsReachTheGeneratedSchema(t *testing.T) {
+	t.Parallel()
+	data, err := EffectiveSchema("tenant", testCatalog(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	_ = json.Unmarshal(data, &doc)
+	web, err := node(doc, "/properties/web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snips, _ := web["defaultSnippets"].([]any)
+	if len(snips) != 1 {
+		t.Fatalf("web must carry its snippet, got %v", web["defaultSnippets"])
+	}
+	first := snips[0].(map[string]any)
+	if first["label"] != "web hostname" {
+		t.Errorf("label = %v", first["label"])
+	}
+	if _, ok := doc["defaultSnippets"].([]any); !ok {
+		t.Error("the tenant root must carry the skeleton snippet")
 	}
 }

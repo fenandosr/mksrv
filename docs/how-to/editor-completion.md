@@ -27,6 +27,12 @@ so what it suggests always matches that version.
   for). The instance list is only a suggestion: any other type that matches the pattern is accepted.
 - A red mark on a stack name that is not in the catalog, before you run `validate`.
 - A description when you hover the main fields.
+- **Insertable templates** (`defaultSnippets`): a whole tenant skeleton at the top of a tenant file, a host
+  (`aws` or `existing`) under `hosts:`, and the blocks people copy most: `web`, `mail`, `storage` (an S3 bucket,
+  or a bucket plus an AppRole) and a `database.service_roles` entry. Each is valid as inserted, with placeholder
+  values on documentation domains that you then edit. Two have a precondition the description states: the AppRole
+  one needs `openbao` among the tenant's stacks (and a fleet that carries it), and a service role's name must
+  start with the tenant id. How the editor presents snippets varies; in VS Code they appear in the completion list.
 
 `mksrv schema deployment|tenant|users|stack` prints the same schema to stdout, for an editor that wants a
 file of its own or for a script.
