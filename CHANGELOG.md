@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix (mail): `mksrv-mail-cert.service` was marked failed every day. `acme.sh --issue` exits 2 when the
+  certificate is not due for renewal, and the script (`set -e`) aborted on it, so `mksrv status` always showed the
+  edge as failed and a real renewal failure could not be told apart. Status 2 is now success and the certificate
+  is installed on every run; any other status still fails and says so.
+
 - Fix (schema): `instance_type` rejected EC2 types that contain a hyphen (`m7i-flex.large`, `u-6tb1.metal`);
   the pattern now allows it.
 

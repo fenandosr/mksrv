@@ -3,6 +3,9 @@
 package cli
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -244,5 +247,79 @@ func TestMTASTSFragmentServesWellKnownOnly(t *testing.T) {
 	}
 	if !strings.Contains(frag, "respond 404") {
 		t.Fatalf("fragment must 404 everything but the well-known path:\n%s", frag)
+	}
+}
+
+// runMailCertScript executes the rendered script with curl, jq and podman stubbed. The stub
+// podman exits with $STUB_ISSUE_RC for the `--issue` call (the container's exit status is what
+// acme.sh returns) and 0 otherwise, and logs which acme.sh action ran.
+func runMailCertScript(t *testing.T, issueRC string) (output string, exitCode int, calls string) {
+	t.Helper()
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	root := t.TempDir()
+	script := mailCertIssueScript([]string{"mail.example.com"})
+	script = strings.ReplaceAll(script, mailAcmeStateDir, filepath.Join(root, "state"))
+	script = strings.ReplaceAll(script, mailTLSDir, filepath.Join(root, "tls"))
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(root, "calls.log")
+	stubs := map[string]string{
+		"curl": "#!/usr/bin/env bash\necho '{}'\n",
+		"jq":   "#!/usr/bin/env bash\necho x\n",
+		"podman": "#!/usr/bin/env bash\n" +
+			"case \"$*\" in\n" +
+			"  *--issue*) echo issue >> " + log + "; exit \"${STUB_ISSUE_RC:-0}\" ;;\n" +
+			"  *--install-cert*) echo install >> " + log + "; exit 0 ;;\n" +
+			"esac\nexit 0\n",
+	}
+	for name, body := range stubs {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := filepath.Join(root, "issue.sh")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", path)
+	cmd.Env = []string{"PATH=" + bin + ":" + os.Getenv("PATH"), "HOME=" + root, "STUB_ISSUE_RC=" + issueRC}
+	out, err := cmd.CombinedOutput()
+	code := 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		t.Fatalf("running the script: %v\n%s", err, out)
+	}
+	blob, _ := os.ReadFile(log)
+	return string(out), code, string(blob)
+}
+
+// acme.sh exits 2 when the certificate is not due: that is success for the unit, and the
+// certificate is still installed. Any other non-zero status stays a failure.
+func TestMailCertScriptTreatsRenewalSkippedAsSuccess(t *testing.T) {
+	t.Parallel()
+	for _, rc := range []string{"0", "2"} {
+		out, code, calls := runMailCertScript(t, rc)
+		if code != 0 {
+			t.Errorf("issue status %s must end the script with 0, got %d:\n%s", rc, code, out)
+		}
+		if !strings.Contains(calls, "install") {
+			t.Errorf("issue status %s: the certificate must still be installed, calls=%q", rc, calls)
+		}
+	}
+}
+
+func TestMailCertScriptFailsOnARealIssueError(t *testing.T) {
+	t.Parallel()
+	out, code, calls := runMailCertScript(t, "1")
+	if code != 1 || !strings.Contains(out, "acme.sh --issue failed with status 1") {
+		t.Fatalf("a real error must fail with its status and say so, got %d:\n%s", code, out)
+	}
+	if strings.Contains(calls, "install") {
+		t.Errorf("nothing must be installed after a failed issue, calls=%q", calls)
 	}
 }
