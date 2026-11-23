@@ -18,7 +18,9 @@ variable "tenants" {
     dns_override = optional(object({
       provider = string
       zone_id  = optional(string)
-      server   = optional(string)
+      # ADR 0043: mksrv creates and owns the Route 53 zone for base_domain.
+      create_zone = optional(bool)
+      server      = optional(string)
     }))
     keycloak = object({
       realm = optional(string)

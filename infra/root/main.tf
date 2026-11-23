@@ -36,13 +36,37 @@ locals {
     if contains(try(t.stacks, []), "database") && try(coalesce(t.database.postgrest.enabled, false), false)
   ]
 
+  # ADR 0043: tenants whose hosted zone mksrv creates and owns. Everything that
+  # DECIDES whether a tenant has a zone (tenant_has_zone) is built from the
+  # configuration only, because the id of a zone created in this same apply is
+  # unknown at plan time and Terraform cannot key a for_each or a conditional
+  # on an unknown value. Only the zone id VALUE (tenant_zone_id) may be unknown.
+  tenant_create_zone = {
+    for id, t in var.tenants : id => t.base_domain
+    if try(t.dns_override.provider, "") == "route53"
+    && try(coalesce(t.dns_override.create_zone, false), false)
+    && try(coalesce(t.dns_override.zone_id, ""), "") == ""
+  }
+  tenant_has_zone = {
+    for id, t in var.tenants : id => (
+      try(coalesce(t.dns_override.zone_id, ""), "") != "" || contains(keys(local.tenant_create_zone), id)
+    )
+  }
+  tenant_zone_id = {
+    for id, t in var.tenants : id => (
+      try(coalesce(t.dns_override.zone_id, ""), "") != "" ? t.dns_override.zone_id : (
+        contains(keys(local.tenant_create_zone), id) ? aws_route53_zone.tenant[id].zone_id : ""
+      )
+    )
+  }
+
   # Records mksrv writes into each tenant's own hosted zone (never the operator
   # zone). allow_overwrite is false downstream, so a name that already exists in
   # the tenant zone fails the apply instead of being clobbered. `web:` endpoints
   # (ADR 0028) add an A record pointing at the edge, which reverse-proxies them.
   tenant_dns = {
     for id, t in var.tenants : id => {
-      zone_id = try(coalesce(t.dns_override.zone_id, ""), "")
+      zone_id = local.tenant_zone_id[id]
       records = concat(
         # Phase B (per-tenant SES relay, draft ADR): the verification TXT
         # SES checks before it will let anything send as this domain.
@@ -74,7 +98,7 @@ locals {
           }
           # Tenants without their own zone publish `web:` hostnames in the
           # operator zone instead (operator_fqdns below).
-          if coalesce(w.provider, "edge") == "edge" && try(coalesce(t.dns_override.zone_id, ""), "") != ""
+          if coalesce(w.provider, "edge") == "edge" && local.tenant_has_zone[id]
         ],
         # ADR 0032: MX/SPF/DMARC are fully computable from the tenant's own
         # `mail:` block — no dependency on the mail server's live state (unlike
@@ -186,10 +210,10 @@ locals {
   # 0032 addendum — Caddy cannot issue the multi-SAN cert this needs, see
   # docs/decisions/0033-mail-cert-dns01-acme-sh.md).
   mail_branded_tenant_zone_arns = [
-    for id, t in var.tenants : "arn:aws:route53:::hostedzone/${t.dns_override.zone_id}"
+    for id, t in var.tenants : "arn:aws:route53:::hostedzone/${local.tenant_zone_id[id]}"
     if try(coalesce(t.mail.hosted, false), false)
     && try(coalesce(t.mail.branded_hostname, false), false)
-    && try(coalesce(t.dns_override.zone_id, ""), "") != ""
+    && local.tenant_has_zone[id]
   ]
   mail_cert_zone_arns = length(local.mail_hosts) > 0 ? distinct(concat(
     local.zone_id != null ? ["arn:aws:route53:::hostedzone/${local.zone_id}"] : [],
@@ -206,7 +230,7 @@ locals {
       for w in coalesce(t.web, []) : w.hostname
       if coalesce(w.provider, "edge") == "edge"
     ]
-    if try(coalesce(t.dns_override.zone_id, ""), "") == ""
+    if !local.tenant_has_zone[id]
   ])
 
   # Shared operator endpoints, all fronted by the edge.
@@ -494,7 +518,7 @@ locals {
     for id, domain in local.tenant_ses_domains : {
       for i in range(3) : "${id}-${i}" => {
         tenant_id = id
-        zone_id   = var.tenants[id].dns_override.zone_id
+        zone_id   = local.tenant_zone_id[id]
         domain    = domain
         index     = i
       }
@@ -592,6 +616,22 @@ locals {
   tenant_ses_domains = {
     for id, t in var.tenants : id => t.base_domain
     if try(t.dns_override.provider, "") == "route53"
+  }
+}
+
+# ADR 0043: a hosted zone mksrv owns, for a domain the tenant brings (declared
+# with dns_override.create_zone). prevent_destroy: the zone holds the live DNS of
+# a domain, and removing a line of YAML must never delete it. The registrar must
+# delegate the domain to this zone's name servers (output tenant_zones); until
+# then the domain does not resolve, but the records are already in place.
+resource "aws_route53_zone" "tenant" {
+  for_each = local.tenant_create_zone
+  name     = each.value
+  comment  = "mksrv ${local.env}: zone for tenant ${each.key}"
+  tags     = { "mksrv:env" = local.env, "mksrv:tenant" = each.key }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 

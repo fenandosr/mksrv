@@ -75,6 +75,16 @@ output "tenant_mail_smtp" {
   }
 }
 
+output "tenant_zones" {
+  description = "Route 53 zones mksrv created for tenants (dns_override.create_zone, ADR 0043), keyed by tenant id. name_servers are what the domain's registrar must delegate to."
+  value = {
+    for id, z in aws_route53_zone.tenant : id => {
+      zone_id      = z.zone_id
+      name_servers = z.name_servers
+    }
+  }
+}
+
 output "tenant_storage_s3" {
   description = "Per-tenant S3 bucket + dedicated IAM access key, keyed by tenant id (ADR 0041). Only tenants with storage.s3."
   sensitive   = true
