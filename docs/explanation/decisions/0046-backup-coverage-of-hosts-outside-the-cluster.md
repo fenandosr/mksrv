@@ -91,6 +91,17 @@ failed.
 
 ## Not verified
 
-How DLM behaves on volumes whose tags this repository currently rewrites (the volumes' `Name` tags already alternate
-between plans, unrelated to this), concurrent restic runs from two hosts, the image and method for a SQLite online backup,
+How DLM behaves on tagged volumes (the tag conflict itself is fixed, see the addendum), concurrent restic runs from two hosts, the image and method for a SQLite online backup,
 and restore times. None of the phases is started.
+
+## Addendum (2026-11-22): the volume tag conflict was a prerequisite, and is fixed
+
+Snapshot selection by tag needs tags that stay put. `aws_instance.volume_tags` tags every volume attached to the instance,
+data volumes included, and `aws_ebs_volume` tags its own: every apply, each overwrote the other's `Name` and `mksrv:volume`
+(nine in-place changes in every plan; some data volumes had the tag, others not). A snapshot tag would have been removed the
+same way, with no error, leaving the policy with nothing to copy. The root volume is now tagged from `root_block_device`,
+`volume_tags` is no longer set and is in `ignore_changes` (without that, removing it plans `volume_tags -> null`, which deletes
+those tags from every attached volume until a second apply). The new plan against the live state is additive only: 5 instances
+get root-volume tags and 4 data volumes get `mksrv:volume`, 0 removals; it converges to no changes after one apply. A test
+pins the shape. Phase 1 can start once that apply is done.
+

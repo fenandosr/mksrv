@@ -250,6 +250,12 @@ resource "aws_instance" "host" {
     volume_type = "gp3"
     volume_size = var.root_gb
     encrypted   = true
+    # The root volume is tagged HERE and nowhere else. The instance must not set
+    # `volume_tags`: that tags EVERY volume attached to it, including the data
+    # volumes below that tag themselves, so the two resources overwrote each
+    # other's Name and mksrv:volume tags on every apply (a tag-based snapshot
+    # policy, ADR 0046, would have lost its volumes without any error).
+    tags = merge(local.tags, { Name = "${local.name}-root" })
   }
 
   metadata_options {
@@ -267,8 +273,7 @@ resource "aws_instance" "host" {
     timezone = var.timezone
   }))
 
-  tags        = merge(local.tags, { Name = local.name })
-  volume_tags = merge(local.tags, { Name = "${local.name}-root" })
+  tags = merge(local.tags, { Name = local.name })
 
   # The AMI is looked up as "the most recent Rocky 9" (data.aws_ami.rocky9), so a
   # newer upstream image would otherwise plan a REPLACEMENT of every running host
@@ -278,8 +283,13 @@ resource "aws_instance" "host" {
   # AMI. New hosts still get the latest image. To roll a host onto a new image on
   # purpose, `terraform apply -replace` that one instance (data volumes need a
   # migration plan first) or set `ami_id` explicitly.
+  #
+  # volume_tags is ignored on purpose. It is not set (see root_block_device), but
+  # an instance that once had it still holds it in state, and Terraform plans
+  # `volume_tags -> null`, which deletes those tags from EVERY attached volume,
+  # data volumes included, until a second apply puts them back.
   lifecycle {
-    ignore_changes = [ami]
+    ignore_changes = [ami, volume_tags]
   }
 }
 

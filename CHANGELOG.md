@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix (infra): `aws_instance.volume_tags` and `aws_ebs_volume` both tagged the data volumes, overwriting each
+  other's `Name` and `mksrv:volume` on every apply (nine in-place changes in every plan). The root volume is now tagged
+  from `root_block_device`, `volume_tags` is no longer set and is ignored, and a test pins it. Needed before
+  tag-based snapshots (ADR 0046). The resulting plan only adds tags; apply it once to converge.
+
 - Fix (mail): the mail certificate was force-reissued, and the shared mail server restarted, whenever the
   issuance script text changed, because "the SAN list changed" was decided by comparing the whole script with
   the installed one (the exit-status fix of the previous change triggered it). It now compares the DNS names the
