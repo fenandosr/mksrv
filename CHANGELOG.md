@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fix (monitoring): nine alerts had fired since Prometheus first loaded its real configuration (2026-11-22; it had run a
+  September one). `postgres_exporter` (:9187, core nodes) and Caddy's metrics (:9019, edge) run with host networking and
+  firewalld's `public` zone rejected the monitor host ("no route to host"); each stack now opens its port to the monitor
+  hosts only, with source rich rules, from a post-deploy hook that restarts nothing. The operator-endpoint probe also no
+  longer probes `<tenant>.rest` for tenants that do not run PostgREST (no vhost exists) and uses a `http_reachable` module that
+  accepts a healthy 404 (Headscale, configd and an OpenAPI-less PostgREST answer their root with it) while 5xx, refused
+  connections and TLS failures still count as down. Needs a deploy of `postgres`, `base` and `monitor`.
+
 - Feat (ADR 0046 phase 1): daily EBS snapshots of every data volume through DLM, in three tiers by how much the data matters
   (`priority:` on stacks and their `storage:` volumes: critical keeps 30, standard 7, low 2; RPO 24 h), selected by the
   `mksrv:snapshot = <tier>` tag that the `aws-host` module puts on data volumes and never on root volumes. An hourly check on the

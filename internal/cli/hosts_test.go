@@ -102,8 +102,12 @@ func TestRenderContextPopulatesOperatorFQDNs(t *testing.T) {
 				Hosts:    map[string]model.Host{"edge": {Provider: "aws", Stacks: []string{"base"}}},
 			},
 			Tenants: map[string]model.Tenant{
-				"bitabit": {ID: "bitabit", Stacks: []string{"database", "cache"}},
+				"bitabit": {ID: "bitabit", Stacks: []string{"database", "cache"}, Database: &model.TenantDatabase{PostgREST: &model.PostgRESTConfig{}}},
 				"hg":      {ID: "hg", Stacks: []string{"cache"}}, // no database -> no rest vhost
+				// A database without PostgREST (mcps, scinugget) has DNS but no rest vhost: probing it
+				// raised a permanent EndpointDown.
+				"plain": {ID: "plain", Stacks: []string{"database"}, Database: &model.TenantDatabase{}},
+				"off":   {ID: "off", Stacks: []string{"database"}, Database: &model.TenantDatabase{PostgREST: &model.PostgRESTConfig{Enabled: new(bool)}}},
 			},
 		},
 		targets: []hostTarget{{Name: "edge", Host: model.Host{Stacks: []string{"base"}}}},
@@ -121,7 +125,7 @@ func TestRenderContextPopulatesOperatorFQDNs(t *testing.T) {
 	}
 	// M24: every declared tenant, not just `database` consumers — Keycloak's
 	// per-tenant theme mount needs the full roster.
-	if wantIDs := []string{"bitabit", "hg"}; len(ctx.TenantIDs) != 2 || ctx.TenantIDs[0] != wantIDs[0] || ctx.TenantIDs[1] != wantIDs[1] {
+	if wantIDs := []string{"bitabit", "hg", "off", "plain"}; fmt.Sprint(ctx.TenantIDs) != fmt.Sprint(wantIDs) {
 		t.Fatalf("TenantIDs = %v, want %v", ctx.TenantIDs, wantIDs)
 	}
 }

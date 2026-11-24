@@ -28,6 +28,13 @@ templates:
   - src: templates/Caddyfile.tmpl
     dst: /var/lib/mksrv/stacks/base/Caddyfile
     scope: shared
+  - src: templates/metrics-firewall.sh.tmpl
+    dst: /var/lib/mksrv/stacks/base/metrics-firewall.sh
+    scope: shared
+hooks:
+  post_deploy:
+    - run: hooks/open-metrics-port.sh
+      scope: shared
 health:
   - app: caddy
     type: http

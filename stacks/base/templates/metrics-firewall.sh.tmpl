@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Rendered by mksrv; run by the post-deploy hook of the base stack.
+#
+# Caddy runs with host networking and serves its metrics on <private ip>:9019 (Caddyfile), so
+# the port is ordinary INPUT traffic and firewalld's `public` zone rejects it: Prometheus on
+# the monitor host got "no route to host". This opens exactly 9019/tcp from the fleet's
+# monitor hosts, as rich rules with a source. Idempotent, runtime and permanent, and it
+# restarts nothing (a Caddy restart would interrupt every published site).
+set -euo pipefail
+
+if ! systemctl is-active --quiet firewalld; then
+  echo "firewalld not active; nothing to open"
+  exit 0
+fi
+
+rule() {
+  firewall-cmd --zone=public --add-rich-rule="$1" >/dev/null
+  firewall-cmd --permanent --zone=public --add-rich-rule="$1" >/dev/null
+}
+
+{{- range .StackNodes "monitor" }}
+rule 'rule family="ipv4" source address="{{ .PrivateIP }}" port port="9019" protocol="tcp" accept'
+{{- end }}
+echo "caddy metrics firewall rules in place"

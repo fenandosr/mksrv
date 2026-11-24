@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Rendered by mksrv; run by the post-deploy hook of the postgres stack.
+#
+# postgres_exporter runs with host networking (mksrv-postgres-exporter.container), so :9187 is
+# ordinary INPUT traffic and firewalld's `public` zone (ssh only) rejects it: Prometheus on the
+# monitor host got "no route to host" and the exporter was never scraped. This opens exactly
+# 9187/tcp from the fleet's monitor hosts, as rich rules with a source, never a bare port.
+# Idempotent (re-adding a rule is a no-op) and written to both runtime and permanent
+# configuration, so a reload or a reboot keeps it. It restarts nothing.
+set -euo pipefail
+
+if ! systemctl is-active --quiet firewalld; then
+  echo "firewalld not active; nothing to open"
+  exit 0
+fi
+
+rule() {
+  firewall-cmd --zone=public --add-rich-rule="$1" >/dev/null
+  firewall-cmd --permanent --zone=public --add-rich-rule="$1" >/dev/null
+}
+
+{{- range .StackNodes "monitor" }}
+rule 'rule family="ipv4" source address="{{ .PrivateIP }}" port port="9187" protocol="tcp" accept'
+{{- end }}
+echo "postgres exporter firewall rules in place"

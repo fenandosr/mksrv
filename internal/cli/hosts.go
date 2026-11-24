@@ -671,10 +671,10 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 			stackMembers[s] = append(stackMembers[s], member)
 		}
 	}
-	// OperatorFQDNs: every shared operator endpoint plus each tenant's
-	// PostgREST vhost, fronted by the edge — mirrors infra/root/main.tf's
-	// local.operator_fqdns so blackbox probes exactly what DNS actually
-	// points at (M23 phase 3).
+	// OperatorFQDNs: every shared operator endpoint plus the PostgREST vhost of
+	// each tenant that RUNS PostgREST, fronted by the edge. A tenant with a
+	// database but no PostgREST has a DNS record (infra/root/main.tf) but no
+	// vhost, so probing it only produced a permanent EndpointDown.
 	operatorFQDNs := []string{
 		dep.Identity.KeycloakDomain,
 		dep.Identity.HeadscaleDomain,
@@ -683,7 +683,7 @@ func (f *fleet) renderContext(ht hostTarget) render.Context {
 		"pgadmin." + dep.DNS.RootDomain,
 	}
 	for _, id := range sortedTenantIDs(f.data.Tenants) {
-		if slices.Contains(f.data.Tenants[id].Stacks, "database") {
+		if t := f.data.Tenants[id]; slices.Contains(t.Stacks, "database") && t.PostgRESTEnabled() {
 			operatorFQDNs = append(operatorFQDNs, id+".rest."+dep.DNS.RootDomain)
 		}
 	}

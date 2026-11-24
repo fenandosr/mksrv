@@ -87,7 +87,7 @@ scrape_configs:
   - job_name: blackbox
     metrics_path: /probe
     params:
-      module: [http_2xx]
+      module: [http_reachable]
     static_configs:
       - targets:
 {{- range .OperatorFQDNs }}
