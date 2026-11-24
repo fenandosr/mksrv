@@ -20,9 +20,12 @@ A host's data volume (the one mounted at `/var/lib/mksrv`) takes the highest pri
 - **RPO is 24 h in every tier** (the snapshot interval); the tiers differ in how far back you can go. `snapshot_tiers` in the root
   module holds `rpo_hours` and `retain` per tier, and `snapshot_time_utc` (default 09:00 UTC, 03:00 in Mexico City) the start time.
   `snapshot_enabled = false` removes the policies and the tags.
-- **Selected by tag.** The `aws-host` module tags each data volume `mksrv:snapshot = <tier>` and `mksrv:snapshot-rpo-hours`; each
-  tier's policy takes the volumes with its tier and `mksrv:env = <env>`. A new host or stack volume is covered by being created.
-  Root volumes are never tagged: they hold nothing that bootstrap does not rebuild.
+- **Selected by tag.** The `aws-host` module tags each data volume `mksrv:snapshot = <tier>`, `mksrv:snapshot-rpo-hours` and
+  `mksrv:snapshot-group = <env>-<tier>`; each tier's policy targets **only** that last tag. A new host or stack volume is covered by
+  being created. Root volumes are never tagged: they hold nothing that bootstrap does not rebuild.
+- **DLM matches ANY target tag, not all.** A policy that listed two (the tier and `mksrv:env`) took every volume of the environment,
+  root volumes included, once per policy: 66 snapshots of 22 volumes on the first run. That is why a policy has exactly one target
+  tag, whose value already carries the environment and the tier, and a test pins it.
 - **Crash-consistent, not application-consistent.** A snapshot is what a power cut would leave. Postgres and SQLite recover
   from that, but nothing flushes or locks before the snapshot. It is a safety net against losing a volume or a host, not a
   substitute for the logical backups (`docs/how-to/backup.md`), which can restore one database.

@@ -861,11 +861,12 @@ resource "aws_dlm_lifecycle_policy" "volumes" {
 
   policy_details {
     resource_types = ["VOLUME"]
-    # Both tags must match: the environment keeps a second mksrv environment in the same
-    # account out of this policy.
+    # EXACTLY ONE tag. DLM selects a volume that carries ANY of target_tags, not all of them: with
+    # mksrv:env listed next to the tier, every policy took every prod volume (22, root volumes
+    # included) and each got three snapshots, one per policy. The value carries environment and
+    # tier, which also keeps a second mksrv environment in the same account out of this policy.
     target_tags = {
-      "mksrv:snapshot" = each.key
-      "mksrv:env"      = local.env
+      "mksrv:snapshot-group" = "${local.env}-${each.key}"
     }
 
     schedule {
