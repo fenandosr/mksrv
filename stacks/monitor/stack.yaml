@@ -24,6 +24,7 @@ storage:
     grows_with: metrics
     from: mksrv-monitor-prometheus
     unit: mksrv-prometheus.service
+    priority: low   # metrics regenerate
 templates:
   - src: templates/mksrv-monitor.network.tmpl
     dst: /etc/containers/systemd/mksrv-monitor.network

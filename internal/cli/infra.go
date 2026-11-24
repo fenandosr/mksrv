@@ -230,6 +230,7 @@ func (a *App) openInfraSession(ctx context.Context, printer ui.Printer, globals 
 	if hv := hostVolumes(data); len(hv) > 0 {
 		extra["host_volumes"] = hv
 	}
+	extra["host_data_tier"] = hostDataTiers(data)
 	varsPath, err := infra.Materialize(data, extra)
 	if err != nil {
 		return nil, err
@@ -301,10 +302,29 @@ func hostVolumes(data workspace.Data) map[string][]map[string]any {
 					"iops":       v.IOPS,
 					"throughput": v.Throughput,
 					"device":     "/dev/sd" + string(dev),
+					"tier":       model.EffectivePriority(v.Priority),
 				})
 				dev++
 			}
 		}
+	}
+	return out
+}
+
+// hostDataTiers gives, for each aws host, the snapshot tier of the volume mounted at /var/lib/mksrv:
+// the highest priority among the stacks the host carries (standard when none says otherwise). The
+// dedicated stack volumes carry their own, see hostVolumes (ADR 0046).
+func hostDataTiers(data workspace.Data) map[string]string {
+	out := map[string]string{}
+	for name, h := range data.Deployment.Hosts {
+		if h.Provider == "existing" {
+			continue
+		}
+		tier := model.PriorityStandard
+		for _, s := range h.Stacks {
+			tier = model.MaxPriority(tier, data.Catalog[s].Priority)
+		}
+		out[name] = tier
 	}
 	return out
 }

@@ -118,3 +118,51 @@ groups:
         annotations:
           summary: "mksrv backup could not collect {{`{{ $labels.component }}`}}"
           description: "The last backup wrote a snapshot WITHOUT {{`{{ $labels.component }}`}}: it is incomplete. See `journalctl -u mksrv-backup.service` on the backup host."
+
+  # ADR 0046: volume snapshots. Coverage is the share of a tier's volumes whose newest COMPLETED
+  # snapshot is within the tier's RPO plus a grace; 1 means every one is protected.
+  - name: mksrv-snapshots
+    rules:
+      - alert: SnapshotCoverageCritical
+        expr: mksrv_snapshot_coverage_ratio{tier="critical"} < 1
+        for: 2h
+        labels:
+          severity: critical
+        annotations:
+          summary: "A critical volume has no recent snapshot"
+          description: "Coverage of critical volumes is {{`{{ $value | humanizePercentage }}`}}. Find the stale one with mksrv_snapshot_newest_timestamp_seconds{tier=\"critical\"} and see docs/how-to/volume-snapshots.md."
+      - alert: SnapshotCoverageLow
+        expr: mksrv_snapshot_coverage_ratio{tier=~"standard|low"} < 1
+        for: 6h
+        labels:
+          severity: warning
+        annotations:
+          summary: "A {{`{{ $labels.tier }}`}} volume has no recent snapshot"
+          description: "Coverage of the {{`{{ $labels.tier }}`}} tier is {{`{{ $value | humanizePercentage }}`}}."
+      # The case the check exists for: a policy or a tag that selects NOTHING leaves no coverage
+      # series at all, so the coverage alerts above could never fire.
+      - alert: SnapshotNoCriticalVolumes
+        expr: (mksrv_snapshot_check_success == 1) unless on() mksrv_snapshot_volumes{tier="critical"}
+        for: 2h
+        labels:
+          severity: critical
+        annotations:
+          summary: "No volume is tagged for critical snapshots"
+          description: "EC2 answered, but no volume carries mksrv:snapshot=critical, so nothing critical is being snapshotted. Check the aws-host tags and `mksrv plan --infra-only`."
+      - alert: SnapshotCheckFailing
+        expr: mksrv_snapshot_check_success == 0 or (time() - mksrv_snapshot_check_last_run_seconds) > 3 * 3600
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The volume snapshot check is not running or cannot ask EC2"
+          description: "mksrv-snapshot-check.timer runs hourly on the backup host; see `journalctl -u mksrv-snapshot-check.service`. Until it works, snapshot coverage is unknown."
+      - alert: SnapshotCheckAbsent
+        expr: absent(mksrv_snapshot_check_last_run_seconds)
+        for: 6h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No volume snapshot metrics at all"
+          description: "snapshots.prom is missing: the check has never run, or the backup stack is not deployed where the monitor expects it."
+

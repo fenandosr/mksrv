@@ -626,7 +626,7 @@ func TestStackRendersMonitorFleetWide(t *testing.T) {
 	rules := string(files["/var/lib/mksrv/stacks/monitor/prometheus-rules.yml"])
 	for _, want := range []string{
 		"alert: TargetDown", "alert: PatroniNoLeader", "alert: OpenBaoSealed",
-		"alert: EndpointDown", "alert: CertExpiringSoon", "alert: BackupStale", "alert: BackupComponentFailed",
+		"alert: EndpointDown", "alert: CertExpiringSoon", "alert: BackupStale", "alert: BackupComponentFailed", "alert: SnapshotCoverageCritical", "alert: SnapshotCoverageLow", "alert: SnapshotNoCriticalVolumes", "alert: SnapshotCheckFailing", "alert: SnapshotCheckAbsent",
 		"{{ $labels.host }}", "mksrv_backup_last_success_seconds",
 	} {
 		if !strings.Contains(rules, want) {
@@ -638,8 +638,8 @@ func TestStackRendersMonitorFleetWide(t *testing.T) {
 		t.Fatalf("prometheus-rules.yml is not valid YAML: %v\n%s", err, rules)
 	}
 	groups, _ := rulesDoc["groups"].([]any)
-	if len(groups) != 4 {
-		t.Fatalf("prometheus-rules.yml groups = %d, want 4:\n%s", len(groups), rules)
+	if len(groups) != 5 {
+		t.Fatalf("prometheus-rules.yml groups = %d, want 5:\n%s", len(groups), rules)
 	}
 }
 

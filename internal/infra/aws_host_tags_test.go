@@ -74,42 +74,71 @@ func resourceBlock(t *testing.T, relPath, header string) string {
 	return src[start : start+end]
 }
 
-// ADR 0046 phase 1: the DLM policy selects volumes by tag, so exactly the data volumes (the one
+// ADR 0046 phase 1: the DLM policies select volumes by tag, so exactly the data volumes (the one
 // mounted at /var/lib/mksrv and every dedicated stack volume) carry mksrv:snapshot, and the root
 // volume and the instance never do. If this regresses, snapshots stop being taken without an error.
 func TestOnlyDataVolumesCarryTheSnapshotTag(t *testing.T) {
 	t.Parallel()
 	const module = "infra/modules/aws-host/main.tf"
-	for _, header := range []string{`resource "aws_ebs_volume" "data" {`, `resource "aws_ebs_volume" "extra" {`} {
-		if block := resourceBlock(t, module, header); !strings.Contains(block, "local.snapshot_tags") {
-			t.Errorf("%s must merge local.snapshot_tags into its tags", header)
+	for header, tier := range map[string]string{
+		`resource "aws_ebs_volume" "data" {`:  "var.data_snapshot_tier",
+		`resource "aws_ebs_volume" "extra" {`: "each.value.tier",
+	} {
+		block := resourceBlock(t, module, header)
+		if !strings.Contains(block, "local.snapshot_tags_by_tier") || !strings.Contains(block, tier) {
+			t.Errorf("%s must merge the tags of its tier (%s) from local.snapshot_tags_by_tier", header, tier)
 		}
 	}
-	for _, header := range []string{`resource "aws_instance" "host" {`} {
-		if block := resourceBlock(t, module, header); strings.Contains(block, "snapshot_tags") || strings.Contains(block, "mksrv:snapshot") {
-			t.Errorf("%s must not carry the snapshot tag: root volumes are not snapshotted", header)
-		}
+	if block := resourceBlock(t, module, `resource "aws_instance" "host" {`); strings.Contains(block, "snapshot_tags") || strings.Contains(block, "mksrv:snapshot") {
+		t.Error("aws_instance.host must not carry the snapshot tags: root volumes are not snapshotted")
 	}
 }
 
-func TestSnapshotPolicySelectsTheTaggedVolumesOfThisEnvironment(t *testing.T) {
+func TestSnapshotPoliciesSelectTheTaggedVolumesOfThisEnvironmentPerTier(t *testing.T) {
 	t.Parallel()
 	policy := resourceBlock(t, "infra/root/main.tf", `resource "aws_dlm_lifecycle_policy" "volumes" {`)
 	for _, want := range []string{
-		`"mksrv:snapshot" = "daily"`, // the tag the module sets
-		`"mksrv:env"      = local.env`,
+		"for_each           = var.snapshot_enabled ? var.snapshot_tiers : {}", // one policy per tier
+		`"mksrv:snapshot" = each.key`,                                         // the tier tag the module sets
+		`"mksrv:env"      = local.env`,                                        // never another environment's volumes
 		`resource_types = ["VOLUME"]`,
-		"retain_rule",
-		"var.snapshot_retention_count",
+		"interval      = each.value.rpo_hours",
+		"count = each.value.retain",
 		"var.snapshot_time_utc",
 	} {
 		if !strings.Contains(policy, want) {
 			t.Errorf("the DLM policy must contain %q", want)
 		}
 	}
-	// The value the root passes to every host must be the one the policy targets.
+	// What the root passes to every host must agree with what the policies target.
 	hostCall := resourceBlock(t, "infra/root/main.tf", `module "aws_host" {`)
-	if !regexp.MustCompile(`snapshot_tag\s*=\s*var\.snapshot_enabled \? "daily" : ""`).MatchString(hostCall) {
-		t.Error(`the aws_host module call must pass snapshot_tag = var.snapshot_enabled ? "daily" : ""`)
+	for _, re := range []string{
+		`data_snapshot_tier\s*=\s*var\.snapshot_enabled \? try\(var\.host_data_tier\[each\.key\], "standard"\) : ""`,
+		`snapshot_rpo_hours\s*=\s*\{ for tier, t in var\.snapshot_tiers : tier => t\.rpo_hours \}`,
+		`tier = var\.snapshot_enabled \? v\.tier : ""`,
+	} {
+		if !regexp.MustCompile(re).MatchString(hostCall) {
+			t.Errorf("the aws_host module call must match %s", re)
+		}
+	}
+}
+
+// The three tiers and their defaults are part of the contract with the Go side (internal/model
+// priorities) and with the snapshot check: adding or renaming one needs all of them.
+func TestSnapshotTierDefaults(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "infra", "root", "variables.tf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(raw)
+	for _, want := range []string{
+		"critical = { rpo_hours = 24, retain = 30 }",
+		"standard = { rpo_hours = 24, retain = 7 }",
+		"low      = { rpo_hours = 24, retain = 2 }",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("snapshot_tiers default must contain %q", want)
+		}
 	}
 }

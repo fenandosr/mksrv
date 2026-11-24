@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+# mksrv snapshot freshness check (ADR 0046). Run hourly by mksrv-snapshot-check.timer on the
+# host that carries `backup`; rendered by `mksrv deploy`.
+#
+# The DLM policies (infra/root/main.tf) snapshot every data volume that carries the tag
+# mksrv:snapshot = <tier>. A policy that silently selects nothing, loses its role, or stops
+# running leaves no error anywhere, so this asks EC2 how old the newest COMPLETED snapshot of each
+# tagged volume is, and writes node-exporter textfile metrics:
+#
+#   mksrv_snapshot_coverage_ratio{tier}   fresh volumes / volumes of the tier (1 = every one covered)
+#   mksrv_snapshot_newest_timestamp_seconds{tier,volume,host,volume_id}   0 when it has none
+#   mksrv_snapshot_check_success          0 when EC2 could not be asked
+#
+# A volume is fresh when its newest completed snapshot is younger than the volume's RPO
+# (the tag mksrv:snapshot-rpo-hours, written by Terraform from one variable) plus a grace
+# for the snapshot to start and finish. Read-only: ec2:DescribeVolumes and ec2:DescribeSnapshots.
+# Stdlib only (no AWS CLI on the host); the SigV4 signature is checked in the tests against
+# AWS's published test vector.
+import datetime
+import hashlib
+import hmac
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+
+ENV = "{{ .Env }}"
+GRACE_SECONDS = 4 * 3600
+DEFAULT_RPO_HOURS = 24
+METRICS_DIR = os.environ.get("MKSRV_METRICS_DIR", "/var/lib/mksrv/metrics")
+IMDS = os.environ.get("MKSRV_IMDS_URL", "http://169.254.169.254")
+EC2_URL = os.environ.get("MKSRV_EC2_URL", "")  # tests only; default is the regional endpoint
+UTC = datetime.timezone.utc
+
+
+def _hmac(key, msg):
+    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+
+def sigv4_get(host, region, service, params, headers, access_key, secret_key, now):
+    """Return the Authorization header value and the x-amz-date for a GET to host/ with params."""
+    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+    datestamp = now.strftime("%Y%m%d")
+    quote = lambda s: urllib.parse.quote(str(s), safe="-_.~")
+    canonical_qs = "&".join("%s=%s" % pair for pair in sorted((quote(k), quote(v)) for k, v in params))
+    all_headers = dict(headers)
+    all_headers["host"] = host
+    all_headers["x-amz-date"] = amz_date
+    names = sorted(all_headers)
+    canonical_headers = "".join("%s:%s\n" % (n, all_headers[n].strip()) for n in names)
+    signed_headers = ";".join(names)
+    canonical_request = "\n".join(["GET", "/", canonical_qs, canonical_headers, signed_headers, hashlib.sha256(b"").hexdigest()])
+    scope = "%s/%s/%s/aws4_request" % (datestamp, region, service)
+    string_to_sign = "\n".join(["AWS4-HMAC-SHA256", amz_date, scope, hashlib.sha256(canonical_request.encode()).hexdigest()])
+    key = _hmac(("AWS4" + secret_key).encode(), datestamp)
+    for part in (region, service, "aws4_request"):
+        key = _hmac(key, part)
+    signature = hmac.new(key, string_to_sign.encode(), hashlib.sha256).hexdigest()
+    auth = "AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s" % (access_key, scope, signed_headers, signature)
+    return auth, amz_date, canonical_qs
+
+
+def _http(url, headers=None, method="GET", timeout=20):
+    req = urllib.request.Request(url, headers=headers or {}, method=method)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8")
+
+
+def credentials():
+    """Credentials and region: the environment when it carries a key (local runs, tests), else the instance role."""
+    if os.environ.get("AWS_ACCESS_KEY_ID"):
+        return (os.environ["AWS_ACCESS_KEY_ID"], os.environ["AWS_SECRET_ACCESS_KEY"],
+                os.environ.get("AWS_SESSION_TOKEN", ""), os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1")
+    token = _http(IMDS + "/latest/api/token", {"X-aws-ec2-metadata-token-ttl-seconds": "300"}, method="PUT")
+    meta = {"X-aws-ec2-metadata-token": token}
+    role = _http(IMDS + "/latest/meta-data/iam/security-credentials/", meta).split()[0]
+    creds = json.loads(_http(IMDS + "/latest/meta-data/iam/security-credentials/" + role, meta))
+    region = _http(IMDS + "/latest/meta-data/placement/region", meta).strip()
+    return creds["AccessKeyId"], creds["SecretAccessKey"], creds["Token"], region
+
+
+def ec2(action, extra_params, creds):
+    access, secret, session, region = creds
+    host = "ec2.%s.amazonaws.com" % region
+    params = [("Action", action), ("Version", "2016-11-15")] + list(extra_params)
+    headers = {"x-amz-security-token": session} if session else {}
+    auth, amz_date, qs = sigv4_get(host, region, "ec2", params, headers, access, secret, datetime.datetime.now(UTC))
+    base = EC2_URL or ("https://" + host)
+    req_headers = dict(headers)
+    req_headers.update({"x-amz-date": amz_date, "Authorization": auth})
+    body = _http(base + "/?" + qs, req_headers)
+    root = ET.fromstring(body)
+    if root.findtext("{*}nextToken"):
+        raise RuntimeError("%s returned more than one page; the check does not paginate" % action)
+    return root
+
+
+def tags(item):
+    return {t.findtext("{*}key"): t.findtext("{*}value") for t in item.findall("{*}tagSet/{*}item")}
+
+
+def filters():
+    return [("Filter.1.Name", "tag:mksrv:env"), ("Filter.1.Value.1", ENV),
+            ("Filter.2.Name", "tag-key"), ("Filter.2.Value.1", "mksrv:snapshot")]
+
+
+def parse_time(text):
+    return datetime.datetime.strptime(text[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=UTC).timestamp()
+
+
+def collect(creds, now):
+    volumes = []
+    for item in ec2("DescribeVolumes", filters(), creds).findall("{*}volumeSet/{*}item"):
+        t = tags(item)
+        volumes.append({
+            "id": item.findtext("{*}volumeId"), "tier": t.get("mksrv:snapshot", ""), "name": t.get("Name", ""),
+            "host": t.get("mksrv:host", ""), "rpo": int(t.get("mksrv:snapshot-rpo-hours") or DEFAULT_RPO_HOURS) * 3600, "newest": 0.0,
+        })
+    by_id = {v["id"]: v for v in volumes}
+    for item in ec2("DescribeSnapshots", [("Owner.1", "self")] + filters(), creds).findall("{*}snapshotSet/{*}item"):
+        v = by_id.get(item.findtext("{*}volumeId"))
+        # Only a COMPLETED snapshot protects anything: a pending one may still fail.
+        if v is not None and item.findtext("{*}status") == "completed":
+            v["newest"] = max(v["newest"], parse_time(item.findtext("{*}startTime")))
+    for v in volumes:
+        v["fresh"] = v["newest"] > 0 and now - v["newest"] <= v["rpo"] + GRACE_SECONDS
+    return volumes
+
+
+def render(volumes, now, ok):
+    out = [
+        "# HELP mksrv_snapshot_check_success 1 when the last check could ask EC2 about snapshots.",
+        "# TYPE mksrv_snapshot_check_success gauge",
+        "mksrv_snapshot_check_success %d" % (1 if ok else 0),
+        "# HELP mksrv_snapshot_check_last_run_seconds Unix time of the last check, successful or not.",
+        "# TYPE mksrv_snapshot_check_last_run_seconds gauge",
+        "mksrv_snapshot_check_last_run_seconds %d" % now,
+    ]
+    if ok:
+        out += ["# HELP mksrv_snapshot_grace_seconds Time added to a volume's RPO before its newest snapshot counts as stale.",
+                "# TYPE mksrv_snapshot_grace_seconds gauge", "mksrv_snapshot_grace_seconds %d" % GRACE_SECONDS]
+        tiers = sorted({v["tier"] for v in volumes})
+        out += ["# HELP mksrv_snapshot_volumes Volumes carrying the snapshot tag, by tier.", "# TYPE mksrv_snapshot_volumes gauge"]
+        out += ['mksrv_snapshot_volumes{tier="%s"} %d' % (t, sum(1 for v in volumes if v["tier"] == t)) for t in tiers]
+        out += ["# HELP mksrv_snapshot_coverage_ratio Share of the tier's volumes whose newest completed snapshot is within RPO plus grace. 1 is good.",
+                "# TYPE mksrv_snapshot_coverage_ratio gauge"]
+        for t in tiers:
+            of_tier = [v for v in volumes if v["tier"] == t]
+            out.append('mksrv_snapshot_coverage_ratio{tier="%s"} %.4f' % (t, sum(1 for v in of_tier if v["fresh"]) / len(of_tier)))
+        out += ["# HELP mksrv_snapshot_newest_timestamp_seconds Start time of the volume's newest completed snapshot; 0 when it has none.",
+                "# TYPE mksrv_snapshot_newest_timestamp_seconds gauge"]
+        for v in sorted(volumes, key=lambda v: (v["tier"], v["name"])):
+            out.append('mksrv_snapshot_newest_timestamp_seconds{tier="%s",volume="%s",host="%s",volume_id="%s"} %d'
+                       % (v["tier"], v["name"], v["host"], v["id"], v["newest"]))
+    return "\n".join(out) + "\n"
+
+
+def write_atomically(text):
+    os.makedirs(METRICS_DIR, exist_ok=True)
+    path = os.path.join(METRICS_DIR, "snapshots.prom")
+    tmp = "%s.%d" % (path, os.getpid())
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def main():
+    now = time.time()
+    try:
+        volumes = collect(credentials(), now)
+    except Exception as exc:  # any failure to ask EC2 must be visible, not a silent absence
+        write_atomically(render([], now, False))
+        print("snapshot check failed: %s" % exc, file=sys.stderr)
+        return 1
+    write_atomically(render(volumes, now, True))
+    stale = [v for v in volumes if not v["fresh"]]
+    for v in stale:
+        print("stale: %s %s (%s) newest=%s" % (v["tier"], v["name"], v["id"], int(v["newest"])), file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

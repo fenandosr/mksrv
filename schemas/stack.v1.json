@@ -36,6 +36,7 @@
         "disk_gb": {"type": "integer", "minimum": 0, "maximum": 1048576}
       }
     },
+    "priority": {"type": "string", "enum": ["critical", "standard", "low"]},
     "storage": {
       "type": "array", "maxItems": 8,
       "items": {
@@ -47,7 +48,8 @@
           "throughput": {"type": "integer", "minimum": 125, "maximum": 1000},
           "grows_with": {"type": "string", "enum": ["data", "metrics", "logs"]},
           "from": {"type": "string", "pattern": "^mksrv-[a-z0-9-]+$"},
-          "unit": {"type": "string", "pattern": "^mksrv-[a-z0-9-]+\\.service$"}
+          "unit": {"type": "string", "pattern": "^mksrv-[a-z0-9-]+\\.service$"},
+          "priority": {"type": "string", "enum": ["critical", "standard", "low"]}
         }
       }
     },

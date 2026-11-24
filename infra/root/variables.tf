@@ -112,25 +112,43 @@ variable "host_volumes" {
     iops       = optional(number, 0)
     throughput = optional(number, 0)
     device     = string
+    tier       = optional(string, "") # snapshot tier from the stack's storage priority (ADR 0046)
   })))
   default = {}
 }
 
-# ADR 0046, phase 1: daily EBS snapshots of every data volume, by tag.
+variable "host_data_tier" {
+  description = "Per-host snapshot tier of the volume mounted at /var/lib/mksrv: the highest priority among the host's stacks, computed by the CLI (ADR 0046)."
+  type        = map(string)
+  default     = {}
+}
+
+# ADR 0046, phase 1: daily EBS snapshots of every data volume, by tier.
 variable "snapshot_enabled" {
   type        = bool
   default     = true
-  description = "Create the DLM policy and tag the data volumes (mksrv:snapshot = daily). Crash-consistent snapshots, not application-consistent: a database recovers from one as it does from a power cut."
+  description = "Create the DLM policies and tag the data volumes. Crash-consistent snapshots, not application-consistent: a database recovers from one as it does from a power cut."
 }
 
-variable "snapshot_retention_count" {
-  type        = number
-  default     = 7
-  description = "How many daily snapshots to keep per volume."
+variable "snapshot_tiers" {
+  description = "Per tier: rpo_hours (how old the newest snapshot may be before the check complains; also the DLM interval, one of 1, 2, 3, 4, 6, 8, 12 or 24) and retain (how many snapshots to keep). The tier of each volume comes from the stack catalog (`priority` in stack.yaml), not from here."
+  type = map(object({
+    rpo_hours = number
+    retain    = number
+  }))
+  default = {
+    critical = { rpo_hours = 24, retain = 30 } # tenant databases, secrets, every tenant's users and mail
+    standard = { rpo_hours = 24, retain = 7 }  # host configuration and the rest
+    low      = { rpo_hours = 24, retain = 2 }  # metrics and logs, which regenerate
+  }
 
   validation {
-    condition     = var.snapshot_retention_count >= 1 && var.snapshot_retention_count <= 1000
-    error_message = "snapshot_retention_count must be between 1 and 1000."
+    condition     = toset(keys(var.snapshot_tiers)) == toset(["critical", "standard", "low"])
+    error_message = "snapshot_tiers must define exactly critical, standard and low."
+  }
+  validation {
+    condition     = alltrue([for t in values(var.snapshot_tiers) : contains([1, 2, 3, 4, 6, 8, 12, 24], t.rpo_hours) && t.retain >= 1 && t.retain <= 1000])
+    error_message = "Each tier needs rpo_hours in 1, 2, 3, 4, 6, 8, 12 or 24 (the intervals DLM supports) and retain between 1 and 1000."
   }
 }
 
@@ -144,4 +162,3 @@ variable "snapshot_time_utc" {
     error_message = "snapshot_time_utc must be HH:MM, 24 hour."
   }
 }
-

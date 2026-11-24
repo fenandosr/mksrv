@@ -1,0 +1,12 @@
+[Unit]
+Description=mksrv volume snapshot freshness check (ADR 0046)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Invoke python explicitly, like backup.sh runs through bash: the script lives under
+# /var/lib/mksrv, which the bootstrap relabels for podman's graphroot, so systemd (init_t)
+# cannot exec the file directly.
+ExecStart=/usr/bin/python3 /var/lib/mksrv/stacks/backup/snapshot-check.py
+TimeoutStartSec=300

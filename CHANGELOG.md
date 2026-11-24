@@ -2,11 +2,13 @@
 
 ## Unreleased
 
-- Feat (ADR 0046 phase 1): daily EBS snapshots of every data volume through one DLM policy (7 kept, 09:00 UTC),
-  selected by the `mksrv:snapshot = daily` tag that the `aws-host` module puts on data volumes and never on root volumes;
-  `snapshot_enabled`, `snapshot_retention_count` and `snapshot_time_utc` are root variables. Also ignores
-  `root_block_device[0].tags` on instances, which the provider never reads back and which made every plan propose them
-  again. See `docs/how-to/volume-snapshots.md`. Needs an infra apply.
+- Feat (ADR 0046 phase 1): daily EBS snapshots of every data volume through DLM, in three tiers by how much the data matters
+  (`priority:` on stacks and their `storage:` volumes: critical keeps 30, standard 7, low 2; RPO 24 h), selected by the
+  `mksrv:snapshot = <tier>` tag that the `aws-host` module puts on data volumes and never on root volumes. An hourly check on the
+  backup host (`mksrv-snapshot-check.timer`) writes `mksrv_snapshot_coverage_ratio{tier}` and friends, with Prometheus alerts,
+  including one for "nothing is tagged critical". `snapshot_enabled`, `snapshot_tiers` and `snapshot_time_utc` are root variables.
+  Also ignores `root_block_device[0].tags` on instances, which the provider never reads back and which made every plan propose
+  them again. See `docs/how-to/volume-snapshots.md`. Needs an infra apply and a `deploy` of `backup` and `monitor`.
 
 - Fix (infra): `aws_instance.volume_tags` and `aws_ebs_volume` both tagged the data volumes, overwriting each
   other's `Name` and `mksrv:volume` on every apply (nine in-place changes in every plan). The root volume is now tagged

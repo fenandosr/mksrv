@@ -3,6 +3,7 @@ title: Identity and mesh
 description: "Headscale, one Keycloak instance with its own Postgres, and configd"
 targets: [cloud]
 per_tenant: true
+priority: critical   # on the shared data volume: Keycloak users and credentials, Headscale, Caddy certificates (ADR 0046)
 depends_on: [base]
 apps:
   - name: postgres
