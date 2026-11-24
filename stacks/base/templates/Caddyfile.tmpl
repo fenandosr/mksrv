@@ -19,7 +19,10 @@
 # Prometheus scrapes Caddy through here rather than the admin API directly:
 # the admin listener (config reload, /stop, ...) stays loopback-only, and only
 # /metrics is proxied through, on the private IP (M23 phase 3).
-{{ .Host.PrivateIP }}:9019 {
+# `http://` is required: a site address that is a bare IP makes Caddy serve HTTPS (its internal CA)
+# on that port, and Prometheus scrapes over plain HTTP, so every scrape got
+# "Client sent an HTTP request to an HTTPS server" (400) once the firewall let it in.
+http://{{ .Host.PrivateIP }}:9019 {
 	handle /metrics {
 		reverse_proxy 127.0.0.1:2019
 	}

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fix (monitoring): Caddy's metrics vhost `<private ip>:9019` had no scheme, so Caddy served HTTPS on it and every
+  Prometheus scrape (plain HTTP) got 400 "Client sent an HTTP request to an HTTPS server"; it was hidden until the
+  firewall opened the port. It is now `http://<private ip>:9019`. A new post-deploy hook reloads Caddy gracefully so a
+  changed Caddyfile takes effect (before, only fragment writes reloaded it); a missing container is skipped and a failing
+  reload fails the deploy.
+
 - Fix (monitoring): nine alerts had fired since Prometheus first loaded its real configuration (2026-11-22; it had run a
   September one). `postgres_exporter` (:9187, core nodes) and Caddy's metrics (:9019, edge) run with host networking and
   firewalld's `public` zone rejected the monitor host ("no route to host"); each stack now opens its port to the monitor

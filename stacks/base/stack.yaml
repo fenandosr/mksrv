@@ -35,6 +35,10 @@ hooks:
   post_deploy:
     - run: hooks/open-metrics-port.sh
       scope: shared
+    # After the Caddyfile and fragments are written: nothing else reloads Caddy when the Caddyfile
+    # itself changes (only fragment writes did).
+    - run: hooks/reload-caddy.sh
+      scope: shared
 health:
   - app: caddy
     type: http
