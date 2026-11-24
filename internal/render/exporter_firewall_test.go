@@ -341,3 +341,30 @@ func TestMonitorHookReloadsBlackboxAndRestartsOnlyWhenReloadFails(t *testing.T) 
 		t.Errorf("a host without blackbox is skipped: %q restarted=%v", out, restarted)
 	}
 }
+
+// Caddy's admin API answers 403 to a request whose Host is not its own address. The metrics vhost
+// proxies to it, and reverse_proxy forwards the client's Host (<private ip>:9019) unless told
+// otherwise. Reproduced with the real Caddy 2.8 image: without the directive 403, with it 200.
+func TestCaddyMetricsVhostRewritesHostForTheAdminAPI(t *testing.T) {
+	t.Parallel()
+	catalog, err := engine.Catalog(schema.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Stack(filepath.Clean(filepath.Join("..", "..", "stacks")), catalog["base"], baseContext())
+	if err != nil {
+		t.Fatal(err)
+	}
+	caddyfile := string(files["/var/lib/mksrv/stacks/base/Caddyfile"])
+	i := strings.Index(caddyfile, "http://10.20.0.10:9019 {")
+	if i < 0 {
+		t.Fatalf("metrics vhost missing:\n%s", caddyfile)
+	}
+	block := caddyfile[i:]
+	if j := strings.Index(block, "\n}\n"); j > 0 {
+		block = block[:j]
+	}
+	if !strings.Contains(block, "reverse_proxy 127.0.0.1:2019 {") || !strings.Contains(block, "header_up Host {upstream_hostport}") {
+		t.Errorf("the metrics proxy must rewrite Host to the admin address:\n%s", block)
+	}
+}
