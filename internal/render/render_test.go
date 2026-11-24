@@ -63,7 +63,7 @@ func TestStackRendersBase(t *testing.T) {
 	if !strings.Contains(string(caddyfile), "servers {\n\t\tmetrics\n\t}") {
 		t.Fatalf("Caddyfile missing the metrics server option:\n%s", caddyfile)
 	}
-	if !strings.Contains(string(caddyfile), "10.20.0.10:9019 {") || !strings.Contains(string(caddyfile), "reverse_proxy 127.0.0.1:2019") {
+	if !strings.Contains(string(caddyfile), "\nhttp://10.20.0.10:9019 {") || !strings.Contains(string(caddyfile), "reverse_proxy 127.0.0.1:2019") {
 		t.Fatalf("Caddyfile missing the metrics vhost on the private IP:\n%s", caddyfile)
 	}
 

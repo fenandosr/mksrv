@@ -14,3 +14,17 @@ if systemctl is-active --quiet mksrv-prometheus.service; then
 else
 	echo "prometheus not running on this host; skipping reload"
 fi
+
+# blackbox_exporter reads its modules at start and the hook above only reloads Prometheus, so a new
+# module (http_reachable) was unknown to the running exporter and every probe using it returned 400
+# until it was reloaded by hand. It has its own reload endpoint; restart only if that fails.
+if systemctl is-active --quiet mksrv-blackbox.service; then
+	if podman exec mksrv-blackbox wget -q --post-data='' -O- http://localhost:9115/-/reload >/dev/null 2>&1; then
+		echo "blackbox reloaded"
+	else
+		systemctl restart mksrv-blackbox.service
+		echo "blackbox restarted"
+	fi
+else
+	echo "blackbox not running on this host; skipping reload"
+fi
