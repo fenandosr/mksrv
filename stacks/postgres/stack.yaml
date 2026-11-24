@@ -36,6 +36,13 @@ templates:
   - src: templates/postgres-exporter.container.tmpl
     dst: /etc/containers/systemd/mksrv-postgres-exporter.container
     scope: shared
+  - src: templates/exporter-firewall.sh.tmpl
+    dst: /var/lib/mksrv/stacks/postgres/exporter-firewall.sh
+    scope: shared
+hooks:
+  post_deploy:
+    - run: hooks/open-exporter-port.sh
+      scope: shared
 health:
   - app: postgres
     type: http

@@ -1,4 +1,15 @@
 modules:
+  # Reachability and certificate expiry, which is what the operator-endpoint probe is for. Headscale,
+  # configd and a PostgREST with its OpenAPI disabled all answer their root path with 404 while
+  # perfectly healthy, so requiring 2xx there raised a permanent EndpointDown. A 5xx, a refused
+  # connection and a TLS failure still count as down.
+  http_reachable:
+    prober: http
+    timeout: 10s
+    http:
+      method: GET
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200, 204, 301, 302, 303, 307, 308, 401, 403, 404]
   http_2xx:
     prober: http
     timeout: 10s
