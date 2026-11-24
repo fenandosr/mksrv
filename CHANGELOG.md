@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix (infra, ADR 0046): DLM matches a volume carrying ANY of a policy's `target_tags`, not all of them. The three tier policies
+  each listed the tier and `mksrv:env`, so each took every prod volume (root volumes included): the first run made 66 snapshots of
+  22 volumes. Each policy now targets one tag, `mksrv:snapshot-group = <env>-<tier>`, set by the module on data volumes only, and a
+  test pins that `target_tags` holds exactly one. The same run showed the DLM role works with the encrypted volumes.
+
 - Fix (monitoring): Caddy's metrics vhost proxies to its admin API, which answers 403 to a request whose Host is not its
   own address, and `reverse_proxy` forwards the client's (`<private ip>:9019`). The proxy now sets
   `header_up Host {upstream_hostport}`. Reproduced and fixed in an isolated Caddy 2.8 container (403 without, 200 with);

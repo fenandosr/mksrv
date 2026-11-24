@@ -46,6 +46,11 @@ locals {
     for tier, hours in var.snapshot_rpo_hours : tier => {
       "mksrv:snapshot"           = tier
       "mksrv:snapshot-rpo-hours" = tostring(hours)
+      # The ONLY tag a DLM policy selects on. DLM's target_tags match a volume that carries ANY of
+      # the listed tags, not all of them (seen live: a policy that also listed mksrv:env took every
+      # prod volume, root volumes included, three times over). One tag whose value holds the
+      # environment and the tier is what keeps a policy to exactly its own volumes.
+      "mksrv:snapshot-group" = "${var.env}-${tier}"
     }
   }
 }

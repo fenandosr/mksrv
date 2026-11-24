@@ -108,8 +108,8 @@ pins the shape. Phase 1 can start once that apply is done.
 ## Phase 1 as built (2026-11-23)
 
 **Three tiers, one DLM policy each** (`infra/root/main.tf`), daily at 09:00 UTC: `critical` keeps 30, `standard` 7, `low` 2. Each
-volume carries `mksrv:snapshot = <tier>` and `mksrv:snapshot-rpo-hours`; a policy takes the volumes with its tier **and**
-`mksrv:env = <env>`. The tier comes from the catalog: a `priority:` on a stack (its data on the shared data volume) and on each
+volume carries `mksrv:snapshot = <tier>`, `mksrv:snapshot-rpo-hours` and `mksrv:snapshot-group = <env>-<tier>`; a policy targets
+**only** the group tag (see the correction below). The tier comes from the catalog: a `priority:` on a stack (its data on the shared data volume) and on each
 `storage:` volume, default `standard`; a host's data volume takes the highest priority among its stacks (`hostDataTiers`). On
 today's fleet: critical = the edge's data volume and `maildata`, and `pgdata` and `baoraft` on the three core nodes (8 volumes);
 standard = the data volumes of `appd` and the cores and `raft` (7); low = `tsdb` and `chunks` (2). Root volumes are never tagged.
@@ -141,3 +141,18 @@ wrong).
 **Not done yet:** the apply, the first snapshots, how the check reads real tier tags and snapshots (and runs on `appd` through
 IMDS), whether the DLM role works with these encrypted volumes, and the restore drill that is this phase's acceptance
 (`docs/how-to/volume-snapshots.md`, whose restore steps are untested until then).
+
+## Correction (2026-11-24): DLM matches ANY target tag, and the first run showed it
+
+The first scheduled run (2026-11-24 09:00 UTC) produced **66 snapshots of 22 volumes**, not 17 of 17. The cause was an assumption of
+mine that a policy listing `mksrv:snapshot = <tier>` and `mksrv:env = <env>` as `target_tags` would take only volumes carrying both.
+DLM takes volumes carrying **any** of them, so each of the three policies took every prod volume, the five root volumes included
+(3 policies x 22 volumes = 66; 15 of them had no tier tag because root volumes carry none). The read-only plan could not show this: it
+only shows the configuration, not how AWS interprets it.
+
+What the run did confirm, and was untested before: **all 66 snapshots completed and are encrypted**, so the DLM role works with these
+encrypted volumes, and the policies report no error. The fix is one target tag per policy, `mksrv:snapshot-group = <env>-<tier>`,
+set by the module on the data volumes only, with a test that `target_tags` holds exactly one tag. The extra snapshots (the 15 of the
+root volumes and the two off-tier copies of each data volume) are not removed by DLM once the policies stop selecting those volumes,
+so they are deleted by hand; the restic job and every other snapshot are untouched.
+

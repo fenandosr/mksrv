@@ -89,6 +89,9 @@ func TestOnlyDataVolumesCarryTheSnapshotTag(t *testing.T) {
 			t.Errorf("%s must merge the tags of its tier (%s) from local.snapshot_tags_by_tier", header, tier)
 		}
 	}
+	if !strings.Contains(resourceBlock(t, "infra/modules/aws-host/main.tf", "locals {"), `"mksrv:snapshot-group" = "${var.env}-${tier}"`) {
+		t.Error("the module must set mksrv:snapshot-group = <env>-<tier>, the value the policies target")
+	}
 	if block := resourceBlock(t, module, `resource "aws_instance" "host" {`); strings.Contains(block, "snapshot_tags") || strings.Contains(block, "mksrv:snapshot") {
 		t.Error("aws_instance.host must not carry the snapshot tags: root volumes are not snapshotted")
 	}
@@ -99,8 +102,7 @@ func TestSnapshotPoliciesSelectTheTaggedVolumesOfThisEnvironmentPerTier(t *testi
 	policy := resourceBlock(t, "infra/root/main.tf", `resource "aws_dlm_lifecycle_policy" "volumes" {`)
 	for _, want := range []string{
 		"for_each           = var.snapshot_enabled ? var.snapshot_tiers : {}", // one policy per tier
-		`"mksrv:snapshot" = each.key`,                                         // the tier tag the module sets
-		`"mksrv:env"      = local.env`,                                        // never another environment's volumes
+		`"mksrv:snapshot-group" = "${local.env}-${each.key}"`,                 // the single tag the module sets
 		`resource_types = ["VOLUME"]`,
 		"interval      = each.value.rpo_hours",
 		"count = each.value.retain",
@@ -109,6 +111,23 @@ func TestSnapshotPoliciesSelectTheTaggedVolumesOfThisEnvironmentPerTier(t *testi
 		if !strings.Contains(policy, want) {
 			t.Errorf("the DLM policy must contain %q", want)
 		}
+	}
+	// DLM's target_tags select a volume that carries ANY of them, so a second tag (mksrv:env was one) makes every
+	// policy take every volume of the environment, root volumes included. Seen live: 66 snapshots of 22 volumes.
+	inTargets, tags := false, 0
+	for _, line := range strings.Split(policy, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "target_tags = {"):
+			inTargets = true
+		case inTargets && trimmed == "}":
+			inTargets = false
+		case inTargets && strings.HasPrefix(trimmed, `"`):
+			tags++
+		}
+	}
+	if tags != 1 {
+		t.Errorf("target_tags must hold exactly one tag (DLM matches ANY of them), found %d", tags)
 	}
 	// What the root passes to every host must agree with what the policies target.
 	hostCall := resourceBlock(t, "infra/root/main.tf", `module "aws_host" {`)
