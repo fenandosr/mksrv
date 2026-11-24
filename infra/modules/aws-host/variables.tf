@@ -143,3 +143,10 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "snapshot_tag" {
+  type        = string
+  default     = ""
+  description = "Value of the mksrv:snapshot tag set on this host's DATA volumes (the volume mounted at /var/lib/mksrv and every dedicated stack volume), which the fleet's DLM policy selects (ADR 0046). Empty = no tag and no snapshots. The root volume is never tagged: it holds nothing that is not rebuilt by bootstrap."
+}
+

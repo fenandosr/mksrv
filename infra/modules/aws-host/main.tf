@@ -41,6 +41,8 @@ locals {
   mgmt_is_ipv6 = strcontains(var.mgmt_cidr, ":")
   data_device  = "/dev/sdf"
   tags         = merge(var.tags, { "mksrv:env" = var.env, "mksrv:host" = var.name })
+  # ADR 0046: the tag the fleet's DLM policy selects. Only data volumes carry it.
+  snapshot_tags = var.snapshot_tag != "" ? { "mksrv:snapshot" = var.snapshot_tag } : {}
 }
 
 resource "aws_security_group" "host" {
@@ -284,12 +286,16 @@ resource "aws_instance" "host" {
   # purpose, `terraform apply -replace` that one instance (data volumes need a
   # migration plan first) or set `ami_id` explicitly.
   #
+  # root_block_device[0].tags is ignored too: the provider applies those tags when
+  # the instance is created but does not read them back, so without this every plan
+  # proposes adding tags the root volume already has.
+  #
   # volume_tags is ignored on purpose. It is not set (see root_block_device), but
   # an instance that once had it still holds it in state, and Terraform plans
   # `volume_tags -> null`, which deletes those tags from EVERY attached volume,
   # data volumes included, until a second apply puts them back.
   lifecycle {
-    ignore_changes = [ami, volume_tags]
+    ignore_changes = [ami, volume_tags, root_block_device[0].tags]
   }
 }
 
@@ -298,7 +304,7 @@ resource "aws_ebs_volume" "data" {
   size              = var.data_gb
   type              = "gp3"
   encrypted         = true
-  tags              = merge(local.tags, { Name = "${local.name}-data" })
+  tags              = merge(local.tags, { Name = "${local.name}-data" }, local.snapshot_tags)
 }
 
 resource "aws_volume_attachment" "data" {
@@ -318,7 +324,7 @@ resource "aws_ebs_volume" "extra" {
   iops              = each.value.iops > 0 ? each.value.iops : null
   throughput        = each.value.throughput > 0 ? each.value.throughput : null
   encrypted         = true
-  tags              = merge(local.tags, { Name = "${local.name}-${each.value.name}", "mksrv:volume" = each.value.name })
+  tags              = merge(local.tags, { Name = "${local.name}-${each.value.name}", "mksrv:volume" = each.value.name }, local.snapshot_tags)
 }
 
 resource "aws_volume_attachment" "extra" {

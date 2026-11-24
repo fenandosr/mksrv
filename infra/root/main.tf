@@ -395,6 +395,7 @@ module "aws_host" {
   backup_enabled      = contains(each.value.stacks, "backup") && length(local.backup_hosts) > 0
   backup_bucket_arn   = contains(each.value.stacks, "backup") && length(local.backup_hosts) > 0 ? aws_s3_bucket.backups[0].arn : ""
   mail_cert_zone_arns = contains(each.value.stacks, "mail") ? local.mail_cert_zone_arns : []
+  snapshot_tag        = var.snapshot_enabled ? "daily" : ""
 
   advertise_exitnode = try(each.value.advertise_exitnode, false)
   is_nat             = local.nat_via_edge && each.key == local.base_host
@@ -822,3 +823,68 @@ module "dns_tenant" {
   # overwrite a name mksrv did not create.
   allow_overwrite = false
 }
+
+# ADR 0046, phase 1: one DLM policy snapshots, daily, every volume the aws-host module
+# tagged mksrv:snapshot = daily (data volumes only, never root) in THIS environment.
+# Selecting by tag means a new host or stack volume is covered by being created, with no
+# list to keep in step. The snapshots are incremental and keep the volume's encryption.
+resource "aws_iam_role" "dlm" {
+  count = var.snapshot_enabled ? 1 : 0
+  name  = "mksrv-${local.env}-dlm"
+  tags  = { "mksrv:env" = local.env }
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Action    = "sts:AssumeRole"
+      Principal = { Service = "dlm.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "dlm" {
+  count      = var.snapshot_enabled ? 1 : 0
+  role       = aws_iam_role.dlm[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole"
+}
+
+resource "aws_dlm_lifecycle_policy" "volumes" {
+  count = var.snapshot_enabled ? 1 : 0
+  # DLM accepts only letters, digits, spaces, "_" and "-" here; a ":" or "(" is rejected at plan time.
+  description        = "mksrv ${local.env} daily snapshots of data volumes"
+  execution_role_arn = aws_iam_role.dlm[0].arn
+  state              = "ENABLED"
+  tags               = { "mksrv:env" = local.env }
+
+  policy_details {
+    resource_types = ["VOLUME"]
+    # Both tags must match: the environment keeps a second mksrv environment in the same
+    # account out of this policy.
+    target_tags = {
+      "mksrv:snapshot" = "daily"
+      "mksrv:env"      = local.env
+    }
+
+    schedule {
+      name      = "daily"
+      copy_tags = true
+      tags_to_add = {
+        "mksrv:snapshot-by" = "dlm"
+      }
+
+      create_rule {
+        interval      = 24
+        interval_unit = "HOURS"
+        times         = [var.snapshot_time_utc]
+      }
+
+      retain_rule {
+        count = var.snapshot_retention_count
+      }
+    }
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.dlm]
+}
+

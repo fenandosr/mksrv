@@ -53,3 +53,63 @@ func TestInstanceDoesNotManageTheTagsOfItsDataVolumes(t *testing.T) {
 		t.Error("the root volume must be tagged from root_block_device")
 	}
 }
+
+// resourceBlock returns the text of the named resource in a Terraform file, up to the closing
+// brace at column 0.
+func resourceBlock(t *testing.T, relPath, header string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", relPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(raw)
+	start := strings.Index(src, header)
+	if start < 0 {
+		t.Fatalf("%s not found in %s", header, relPath)
+	}
+	end := strings.Index(src[start:], "\n}\n")
+	if end < 0 {
+		t.Fatalf("end of %s not found", header)
+	}
+	return src[start : start+end]
+}
+
+// ADR 0046 phase 1: the DLM policy selects volumes by tag, so exactly the data volumes (the one
+// mounted at /var/lib/mksrv and every dedicated stack volume) carry mksrv:snapshot, and the root
+// volume and the instance never do. If this regresses, snapshots stop being taken without an error.
+func TestOnlyDataVolumesCarryTheSnapshotTag(t *testing.T) {
+	t.Parallel()
+	const module = "infra/modules/aws-host/main.tf"
+	for _, header := range []string{`resource "aws_ebs_volume" "data" {`, `resource "aws_ebs_volume" "extra" {`} {
+		if block := resourceBlock(t, module, header); !strings.Contains(block, "local.snapshot_tags") {
+			t.Errorf("%s must merge local.snapshot_tags into its tags", header)
+		}
+	}
+	for _, header := range []string{`resource "aws_instance" "host" {`} {
+		if block := resourceBlock(t, module, header); strings.Contains(block, "snapshot_tags") || strings.Contains(block, "mksrv:snapshot") {
+			t.Errorf("%s must not carry the snapshot tag: root volumes are not snapshotted", header)
+		}
+	}
+}
+
+func TestSnapshotPolicySelectsTheTaggedVolumesOfThisEnvironment(t *testing.T) {
+	t.Parallel()
+	policy := resourceBlock(t, "infra/root/main.tf", `resource "aws_dlm_lifecycle_policy" "volumes" {`)
+	for _, want := range []string{
+		`"mksrv:snapshot" = "daily"`, // the tag the module sets
+		`"mksrv:env"      = local.env`,
+		`resource_types = ["VOLUME"]`,
+		"retain_rule",
+		"var.snapshot_retention_count",
+		"var.snapshot_time_utc",
+	} {
+		if !strings.Contains(policy, want) {
+			t.Errorf("the DLM policy must contain %q", want)
+		}
+	}
+	// The value the root passes to every host must be the one the policy targets.
+	hostCall := resourceBlock(t, "infra/root/main.tf", `module "aws_host" {`)
+	if !regexp.MustCompile(`snapshot_tag\s*=\s*var\.snapshot_enabled \? "daily" : ""`).MatchString(hostCall) {
+		t.Error(`the aws_host module call must pass snapshot_tag = var.snapshot_enabled ? "daily" : ""`)
+	}
+}

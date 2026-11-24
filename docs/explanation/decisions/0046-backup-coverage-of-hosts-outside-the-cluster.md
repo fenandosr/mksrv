@@ -105,3 +105,17 @@ those tags from every attached volume until a second apply). The new plan agains
 get root-volume tags and 4 data volumes get `mksrv:volume`, 0 removals; it converges to no changes after one apply. A test
 pins the shape. Phase 1 can start once that apply is done.
 
+## Phase 1 as built (2026-11-23)
+
+One `aws_dlm_lifecycle_policy` in `infra/root/main.tf` (with its role) snapshots daily, at 09:00 UTC, every volume tagged
+`mksrv:snapshot = daily` **and** `mksrv:env = <env>`, keeping 7. The `aws-host` module sets that tag on the volume mounted at
+`/var/lib/mksrv` and on every dedicated stack volume (17 volumes, 287 GB provisioned, on today's fleet) and never on a root
+volume. Retention and time are root variables; `snapshot_enabled = false` removes the policy and the tag. A read-only plan
+against the live state: 3 resources to add, 17 volumes to retag, 0 on instances, 0 removals. That plan also caught a rule
+`validate` does not: DLM rejects a `:` or `(` in the policy description.
+
+The same change adds `root_block_device[0].tags` to the instance's `ignore_changes`: the provider sets those tags at creation
+but does not read them back, so every plan proposed them again (the earlier claim that one apply converged to no changes was
+wrong). Not done yet: the apply, the first snapshots, and the restore drill that is this phase's acceptance
+(`docs/how-to/volume-snapshots.md`, whose steps are untested until then).
+

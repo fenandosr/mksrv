@@ -115,3 +115,33 @@ variable "host_volumes" {
   })))
   default = {}
 }
+
+# ADR 0046, phase 1: daily EBS snapshots of every data volume, by tag.
+variable "snapshot_enabled" {
+  type        = bool
+  default     = true
+  description = "Create the DLM policy and tag the data volumes (mksrv:snapshot = daily). Crash-consistent snapshots, not application-consistent: a database recovers from one as it does from a power cut."
+}
+
+variable "snapshot_retention_count" {
+  type        = number
+  default     = 7
+  description = "How many daily snapshots to keep per volume."
+
+  validation {
+    condition     = var.snapshot_retention_count >= 1 && var.snapshot_retention_count <= 1000
+    error_message = "snapshot_retention_count must be between 1 and 1000."
+  }
+}
+
+variable "snapshot_time_utc" {
+  type        = string
+  default     = "09:00"
+  description = "UTC time the daily snapshot starts (HH:MM). The default is 03:00 in Mexico City, away from the restic job."
+
+  validation {
+    condition     = can(regex("^([01][0-9]|2[0-3]):[0-5][0-9]$", var.snapshot_time_utc))
+    error_message = "snapshot_time_utc must be HH:MM, 24 hour."
+  }
+}
+
