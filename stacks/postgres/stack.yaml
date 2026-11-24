@@ -20,6 +20,7 @@ resources:
 storage:
   - name: pgdata
     gb: 20
+    priority: critical   # every tenant database
   - name: raft
     gb: 2
 templates:

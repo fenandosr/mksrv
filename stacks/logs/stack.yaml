@@ -20,6 +20,7 @@ storage:
     grows_with: logs
     from: mksrv-logs-loki
     unit: mksrv-loki.service
+    priority: low   # logs regenerate
 templates:
   - src: templates/mksrv-logs.network.tmpl
     dst: /etc/containers/systemd/mksrv-logs.network

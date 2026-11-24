@@ -105,3 +105,39 @@ those tags from every attached volume until a second apply). The new plan agains
 get root-volume tags and 4 data volumes get `mksrv:volume`, 0 removals; it converges to no changes after one apply. A test
 pins the shape. Phase 1 can start once that apply is done.
 
+## Phase 1 as built (2026-11-23)
+
+**Three tiers, one DLM policy each** (`infra/root/main.tf`), daily at 09:00 UTC: `critical` keeps 30, `standard` 7, `low` 2. Each
+volume carries `mksrv:snapshot = <tier>` and `mksrv:snapshot-rpo-hours`; a policy takes the volumes with its tier **and**
+`mksrv:env = <env>`. The tier comes from the catalog: a `priority:` on a stack (its data on the shared data volume) and on each
+`storage:` volume, default `standard`; a host's data volume takes the highest priority among its stacks (`hostDataTiers`). On
+today's fleet: critical = the edge's data volume and `maildata`, and `pgdata` and `baoraft` on the three core nodes (8 volumes);
+standard = the data volumes of `appd` and the cores and `raft` (7); low = `tsdb` and `chunks` (2). Root volumes are never tagged.
+`snapshot_tiers` (RPO and retention per tier), `snapshot_time_utc` and `snapshot_enabled` are root variables.
+
+**The RPO is 24 h for every tier**, as decided for mail and users; the tiers differ in depth of history and in alert severity.
+A weekly low tier was dropped: DLM intervals stop at 24 h (a weekly schedule needs `cron`, which I could not validate before an
+apply), and the data it would save is a few hundred MB.
+
+**Measure of goodness: coverage, not a ratio.** The ratio of critical to other snapshots is fixed by the inventory and improves
+if snapshots are deleted, so it is not a goal. What can fail, and is measured, is `mksrv_snapshot_coverage_ratio{tier}`: the share of
+a tier's volumes whose newest completed snapshot is within RPO plus 4 h of grace. `mksrv-snapshot-check.timer` on the `backup` host
+computes it hourly (stdlib Python, SigV4-signed read-only calls with the instance role; `ec2:DescribeVolumes` and
+`DescribeSnapshots`), and Prometheus alerts on it (`SnapshotCoverageCritical`, `SnapshotCoverageLow`, `SnapshotCheckFailing`,
+`SnapshotCheckAbsent`) and on the case where nothing is tagged critical (`SnapshotNoCriticalVolumes`), which leaves no coverage
+series for the others to fire on. Pending or failed snapshots do not count. Restore-tested volumes are not measured yet.
+
+**Verified before any apply.** A read-only plan against the live state: 5 resources to add (three policies, role, attachment), 17
+volumes retagged (8 critical, 7 standard, 2 low), 0 changes on instances, 0 removals; it also caught that DLM rejects a `:` or `(`
+in a policy description. The check's SigV4 signature reproduces AWS's published test vector; its tests run the rendered script
+against fake IMDS and EC2 servers and fail if a pending snapshot counts, the per-volume RPO is ignored, or an EC2 error is
+swallowed. Run for real against EC2 (read-only, before any volume carried the tag) it read 22 volumes and 0 snapshots and wrote
+`success 1`. The five alert expressions evaluate on the live Prometheus, and `unless on()` behaves as intended.
+
+The same change adds `root_block_device[0].tags` to the instance's `ignore_changes`: the provider sets those tags at creation
+but does not read them back, so every plan proposed them again (the earlier claim that one apply converged to no changes was
+wrong).
+
+**Not done yet:** the apply, the first snapshots, how the check reads real tier tags and snapshots (and runs on `appd` through
+IMDS), whether the DLM role works with these encrypted volumes, and the restore drill that is this phase's acceptance
+(`docs/how-to/volume-snapshots.md`, whose restore steps are untested until then).

@@ -388,13 +388,15 @@ module "aws_host" {
   stacks        = toset(each.value.stacks)
   timezone      = local.timezone
   key_name      = var.ssh_public_key != "" ? aws_key_pair.operator[0].key_name : ""
-  volumes       = try(var.host_volumes[each.key], [])
+  volumes       = [for v in try(var.host_volumes[each.key], []) : merge(v, { tier = var.snapshot_enabled ? v.tier : "" })]
 
   openbao_kms_enabled = contains(each.value.stacks, "openbao") && length(local.openbao_hosts) > 0
   openbao_kms_key_arn = contains(each.value.stacks, "openbao") && length(local.openbao_hosts) > 0 ? aws_kms_key.openbao[0].arn : ""
   backup_enabled      = contains(each.value.stacks, "backup") && length(local.backup_hosts) > 0
   backup_bucket_arn   = contains(each.value.stacks, "backup") && length(local.backup_hosts) > 0 ? aws_s3_bucket.backups[0].arn : ""
   mail_cert_zone_arns = contains(each.value.stacks, "mail") ? local.mail_cert_zone_arns : []
+  data_snapshot_tier  = var.snapshot_enabled ? try(var.host_data_tier[each.key], "standard") : ""
+  snapshot_rpo_hours  = { for tier, t in var.snapshot_tiers : tier => t.rpo_hours }
 
   advertise_exitnode = try(each.value.advertise_exitnode, false)
   is_nat             = local.nat_via_edge && each.key == local.base_host
@@ -821,4 +823,69 @@ module "dns_tenant" {
   # Tenant zones hold the tenant's own live records (mail included); never
   # overwrite a name mksrv did not create.
   allow_overwrite = false
+}
+
+# ADR 0046, phase 1: one DLM policy PER TIER snapshots every volume the aws-host module tagged
+# mksrv:snapshot = <tier> (data volumes only, never root) in THIS environment. The tier of a
+# volume comes from the stack catalog, so a new host or stack volume is covered, at the right
+# depth, by being created, with no list to keep in step. The snapshots are incremental and keep
+# the volume's encryption.
+resource "aws_iam_role" "dlm" {
+  count = var.snapshot_enabled ? 1 : 0
+  name  = "mksrv-${local.env}-dlm"
+  tags  = { "mksrv:env" = local.env }
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Action    = "sts:AssumeRole"
+      Principal = { Service = "dlm.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "dlm" {
+  count      = var.snapshot_enabled ? 1 : 0
+  role       = aws_iam_role.dlm[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole"
+}
+
+resource "aws_dlm_lifecycle_policy" "volumes" {
+  for_each           = var.snapshot_enabled ? var.snapshot_tiers : {}
+  execution_role_arn = aws_iam_role.dlm[0].arn
+  state              = "ENABLED"
+  tags               = { "mksrv:env" = local.env, "mksrv:snapshot" = each.key }
+  # DLM accepts only letters, digits, spaces, "_" and "-" here; a ":" or "(" is rejected at plan time.
+  description = "mksrv ${local.env} ${each.key} volume snapshots"
+
+  policy_details {
+    resource_types = ["VOLUME"]
+    # Both tags must match: the environment keeps a second mksrv environment in the same
+    # account out of this policy.
+    target_tags = {
+      "mksrv:snapshot" = each.key
+      "mksrv:env"      = local.env
+    }
+
+    schedule {
+      name      = each.key
+      copy_tags = true
+      tags_to_add = {
+        "mksrv:snapshot-by" = "dlm"
+      }
+
+      create_rule {
+        interval      = each.value.rpo_hours
+        interval_unit = "HOURS"
+        times         = [var.snapshot_time_utc]
+      }
+
+      retain_rule {
+        count = each.value.retain
+      }
+    }
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.dlm]
 }

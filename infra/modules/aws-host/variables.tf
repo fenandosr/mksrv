@@ -85,6 +85,7 @@ variable "volumes" {
     iops       = optional(number, 0)
     throughput = optional(number, 0)
     device     = string
+    tier       = optional(string, "") # snapshot tier; empty = not snapshotted
   }))
   default = []
 }
@@ -143,3 +144,16 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "data_snapshot_tier" {
+  type        = string
+  default     = ""
+  description = "Snapshot tier (critical, standard or low) of the volume mounted at /var/lib/mksrv; it takes the highest priority among the host's stacks. Empty = not snapshotted. The root volume is never snapshotted: it holds nothing bootstrap does not rebuild (ADR 0046)."
+}
+
+variable "snapshot_rpo_hours" {
+  type        = map(number)
+  default     = { critical = 24, standard = 24, low = 24 }
+  description = "Recovery point objective per tier, written on each tagged volume as mksrv:snapshot-rpo-hours so the snapshot-age check reads one source of truth."
+}
+

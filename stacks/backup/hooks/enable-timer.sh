@@ -5,3 +5,5 @@ set -euo pipefail
 systemctl daemon-reload
 systemctl enable --now mksrv-backup.timer
 echo "mksrv-backup.timer enabled ($(systemctl show -p NextElapseUSecRealtime --value mksrv-backup.timer))"
+systemctl enable --now mksrv-snapshot-check.timer
+echo "mksrv-snapshot-check.timer enabled ($(systemctl show -p NextElapseUSecRealtime --value mksrv-snapshot-check.timer))"

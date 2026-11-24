@@ -41,6 +41,13 @@ locals {
   mgmt_is_ipv6 = strcontains(var.mgmt_cidr, ":")
   data_device  = "/dev/sdf"
   tags         = merge(var.tags, { "mksrv:env" = var.env, "mksrv:host" = var.name })
+  # ADR 0046: the tags the fleet's DLM policies select on, by tier. Only data volumes carry them.
+  snapshot_tags_by_tier = {
+    for tier, hours in var.snapshot_rpo_hours : tier => {
+      "mksrv:snapshot"           = tier
+      "mksrv:snapshot-rpo-hours" = tostring(hours)
+    }
+  }
 }
 
 resource "aws_security_group" "host" {
@@ -179,6 +186,22 @@ resource "aws_iam_role_policy" "openbao_kms" {
   })
 }
 
+# ADR 0046: the backup host checks how old the newest snapshot of each volume is. Read-only;
+# these two EC2 Describe actions do not support resource-level permissions, hence "*".
+resource "aws_iam_role_policy" "snapshot_read" {
+  count       = var.backup_enabled ? 1 : 0
+  name_prefix = "mksrv-snapshot-read-"
+  role        = aws_iam_role.host.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ec2:DescribeVolumes", "ec2:DescribeSnapshots"]
+      Resource = "*"
+    }]
+  })
+}
+
 # Backups: only hosts carrying the `backup` stack can read/write the restic bucket.
 resource "aws_iam_role_policy" "backup_s3" {
   count       = var.backup_enabled ? 1 : 0
@@ -284,12 +307,16 @@ resource "aws_instance" "host" {
   # purpose, `terraform apply -replace` that one instance (data volumes need a
   # migration plan first) or set `ami_id` explicitly.
   #
+  # root_block_device[0].tags is ignored too: the provider applies those tags when
+  # the instance is created but does not read them back, so without this every plan
+  # proposes adding tags the root volume already has.
+  #
   # volume_tags is ignored on purpose. It is not set (see root_block_device), but
   # an instance that once had it still holds it in state, and Terraform plans
   # `volume_tags -> null`, which deletes those tags from EVERY attached volume,
   # data volumes included, until a second apply puts them back.
   lifecycle {
-    ignore_changes = [ami, volume_tags]
+    ignore_changes = [ami, volume_tags, root_block_device[0].tags]
   }
 }
 
@@ -298,7 +325,7 @@ resource "aws_ebs_volume" "data" {
   size              = var.data_gb
   type              = "gp3"
   encrypted         = true
-  tags              = merge(local.tags, { Name = "${local.name}-data" })
+  tags              = merge(local.tags, { Name = "${local.name}-data" }, lookup(local.snapshot_tags_by_tier, var.data_snapshot_tier, {}))
 }
 
 resource "aws_volume_attachment" "data" {
@@ -318,7 +345,7 @@ resource "aws_ebs_volume" "extra" {
   iops              = each.value.iops > 0 ? each.value.iops : null
   throughput        = each.value.throughput > 0 ? each.value.throughput : null
   encrypted         = true
-  tags              = merge(local.tags, { Name = "${local.name}-${each.value.name}", "mksrv:volume" = each.value.name })
+  tags              = merge(local.tags, { Name = "${local.name}-${each.value.name}", "mksrv:volume" = each.value.name }, lookup(local.snapshot_tags_by_tier, each.value.tier, {}))
 }
 
 resource "aws_volume_attachment" "extra" {

@@ -15,6 +15,7 @@ resources:
 storage:
   - name: baoraft
     gb: 10
+    priority: critical   # secrets (raft storage)
 templates:
   - src: templates/openbao-firewall.sh.tmpl
     dst: /var/lib/mksrv/stacks/openbao/firewall.sh

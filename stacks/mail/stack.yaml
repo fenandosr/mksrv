@@ -3,6 +3,7 @@ title: Mail
 description: "Shared inbound+outbound mail server (docker-mailserver) for tenants that opt in via a mail: block (ADR 0032)"
 targets: [cloud]
 per_tenant: false
+priority: critical   # on the shared data volume: mail accounts, DKIM keys, configuration (ADR 0046)
 depends_on: [base]
 apps:
   - name: mailserver
@@ -12,6 +13,7 @@ secrets: []
 storage:
   - name: maildata
     gb: 20
+    priority: critical   # every tenant's mailboxes
 templates:
   - src: templates/mksrv-mail.network.tmpl
     dst: /etc/containers/systemd/mksrv-mail.network

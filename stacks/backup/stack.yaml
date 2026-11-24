@@ -21,6 +21,16 @@ templates:
   - src: templates/mksrv-backup.timer.tmpl
     dst: /etc/systemd/system/mksrv-backup.timer
     scope: shared
+  # ADR 0046: how old is the newest snapshot of each volume the DLM policies cover, per tier.
+  - src: templates/snapshot-check.py.tmpl
+    dst: /var/lib/mksrv/stacks/backup/snapshot-check.py
+    scope: shared
+  - src: templates/mksrv-snapshot-check.service.tmpl
+    dst: /etc/systemd/system/mksrv-snapshot-check.service
+    scope: shared
+  - src: templates/mksrv-snapshot-check.timer.tmpl
+    dst: /etc/systemd/system/mksrv-snapshot-check.timer
+    scope: shared
 hooks:
   post_deploy:
     - run: hooks/enable-timer.sh

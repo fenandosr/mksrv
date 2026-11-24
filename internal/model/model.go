@@ -783,17 +783,21 @@ type Stack struct {
 	// (where LocalHost is always nil), only reached via a tenant's
 	// local_hosts. Checked in semanticChecks alongside the existing
 	// target/cloud-or-local check.
-	LocalHostsOnly bool            `json:"local_hosts_only,omitempty"`
-	DependsOn      []string        `json:"depends_on,omitempty"`
-	Apps           []StackApp      `json:"apps"`
-	Networks       []string        `json:"networks,omitempty"`
-	Secrets        []string        `json:"secrets,omitempty"`
-	TailnetPorts   []int           `json:"tailnet_ports,omitempty"`
-	Resources      StackResources  `json:"resources,omitempty"`
-	Storage        []StackVolume   `json:"storage,omitempty"`
-	Templates      []StackTemplate `json:"templates,omitempty"`
-	Hooks          StackHooks      `json:"hooks,omitempty"`
-	Health         []StackHealth   `json:"health,omitempty"`
+	LocalHostsOnly bool           `json:"local_hosts_only,omitempty"`
+	DependsOn      []string       `json:"depends_on,omitempty"`
+	Apps           []StackApp     `json:"apps"`
+	Networks       []string       `json:"networks,omitempty"`
+	Secrets        []string       `json:"secrets,omitempty"`
+	TailnetPorts   []int          `json:"tailnet_ports,omitempty"`
+	Resources      StackResources `json:"resources,omitempty"`
+	Storage        []StackVolume  `json:"storage,omitempty"`
+	// Priority is how much the stack's own data (what it keeps on the host's shared data volume)
+	// matters, for volume snapshots (ADR 0046): critical, standard (the default) or low. A host's
+	// data volume takes the highest priority among its stacks.
+	Priority  string          `json:"priority,omitempty"`
+	Templates []StackTemplate `json:"templates,omitempty"`
+	Hooks     StackHooks      `json:"hooks,omitempty"`
+	Health    []StackHealth   `json:"health,omitempty"`
 }
 
 // StackVolume is a dedicated EBS volume a stack wants, mounted on the host at
@@ -806,6 +810,8 @@ type StackVolume struct {
 	GrowsWith  string `json:"grows_with,omitempty"` // data | metrics | logs — retention-driven sizing
 	From       string `json:"from,omitempty"`       // legacy named podman volume, for `mksrv host migrate-volume`
 	Unit       string `json:"unit,omitempty"`       // systemd unit to stop while migrating
+	// Priority of the data on this volume for snapshots (ADR 0046): critical, standard (default) or low.
+	Priority string `json:"priority,omitempty"`
 }
 
 type StackApp struct {
@@ -851,4 +857,38 @@ type Lock struct {
 	// and Samba host ports (ADR 0040) for the same reason.
 	FilesNextcloudPorts map[string]int `json:"files_nextcloud_ports,omitempty"`
 	FilesSambaPorts     map[string]int `json:"files_samba_ports,omitempty"`
+}
+
+// Snapshot priorities (ADR 0046). The order is the order of importance.
+const (
+	PriorityCritical = "critical"
+	PriorityStandard = "standard"
+	PriorityLow      = "low"
+)
+
+// Priorities lists the valid priorities, most important first.
+var Priorities = []string{PriorityCritical, PriorityStandard, PriorityLow}
+
+// EffectivePriority is p, or standard when it is empty.
+func EffectivePriority(p string) string {
+	if p == "" {
+		return PriorityStandard
+	}
+	return p
+}
+
+// MaxPriority returns the more important of two priorities (empty counts as standard).
+func MaxPriority(a, b string) string {
+	rank := func(p string) int {
+		for i, v := range Priorities {
+			if v == EffectivePriority(p) {
+				return i
+			}
+		}
+		return len(Priorities) // unknown: least important
+	}
+	if rank(b) < rank(a) {
+		return EffectivePriority(b)
+	}
+	return EffectivePriority(a)
 }

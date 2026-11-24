@@ -27,3 +27,6 @@ specific thing.
   provisioning.
 - [Completion and typo checks for the YAML in your editor](editor-completion.md) — the schema header
   and what `mksrv schema` generates.
+- [Shell completion](shell-completion.md) — `mksrv completion` and what TAB offers from your workspace.
+- [Volume snapshots](volume-snapshots.md) — the daily snapshot of every data volume, what it covers, and how to restore one.
+
