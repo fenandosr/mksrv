@@ -49,3 +49,4 @@ unanswered.
 - [ADR 0044: A single-host endpoint that follows the Patroni leader](0044-postgres-leader-endpoint.md)
 - [ADR 0045: Command help, shell completion and editor schemas, in three phases](0045-help-completion-and-editor-schemas.md)
 - [ADR 0046: Backup coverage of the hosts that hold state outside the Postgres cluster](0046-backup-coverage-of-hosts-outside-the-cluster.md)
+- [ADR 0047: Alertmanager, and a dead man's switch so that silence means something](0047-alertmanager-and-a-dead-mans-switch.md)
