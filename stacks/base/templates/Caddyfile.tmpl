@@ -24,7 +24,11 @@
 # "Client sent an HTTP request to an HTTPS server" (400) once the firewall let it in.
 http://{{ .Host.PrivateIP }}:9019 {
 	handle /metrics {
-		reverse_proxy 127.0.0.1:2019
+		# The admin API only accepts requests whose Host is its own address; reverse_proxy forwards
+		# the client's (<private ip>:9019), which the admin API answers with 403.
+		reverse_proxy 127.0.0.1:2019 {
+			header_up Host {upstream_hostport}
+		}
 	}
 	handle {
 		respond 404

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix (monitoring): Caddy's metrics vhost proxies to its admin API, which answers 403 to a request whose Host is not its
+  own address, and `reverse_proxy` forwards the client's (`<private ip>:9019`). The proxy now sets
+  `header_up Host {upstream_hostport}`. Reproduced and fixed in an isolated Caddy 2.8 container (403 without, 200 with);
+  it was the last of three layers (firewall, scheme, Host) that kept the edge's Caddy from ever being scraped.
+
 - Fix (monitoring): Caddy's metrics vhost `<private ip>:9019` had no scheme, so Caddy served HTTPS on it and every
   Prometheus scrape (plain HTTP) got 400 "Client sent an HTTP request to an HTTPS server"; it was hidden until the
   firewall opened the port. It is now `http://<private ip>:9019`. A new post-deploy hook reloads Caddy gracefully so a
