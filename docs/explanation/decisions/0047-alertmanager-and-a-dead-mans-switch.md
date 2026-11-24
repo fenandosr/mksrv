@@ -49,11 +49,14 @@ Three phases, in this order. Each is its own change and none touches a tenant.
   credential that already exists. The password reaches Alertmanager as a podman secret read from a file
   (`smtp_auth_password_file`), the same way Grafana's admin password is delivered, never in the rendered config.
 - **Recipients are declared in the operator's `deployment.yaml`** (a new `alerting:` block with the list of addresses and an optional
-  sender), validated by the schema, and are **not** in the repository. They should be **outside the fleet**: a mailbox hosted on
-  the fleet's own mail server cannot receive the alert about the edge being down.
+  sender), validated by the schema, and are **not** in the repository. They are **outside the fleet** (the operator's own external
+  mailbox, decided 2026-11-24): a mailbox hosted on the fleet's own mail server cannot receive the alert about the edge being down.
 - **Routing by the `severity` label the rules already carry:**
   - `critical`: sent at once (a short `group_wait`), repeated every 4 hours until resolved.
   - `warning`: grouped by alert name, a longer `group_wait`, repeated once a day. Warnings are information to read, not to wake for.
+    The operator wants a **daily summary** for them (decided 2026-11-24). Alertmanager groups and spaces notifications but does **not**
+    batch them at a fixed hour, so what Phase 1 delivers is the closest it can do (a long `group_wait` and `group_interval`, a 24 h
+    `repeat_interval`); a true morning digest is Phase 3.
   - An inhibition rule mutes a `warning` that has the same alert name and instance as a firing `critical`, so one outage is one
     message.
 - **Messages carry what the rules already say** (`summary`, `description`, instance, tier, component) and, for the first time, a
@@ -74,10 +77,21 @@ A `Watchdog` alert that is always firing, and something **outside `appd`** that 
   `cloudwatch:PutMetricData` permission for the monitor host's role.
 - **Acceptance:** stopping the Alertmanager container for longer than the alarm period produces the email; restarting it clears it.
 
-### Phase 3: only if a second channel is wanted
+### Phase 3: a channel through `ifer`, and a daily digest
 
-A push channel for criticals (a phone notification) is an additional Alertmanager receiver, chosen once the operator says which.
-It is deliberately not designed here.
+The operator already runs a notification dispatcher, `ifer` (`POST /notify`, with Telegram, WhatsApp-through-Redis and webhook
+actions; the production deployment is described for the `bitabit` tenant), and wants alerts to reach it. Reading it on 2026-11-24:
+
+- **Alertmanager's webhook body cannot be reshaped and is not `ifer`'s payload**, so a translating endpoint is needed. The least
+  moving parts is for `ifer` to expose one (a request to its owner, left in its inbox) rather than for mksrv to run an adapter.
+  Critical alerts go there **in addition to** email, never instead of it.
+- **`/notify` has no authentication today.** It is not published (its hostname does not resolve), so nothing is exposed now, but it
+  must authenticate before it is published or opened to the mesh; Alertmanager would present a bearer token delivered as a secret.
+- **The WhatsApp path depends on the tenant's Redis, which lives on `appd`**, the same host as Prometheus: when `appd` is down it fails
+  exactly when it is needed. Critical alerts should use the Telegram or webhook action, which leave directly.
+- **A morning digest** is a different job from alerting. `julie` (the operator's digest kit) already has a Prometheus connector and a
+  deterministic digest, but no outbound delivery; whether it can read Prometheus over the mesh and push its digest through `ifer` is a
+  question left in its inbox. Phase 1 does not depend on it, and a digest never replaces a critical alert.
 
 ## Alternatives considered
 
@@ -113,4 +127,6 @@ Everything above is design. Specifically: that the Alertmanager image and versio
 (checked at implementation, not now); that `appd` can reach SES on 587 (it reaches the internet through the edge's NAT, and the
 edge's own relay already uses that port, but `appd` has not been tried); that mail from `noreply@<root_domain>` to the chosen external
 addresses is delivered rather than filtered; that SNS email subscriptions need a one-time confirmation click by the recipient; and
-the CloudWatch cost. Which addresses receive the alerts, and whether a second push channel is wanted, are the operator's decisions.
+the CloudWatch cost. The operator decided on 2026-11-24 who receives the email, that warnings are a daily summary, and that `ifer` is the channel; what
+is still open is `ifer`'s answer (its address, the token scheme, whether it will add the endpoint) and `julie`'s (whether it can produce
+and deliver the digest).
