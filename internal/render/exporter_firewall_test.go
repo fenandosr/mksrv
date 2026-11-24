@@ -281,3 +281,63 @@ func TestReloadCaddyHook(t *testing.T) {
 		t.Errorf("a failing reload must fail the deploy, got %d: %s", code, out)
 	}
 }
+
+// blackbox_exporter reads its modules at start, so the monitor hook must reload it as well as
+// Prometheus: a new module was unknown to the running exporter and every probe using it got 400.
+func TestMonitorHookReloadsBlackboxAndRestartsOnlyWhenReloadFails(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	body, err := os.ReadFile(filepath.Join("..", "..", "stacks", "monitor", "hooks", "reload-prometheus.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(blackboxReloadWorks, blackboxActive bool) (out string, restarted bool) {
+		dir := t.TempDir()
+		bin := filepath.Join(dir, "bin")
+		if err := os.MkdirAll(bin, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		log := filepath.Join(dir, "restarts.log")
+		active := "exit 0"
+		if !blackboxActive {
+			active = "exit 3"
+		}
+		// podman exec <container> wget ... : the Prometheus reload works, the blackbox one as requested.
+		bbReload := "exit 0"
+		if !blackboxReloadWorks {
+			bbReload = "exit 1"
+		}
+		stubs := map[string]string{
+			"systemctl": "#!/usr/bin/env bash\ncase \"$1\" in\n  is-active) " + active + " ;;\n  restart) echo \"$2\" >> " + log + " ;;\nesac\n",
+			"podman":    "#!/usr/bin/env bash\ncase \"$*\" in\n  *mksrv-blackbox*) " + bbReload + " ;;\n  *) exit 0 ;;\nesac\n",
+		}
+		for name, b := range stubs {
+			if err := os.WriteFile(filepath.Join(bin, name), []byte(b), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		script := filepath.Join(dir, "hook.sh")
+		if err := os.WriteFile(script, body, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("bash", script)
+		cmd.Env = []string{"PATH=" + bin + ":" + os.Getenv("PATH")}
+		o, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("hook failed: %v\n%s", err, o)
+		}
+		blob, _ := os.ReadFile(log)
+		return string(o), strings.Contains(string(blob), "mksrv-blackbox.service")
+	}
+	if out, restarted := run(true, true); !strings.Contains(out, "blackbox reloaded") || restarted {
+		t.Errorf("a working reload must not restart blackbox: %q restarted=%v", out, restarted)
+	}
+	if out, restarted := run(false, true); !strings.Contains(out, "blackbox restarted") || !restarted {
+		t.Errorf("a failing reload falls back to a restart: %q restarted=%v", out, restarted)
+	}
+	if out, restarted := run(true, false); !strings.Contains(out, "blackbox not running") || restarted {
+		t.Errorf("a host without blackbox is skipped: %q restarted=%v", out, restarted)
+	}
+}
