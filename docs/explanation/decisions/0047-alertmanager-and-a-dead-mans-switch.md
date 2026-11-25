@@ -77,21 +77,32 @@ A `Watchdog` alert that is always firing, and something **outside `appd`** that 
   `cloudwatch:PutMetricData` permission for the monitor host's role.
 - **Acceptance:** stopping the Alertmanager container for longer than the alarm period produces the email; restarting it clears it.
 
-### Phase 3: a channel through `ifer`, and a daily digest
+### Phase 3: a channel through `ifer`, and a daily status mail
 
-The operator already runs a notification dispatcher, `ifer` (`POST /notify`, with Telegram, WhatsApp-through-Redis and webhook
-actions; the production deployment is described for the `bitabit` tenant), and wants alerts to reach it. Reading it on 2026-11-24:
+**`ifer` (answered 2026-11-24, implemented in its working tree and not yet committed or deployed).** It accepted everything asked: an
+authenticated `POST /alertmanager?tenant=<name>` that translates Alertmanager's webhook (one message per call, the highest severity of the
+group, `critical` to its highest priority, `RESUELTA` for resolved alerts, so `send_resolved: true`), a bearer token on it and on `/notify`
+(the API will not start without one), a new tenant `mksrv-criticas` whose only action is Telegram (it leaves directly, not through the
+Redis on `appd`), no fallback to another tenant for an unknown one, and a 10-minute deduplication of identical retries. The token lives in
+OpenBao (`kv/tenants/bitabit/ifer`, field `api_token`); mksrv delivers it to Alertmanager as a secret file
+(`http_config.authorization.credentials_file`). Still open, and the operator's: **which host runs `ifer` and its mesh address** (it should
+listen on the tailnet only; if it were published, TLS is required because the token travels in a header), the Telegram bot and chat, and
+deploying it. The critical receiver is not added to mksrv until `ifer` is running and a real alert has crossed the whole path; critical
+alerts keep going by email as well.
 
-- **Alertmanager's webhook body cannot be reshaped and is not `ifer`'s payload**, so a translating endpoint is needed. The least
-  moving parts is for `ifer` to expose one (a request to its owner, left in its inbox) rather than for mksrv to run an adapter.
-  Critical alerts go there **in addition to** email, never instead of it.
-- **`/notify` has no authentication today.** It is not published (its hostname does not resolve), so nothing is exposed now, but it
-  must authenticate before it is published or opened to the mesh; Alertmanager would present a bearer token delivered as a secret.
-- **The WhatsApp path depends on the tenant's Redis, which lives on `appd`**, the same host as Prometheus: when `appd` is down it fails
-  exactly when it is needed. Critical alerts should use the Telegram or webhook action, which leave directly.
-- **A morning digest** is a different job from alerting. `julie` (the operator's digest kit) already has a Prometheus connector and a
-  deterministic digest, but no outbound delivery; whether it can read Prometheus over the mesh and push its digest through `ifer` is a
-  question left in its inbox. Phase 1 does not depend on it, and a digest never replaces a critical alert.
+**A daily digest through `julie` is not viable now** (answered 2026-11-24, nothing implemented): its Prometheus connector speaks HTTPS only,
+and its transport blocks private and CGNAT ranges, which includes the tailnet's `100.64.0.0/10`, with no exception planned; it turns a
+series into windowed statistics with unknown severity, so a backup component at 0 would not stand out; it detects no alert transitions;
+and it has no scheduled digest generation or outbound delivery. Getting there would take three separate deliveries on its side plus a public
+HTTPS gateway in front of Prometheus, which this ADR does not want. `julie` remains an option for later and agrees that it cannot replace
+Alertmanager.
+
+**What is built instead: a daily status mail from the monitor host.** A systemd timer on `appd` runs once each morning, reads Prometheus
+on `localhost`, and sends one email through the same SES credential: the coverage of each snapshot tier, the age of the last backup and
+whether each component succeeded, how many alerts are firing, and the `warning`s of the last day. A quiet day is a short message that says
+so and states what it could read, never an empty one (which would be indistinguishable from "could not read"). It also works as a second
+heartbeat a person notices when it stops arriving. It adds no new service and no network path, and it is the fixed-hour summary that
+Alertmanager's own grouping cannot give.
 
 ## Alternatives considered
 
@@ -127,6 +138,6 @@ Everything above is design. Specifically: that the Alertmanager image and versio
 (checked at implementation, not now); that `appd` can reach SES on 587 (it reaches the internet through the edge's NAT, and the
 edge's own relay already uses that port, but `appd` has not been tried); that mail from `noreply@<root_domain>` to the chosen external
 addresses is delivered rather than filtered; that SNS email subscriptions need a one-time confirmation click by the recipient; and
-the CloudWatch cost. The operator decided on 2026-11-24 who receives the email, that warnings are a daily summary, and that `ifer` is the channel; what
-is still open is `ifer`'s answer (its address, the token scheme, whether it will add the endpoint) and `julie`'s (whether it can produce
-and deliver the digest).
+the CloudWatch cost. The operator decided on 2026-11-24 who receives the email, that warnings are a daily summary, and that `ifer` is the channel. What is still
+open is `ifer`'s address, its deployment and the Telegram bot and chat (the operator's), that Alertmanager's `credentials_file` and
+`send_resolved` behave as `ifer` expects, and the SES delivery to the chosen address.
