@@ -85,22 +85,46 @@ without stopping what uses it.
 3. On the instance, mount it **read-only and ignoring the UUID**: the restored XFS has the same UUID as the live volume and
    would otherwise be refused.
 
+   On a Nitro instance the device is not named as you attached it: `/dev/sdz` appears as some `/dev/nvme?n1`. Find it by the
+   volume's serial (the id without its dash), never by guessing:
+
    ```sh
-   sudo lsblk                                  # find the new device
+   DEV=$(readlink -f /dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_vol<id-without-dash>)
    sudo mkdir -p /mnt/restore
-   sudo mount -o ro,nouuid /dev/<device> /mnt/restore
+   sudo mount -o ro,nouuid "$DEV" /mnt/restore
    ```
 4. Copy out what you need. For a database, copy the data directory to a scratch location and start a scratch container on
-   the copy; never point a running database at the mounted snapshot.
-5. Clean up: `sudo umount /mnt/restore`, `aws ec2 detach-volume`, `aws ec2 delete-volume`.
+   the copy **with no network**; never point a running database at the mounted snapshot. For Keycloak's database on the edge's
+   data volume:
+
+   ```sh
+   sudo install -d -m 700 /var/lib/mksrv/restore-drill
+   sudo cp -a /mnt/restore/containers/volumes/mksrv-identity-pgdata/_data/pgdata /var/lib/mksrv/restore-drill/pgdata
+   sudo podman run -d --name restore-drill-pg --network none -e PGDATA=/var/lib/postgresql/data \
+     -v /var/lib/mksrv/restore-drill/pgdata:/var/lib/postgresql/data:Z docker.io/library/postgres:16
+   sudo podman logs restore-drill-pg    # expect "automatic recovery" then "ready to accept connections"
+   sudo podman exec restore-drill-pg psql -U keycloak -d keycloak -c \
+     "select r.name, count(u.id) from realm r left join user_entity u on u.realm_id = r.id group by r.name"
+   ```
+
+   Counts include each client's service-account user (`service_account_client_link is not null`), so they are larger than the
+   admin console's list. A `FATAL: role "root" does not exist` in the log comes from running `pg_isready` as root, not from the
+   database. Headscale is a SQLite database in WAL mode: copy `db.sqlite`, `-wal` and `-shm` together, then `pragma integrity_check`.
+5. Clean up, in this order, and check each: remove the scratch container, delete the scratch copy (it holds every tenant's
+   users), `sudo umount /mnt/restore`, `aws ec2 detach-volume`, `aws ec2 delete-volume`.
 
 ## Status
 
-**The restore steps are untested.** The policies create their first snapshots at the next scheduled time after the apply, so a
-restore drill (phase 1's acceptance) can only be done after that. Until it has been done once, treat steps 2 to 5 as a plan,
-not as a tested procedure, and record in ADR 0046 what the drill showed. The check itself was run against the real EC2 API
-before any volume was tagged (22 volumes read, 0 snapshots, success); how it reads real tier tags and real snapshots is not
-verified until after the apply.
+**Restore drill run on 2026-11-25** with the newest snapshot of the edge's data volume, restored onto `appd`: volume available in
+5 s, attached after 9 s, mounted read-only at once; the Keycloak data directory (69 MB) copied in 3 s and a scratch Postgres
+recovered it and accepted connections 3 s later. Per-realm users and service accounts, the newest account, credentials, clients
+and groups were identical to the live database; Headscale passed `integrity_check` with the same node and user counts as live; the
+two DKIM private keys were valid and byte-identical to production; the mail account count matched. Cleanup took 24 s and left
+nothing.
+
+**Not drilled:** the other volumes (`maildata`, the core nodes' `pgdata` and `baoraft`, `appd`'s), putting restored data back into
+a running service, and restoring when the host itself is gone. A snapshot taken while a database is busy is crash-consistent,
+and this drill used one taken from a quiet database.
 
 ## Cost
 

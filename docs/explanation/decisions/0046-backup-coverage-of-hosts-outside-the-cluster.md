@@ -156,3 +156,16 @@ set by the module on the data volumes only, with a test that `target_tags` holds
 root volumes and the two off-tier copies of each data volume) are not removed by DLM once the policies stop selecting those volumes,
 so they are deleted by hand; the restic job and every other snapshot are untouched.
 
+## Phase 1 accepted: restore drill (2026-11-25)
+
+The acceptance of phase 1 was met: a volume made from the newest snapshot of the edge's data volume was readable and its contents
+recovered. On `appd`, a scratch Postgres with no network recovered Keycloak's data directory (automatic crash recovery, then ready),
+and every realm's users and service accounts, credentials (18), clients (70) and groups (32) equalled the live database; Headscale's
+database passed its integrity check with the live counts (20 nodes, 7 users); both DKIM private keys were valid and identical to
+production's; the mail account count matched (49). The restore took under a minute end to end and the cleanup 24 s, leaving
+nothing behind. The run of 2026-11-25 09:00 UTC also confirmed the fix above: 17 snapshots of 17 volumes, none of a root volume.
+
+What this does **not** show: that the other volumes restore, that restored data can be put back into a running service, or what a
+restore looks like when the host is gone. Phases 2 (logical backups of the edge) and 3 (Headscale and drills of each component)
+remain.
+
