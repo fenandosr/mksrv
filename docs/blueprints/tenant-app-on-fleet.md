@@ -25,6 +25,20 @@ SHA-256 of its contents (so the reference *is* the content). Changes run as
 [ADR 0034](../explanation/decisions/0034-tenant-local-hosts.md) and the draft
 [ADR 0036](../explanation/decisions/0036-per-tenant-service-user-local-hosts.md).
 
+### Operator decisions (2026-11-27)
+
+These are the operator's policy for new apps. mksrv itself does not implement or
+enforce them: [ADR 0036](../explanation/decisions/0036-per-tenant-service-user-local-hosts.md)
+stays *Proposed*, and the agent and its service user are the operator's tooling.
+
+- **The socket dispatcher is the pattern for new apps.** Root is used once, to
+  install it; routine deploys go through its verbs. A personal account with
+  `sudo` is for that installation and for the person who deploys.
+- **A contained entry session (sidecar) is mandatory when a person or a coding
+  agent has an account on the host.**
+- **Where it lives:** these documents here; the home of a reusable agent's code
+  is not decided.
+
 ## 2. What the fleet gives the app
 
 | The app needs | The fleet gives | Declared as | The credential lands in |
@@ -157,6 +171,31 @@ Checklist before step 8:
   warning: no snapshot held a database dump. Check a snapshot's contents (`restic ls`), and try a restore.
   The job now fails when staged files are not in the snapshot
   ([ADR 0018 addendum](../explanation/decisions/0018-restic-backups.md)). *Verified.*
+
+- **Apps in one tenant are not isolated from each other.** There is one database
+  and one bucket per tenant: whoever reads the `database` secret sees all of it,
+  and `storage-s3` is one key for every object. Apps that need isolation go in
+  separate tenants. *Verified in code.*
+- **Overlapping `kv_read` prefixes leak between apps.** A role reading `app-*`
+  also reads a second app's `app-<name>` secrets. Give each app its own prefix.
+- **Removing an AppRole from the YAML does not delete it**, nor its SecretIDs.
+  Likewise there is no command to [remove a tenant](../how-to/tenant-removal.md).
+- **A tenant with no public hostname cannot sign in through the tailnet
+  address.** A redirect URI is `https` under `base_domain`, or `http://localhost`
+  with `allow_localhost`: test the dark launch through an SSH tunnel.
+- **A plan code is not an approval.** A confirmation code derived from the plan
+  proves that what runs is what was planned, not that a person agreed: whoever
+  may ask for a plan gets the code. Approval comes from a per-caller verb list
+  that denies `deploy` to the agent, and holds only if the agent cannot also use
+  the person's credentials. *Reported by the SciNugget agent.*
+- **Installing a sidecar can lock its account out.** The host may keep SSH keys
+  centrally (`AuthorizedKeysFile`), or the developer may not arrive from the
+  network you restrict to. Read the effective configuration
+  (`sshd -T -C user=…,host=…,addr=…`) and `$SSH_CONNECTION`, and have the
+  installer verify it and revert (`sshd -t` only checks syntax). *Reported by the
+  SciNugget agent.*
+- **A per-user egress block also blocks the image pull** of that user: build the
+  image before loading the rule. *Reported by the SciNugget agent.*
 
 ## 9. Known gaps in mksrv
 
