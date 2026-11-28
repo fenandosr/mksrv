@@ -18,6 +18,8 @@ consult these while working, rather than reading them end to end.
 - [Tenant `storage:` (S3 + AppRoles)](tenant-storage.md) — a tenant's S3 bucket,
   its IAM credential mirrored to OpenBao, and the narrow `svc-<id>-<name>`
   AppRole that reads it.
+- [`mksrv tenant contract`](tenant-contract.md) — the offline JSON of what a
+  tenant's app sees: SQL, policies, realm, secret names, images.
 - [Monitoring](monitoring.md) — what's scraped, bundled dashboards, the alert
   rule catalog, and wiring up notifications.
 - [Tenant RBAC](rbac.md) — the four additive groups, what each grants across

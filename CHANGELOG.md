@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- New: `mksrv tenant contract <id>` prints, offline and without secrets, what a tenant's app sees of the fleet (database
+  SQL, OpenBao policies and AppRoles, Keycloak realm and clients, Redis ACL, PostgREST unit, secret field names, images),
+  built by the same functions `tenant apply` uses (ADR 0048). The realm, client, AppRole, OIDC-role and Transit builders
+  moved into shared functions with no intended change in behaviour.
+
 - Fix (infra, ADR 0046): DLM matches a volume carrying ANY of a policy's `target_tags`, not all of them. The three tier policies
   each listed the tier and `mksrv:env`, so each took every prod volume (root volumes included): the first run made 66 snapshots of
   22 volumes. Each policy now targets one tag, `mksrv:snapshot-group = <env>-<tier>`, set by the module on data volumes only, and a

@@ -50,3 +50,4 @@ unanswered.
 - [ADR 0045: Command help, shell completion and editor schemas, in three phases](0045-help-completion-and-editor-schemas.md)
 - [ADR 0046: Backup coverage of the hosts that hold state outside the Postgres cluster](0046-backup-coverage-of-hosts-outside-the-cluster.md)
 - [ADR 0047: Alertmanager, and a dead man's switch so that silence means something](0047-alertmanager-and-a-dead-mans-switch.md)
+- [ADR 0048: `mksrv tenant contract`, what a tenant's app sees, from the code that builds it](0048-tenant-contract.md)

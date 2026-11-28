@@ -190,6 +190,11 @@ func One(templatePath string, ctx Context) ([]byte, error) {
 	return renderOne(filepath.Base(templatePath), string(raw), ctx)
 }
 
+// Text renders a template already held in memory (an embedded asset).
+func Text(name, body string, ctx Context) ([]byte, error) {
+	return renderOne(name, body, ctx)
+}
+
 func renderOne(name, body string, ctx Context) ([]byte, error) {
 	tmpl, err := template.New(name).Option("missingkey=error").Funcs(funcs).Parse(body)
 	if err != nil {

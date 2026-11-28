@@ -74,6 +74,41 @@ func meshHostFQDN(env, host string) string {
 	return fmt.Sprintf("%s-%s.%s.mksrv", env, host, env)
 }
 
+// unboundAppRoleArgs writes one of the two AppRoles every openbao tenant gets
+// (`tenant-<id>` and `svc-<id>`): no CIDR binding, SecretIDs that do not expire.
+func unboundAppRoleArgs(role, policy string) []string {
+	return []string{
+		"write", "auth/approle/role/" + role,
+		"token_policies=" + policy,
+		"token_ttl=1h", "token_max_ttl=4h",
+		"secret_id_num_uses=0", "secret_id_ttl=0",
+	}
+}
+
+// transitKeyArgs creates the tenant's PII key: non-convergent, non-exportable,
+// rotated every 90 days.
+func transitKeyArgs(id string) []string {
+	return []string{
+		"write", "-f", "transit/keys/" + id,
+		"type=aes256-gcm96", "auto_rotate_period=2160h",
+	}
+}
+
+type oidcGroupRole struct {
+	suffix string
+	groups []string
+	policy string
+}
+
+// oidcGroupRoles are the human login roles: dev (any dev or admin; a bare
+// `bao login` lands here) and admin (requested with -role=tenant-<id>-admin).
+func oidcGroupRoles(id string) []oidcGroupRole {
+	return []oidcGroupRole{
+		{"dev", []string{"dev", "admin"}, "tenant-" + id + "-dev"},
+		{"admin", []string{"admin"}, "tenant-" + id + "-admin"},
+	}
+}
+
 // tenantDBSecretFields returns the KV fields for a tenant's Postgres
 // connection. On the distributed profile the target is the Patroni node list
 // over the mesh (with target_session_attrs so writes always land on the
@@ -399,21 +434,13 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 		_, _ = client.Run(ctx, baoExec(rootToken, "delete", "auth/oidc-"+id+"/role/tenant-"+id))
 
 		// The AppRole (services) gets the dev policy.
-		if _, err := client.Run(ctx, baoExec(rootToken,
-			"write", "auth/approle/role/"+role,
-			"token_policies="+role+"-dev",
-			"token_ttl=1h", "token_max_ttl=4h",
-			"secret_id_num_uses=0", "secret_id_ttl=0",
-		)); err != nil {
+		if _, err := client.Run(ctx, baoExec(rootToken, unboundAppRoleArgs(role, role+"-dev")...)); err != nil {
 			return fmt.Errorf("openbao %s: write approle: %w", id, err)
 		}
 
 		// Transit key for PII-column encryption. Non-convergent (same plaintext
 		// -> different ciphertext), non-exportable, auto-rotated every 90 days.
-		if _, err := client.Run(ctx, baoExec(rootToken,
-			"write", "-f", "transit/keys/"+id,
-			"type=aes256-gcm96", "auto_rotate_period=2160h",
-		)); err != nil {
+		if _, err := client.Run(ctx, baoExec(rootToken, transitKeyArgs(id)...)); err != nil {
 			return fmt.Errorf("openbao %s: write transit key: %w", id, err)
 		}
 
@@ -460,12 +487,7 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 		); err != nil {
 			return fmt.Errorf("openbao %s: write policy %s: %w", id, svcRole, err)
 		}
-		if _, err := client.Run(ctx, baoExec(rootToken,
-			"write", "auth/approle/role/"+svcRole,
-			"token_policies="+svcRole,
-			"token_ttl=1h", "token_max_ttl=4h",
-			"secret_id_num_uses=0", "secret_id_ttl=0",
-		)); err != nil {
+		if _, err := client.Run(ctx, baoExec(rootToken, unboundAppRoleArgs(svcRole, svcRole)...)); err != nil {
 			return fmt.Errorf("openbao %s: write approle %s: %w", id, svcRole, err)
 		}
 		svcRIDRes, err := client.Run(ctx, baoExec(rootToken, "read", "-format=json", "auth/approle/role/"+svcRole+"/role-id"))
@@ -500,13 +522,11 @@ func (f *fleet) provisionOpenBaoTenants(ctx context.Context, printer ui.Printer,
 		}
 		// dev role: any dev or admin (bare `bao login` lands here). admin role:
 		// requested explicitly with `-role=tenant-<id>-admin`.
-		if _, err := client.RunInput(ctx, baoExec(rootToken, "write", oidcGroupRolePath(id, "dev"), "-"),
-			oidcGroupRolePayload([]string{"dev", "admin"}, role+"-dev")); err != nil {
-			return fmt.Errorf("openbao %s: oidc dev role: %w", id, err)
-		}
-		if _, err := client.RunInput(ctx, baoExec(rootToken, "write", oidcGroupRolePath(id, "admin"), "-"),
-			oidcGroupRolePayload([]string{"admin"}, role+"-admin")); err != nil {
-			return fmt.Errorf("openbao %s: oidc admin role: %w", id, err)
+		for _, r := range oidcGroupRoles(id) {
+			if _, err := client.RunInput(ctx, baoExec(rootToken, "write", oidcGroupRolePath(id, r.suffix), "-"),
+				oidcGroupRolePayload(r.groups, r.policy)); err != nil {
+				return fmt.Errorf("openbao %s: oidc %s role: %w", id, r.suffix, err)
+			}
 		}
 
 		// Mirror the tenant's own connection secrets into its KV path so the
