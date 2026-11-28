@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Docs: how to [remove a tenant](docs/how-to/tenant-removal.md) by hand (no command does it; written from the code, not
+  yet executed), and the tenant app blueprint records the operator's decisions on the deploy dispatcher and the entry
+  sidecar, plus the traps of per-app isolation, plan codes and sidecar installation.
+
 - Fix (infra, ADR 0046): DLM matches a volume carrying ANY of a policy's `target_tags`, not all of them. The three tier policies
   each listed the tier and `mksrv:env`, so each took every prod volume (root volumes included): the first run made 66 snapshots of
   22 volumes. Each policy now targets one tag, `mksrv:snapshot-group = <env>-<tier>`, set by the module on data volumes only, and a
