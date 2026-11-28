@@ -107,17 +107,7 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 	}
 	status, _ := c.do(ctx, http.MethodGet, "/realms/"+spec.Realm, nil, &existing)
 	if status == http.StatusNotFound {
-		body := map[string]any{
-			"realm":                 spec.Realm,
-			"enabled":               true,
-			"displayName":           spec.DisplayName,
-			"loginWithEmailAllowed": true,
-			"registrationAllowed":   false,
-			"sslRequired":           "external",
-		}
-		if spec.LoginTheme != "" {
-			body["loginTheme"] = spec.LoginTheme
-		}
+		body := RealmRepresentation(spec)
 		if _, err := c.do(ctx, http.MethodPost, "/realms", body, nil); err != nil {
 			return result, err
 		}
@@ -140,43 +130,29 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 		// resetPasswordAllowed + loginWithEmailAllowed put the "Forgot
 		// password?" link on the login page — pointless without SMTP, so
 		// they ride along with it here.
-		if _, err := c.do(ctx, http.MethodPut, "/realms/"+spec.Realm, map[string]any{
-			"realm":                 spec.Realm,
-			"resetPasswordAllowed":  true,
-			"loginWithEmailAllowed": true,
-			"smtpServer": map[string]any{
-				"host":            spec.SMTP.Host,
-				"port":            strconv.Itoa(spec.SMTP.Port),
-				"from":            spec.SMTP.From,
-				"fromDisplayName": spec.SMTP.FromDisplay,
-				"ssl":             "false",
-				"starttls":        "true",
-				"auth":            "true",
-				"user":            spec.SMTP.User,
-				"password":        spec.SMTP.Password,
-			},
-		}, nil); err != nil {
+		body := PasswordResetSettings()
+		body["realm"] = spec.Realm
+		body["smtpServer"] = map[string]any{
+			"host":            spec.SMTP.Host,
+			"port":            strconv.Itoa(spec.SMTP.Port),
+			"from":            spec.SMTP.From,
+			"fromDisplayName": spec.SMTP.FromDisplay,
+			"ssl":             "false",
+			"starttls":        "true",
+			"auth":            "true",
+			"user":            spec.SMTP.User,
+			"password":        spec.SMTP.Password,
+		}
+		if _, err := c.do(ctx, http.MethodPut, "/realms/"+spec.Realm, body, nil); err != nil {
 			return result, fmt.Errorf("set smtp on realm %s: %w", spec.Realm, err)
 		}
 		result.SMTPUpdated = true
 	}
 
-	if st := spec.Settings; st != nil {
-		body := map[string]any{"realm": spec.Realm}
-		if st.AccessTokenLifespan > 0 {
-			body["accessTokenLifespan"] = st.AccessTokenLifespan
-		}
-		if st.SSOSessionIdle > 0 {
-			body["ssoSessionIdleTimeout"] = st.SSOSessionIdle
-		}
-		if st.RefreshTokenRotation != nil {
-			body["revokeRefreshToken"] = *st.RefreshTokenRotation
-			body["refreshTokenMaxReuse"] = 0
-		}
-		if len(body) > 1 {
-			if _, err := c.do(ctx, http.MethodPut, "/realms/"+spec.Realm, body, nil); err != nil {
-				return result, fmt.Errorf("set realm settings on %s: %w", spec.Realm, err)
-			}
+	if body := SettingsRepresentation(spec.Settings); len(body) > 0 {
+		body["realm"] = spec.Realm
+		if _, err := c.do(ctx, http.MethodPut, "/realms/"+spec.Realm, body, nil); err != nil {
+			return result, fmt.Errorf("set realm settings on %s: %w", spec.Realm, err)
 		}
 	}
 
@@ -205,21 +181,7 @@ func (c *Client) EnsureRealm(ctx context.Context, spec RealmSpec) (RealmResult, 
 		return result, err
 	}
 	for _, cs := range spec.Clients {
-		origins := cs.WebOrigins
-		if origins == nil {
-			origins = []string{"+"}
-		}
-		body := map[string]any{
-			"clientId":                  cs.ClientID,
-			"enabled":                   true,
-			"publicClient":              cs.Public,
-			"standardFlowEnabled":       true,
-			"directAccessGrantsEnabled": cs.DirectGrants,
-			"serviceAccountsEnabled":    !cs.Public,
-			"redirectUris":              cs.RedirectURIs,
-			"webOrigins":                origins,
-			"attributes":                clientAttributes(cs),
-		}
+		body := ClientRepresentation(cs)
 		if uuid, ok := existingClients[cs.ClientID]; ok {
 			if _, err := c.do(ctx, http.MethodPut, "/realms/"+spec.Realm+"/clients/"+uuid, body, nil); err != nil {
 				return result, err
@@ -448,20 +410,7 @@ func (c *Client) grantTeamManagement(ctx context.Context, realm, group string) e
 // EnsureClient creates or updates a single OIDC client in an existing realm and
 // returns its secret (empty for public clients).
 func (c *Client) EnsureClient(ctx context.Context, realm string, spec ClientSpec) (string, error) {
-	origins := spec.WebOrigins
-	if origins == nil {
-		origins = []string{"+"}
-	}
-	body := map[string]any{
-		"clientId":                  spec.ClientID,
-		"enabled":                   true,
-		"publicClient":              spec.Public,
-		"standardFlowEnabled":       true,
-		"directAccessGrantsEnabled": false,
-		"redirectUris":              spec.RedirectURIs,
-		"webOrigins":                origins,
-		"attributes":                map[string]string{"pkce.code.challenge.method": "S256"},
-	}
+	body := singleClientRepresentation(spec)
 	existing, err := c.clientUUIDs(ctx, realm)
 	if err != nil {
 		return "", err
@@ -522,16 +471,7 @@ func (c *Client) ensureAudienceMapper(ctx context.Context, realm, clientUUID, cl
 			return nil
 		}
 	}
-	_, err := c.do(ctx, http.MethodPost, "/realms/"+realm+"/clients/"+clientUUID+"/protocol-mappers/models", map[string]any{
-		"name":           "mksrv-audience",
-		"protocol":       "openid-connect",
-		"protocolMapper": "oidc-audience-mapper",
-		"config": map[string]string{
-			"included.client.audience": clientID,
-			"access.token.claim":       "true",
-			"id.token.claim":           "true",
-		},
-	}, nil)
+	_, err := c.do(ctx, http.MethodPost, "/realms/"+realm+"/clients/"+clientUUID+"/protocol-mappers/models", AudienceMapper(clientID), nil)
 	return err
 }
 

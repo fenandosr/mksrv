@@ -50,6 +50,7 @@ var vpnRedirectURIs = []string{
 
 func (a *App) newTenantCommand(opts *globalOptions) *cobra.Command {
 	cmd := &cobra.Command{Use: "tenant", Short: "Reconcile tenant realms, mesh users, and the VPN broker"}
+	cmd.AddCommand(a.newTenantContractCommand(opts))
 	cmd.AddCommand(&cobra.Command{
 		Use:     "apply [ID...]",
 		Short:   "Create/update realms, groups, OIDC clients, and configd",
@@ -179,62 +180,7 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 		if err != nil {
 			return &ExitError{Code: 1, Err: err}
 		}
-		clients := []keycloak.ClientSpec{
-			{
-				ClientID:        vpnClientID,
-				Public:          true,
-				RedirectURIs:    vpnRedirectURIs,
-				HardcodedClaims: map[string]string{"role": dbWebRole}, // global PostgREST landing role (ADR 0026)
-				GroupsClaim:     true,
-			},
-			{ClientID: configdClientID, Public: false, RedirectURIs: []string{}},
-		}
-		if slices.Contains(tenant.Stacks, "openbao") {
-			clients = append(clients, keycloak.ClientSpec{
-				ClientID: openbaoClientID, Public: false, RedirectURIs: openbaoRedirectURIs,
-				GroupsClaim: true,
-			})
-		}
-		if tenant.WebSSO() {
-			clients = append(clients, keycloak.ClientSpec{
-				ClientID: webSSOClientID(id), Public: false,
-				RedirectURIs: webSSORedirectURIs(tenant), GroupsClaim: true,
-			})
-		}
-		for _, dc := range tenant.Keycloak.Clients {
-			spec := keycloak.ClientSpec{
-				ClientID:               dc.ID,
-				Public:                 dc.Public,
-				RedirectURIs:           dc.RedirectURIs,
-				PostLogoutRedirectURIs: dc.PostLogoutRedirectURIs,
-				DirectGrants:           dc.DirectGrants,
-				Audiences:              dc.Audience,
-				GroupsClaim:            dc.Claims.Groups,
-				PruneMappers:           true,
-			}
-			if dc.Claims.PostgRESTRole {
-				spec.HardcodedClaims = map[string]string{"role": dbWebRole}
-			}
-			clients = append(clients, spec)
-		}
-		var settings *keycloak.RealmSettings
-		if st := tenant.Keycloak.Settings; st != nil {
-			settings = &keycloak.RealmSettings{
-				AccessTokenLifespan:  st.AccessTokenLifespan,
-				RefreshTokenRotation: st.RefreshTokenRotation,
-				SSOSessionIdle:       st.SSOSessionIdle,
-			}
-		}
-		res, err := kc.EnsureRealm(ctx, keycloak.RealmSpec{
-			Realm:       realm,
-			DisplayName: tenant.DisplayName,
-			Settings:    settings,
-			Groups:      tenant.KeycloakGroups(),
-			AdminGroup:  "admin",
-			Clients:     clients,
-			LoginTheme:  themeName(id),
-			SMTP:        smtp,
-		})
+		res, err := kc.EnsureRealm(ctx, tenantRealmSpec(id, tenant, smtp))
 		if err != nil {
 			return &ExitError{Code: 1, Err: fmt.Errorf("realm %s: %w", realm, err)}
 		}
@@ -305,6 +251,66 @@ func (a *App) runTenantApply(ctx context.Context, printer ui.Printer, globals *g
 		return &ExitError{Code: 1, Err: err}
 	}
 	return nil
+}
+
+// tenantRealmSpec is everything `tenant apply` declares in a tenant's realm.
+func tenantRealmSpec(id string, tenant model.Tenant, smtp *keycloak.SMTPSpec) keycloak.RealmSpec {
+	clients := []keycloak.ClientSpec{
+		{
+			ClientID:        vpnClientID,
+			Public:          true,
+			RedirectURIs:    vpnRedirectURIs,
+			HardcodedClaims: map[string]string{"role": dbWebRole}, // global PostgREST landing role (ADR 0026)
+			GroupsClaim:     true,
+		},
+		{ClientID: configdClientID, Public: false, RedirectURIs: []string{}},
+	}
+	if slices.Contains(tenant.Stacks, "openbao") {
+		clients = append(clients, keycloak.ClientSpec{
+			ClientID: openbaoClientID, Public: false, RedirectURIs: openbaoRedirectURIs,
+			GroupsClaim: true,
+		})
+	}
+	if tenant.WebSSO() {
+		clients = append(clients, keycloak.ClientSpec{
+			ClientID: webSSOClientID(id), Public: false,
+			RedirectURIs: webSSORedirectURIs(tenant), GroupsClaim: true,
+		})
+	}
+	for _, dc := range tenant.Keycloak.Clients {
+		spec := keycloak.ClientSpec{
+			ClientID:               dc.ID,
+			Public:                 dc.Public,
+			RedirectURIs:           dc.RedirectURIs,
+			PostLogoutRedirectURIs: dc.PostLogoutRedirectURIs,
+			DirectGrants:           dc.DirectGrants,
+			Audiences:              dc.Audience,
+			GroupsClaim:            dc.Claims.Groups,
+			PruneMappers:           true,
+		}
+		if dc.Claims.PostgRESTRole {
+			spec.HardcodedClaims = map[string]string{"role": dbWebRole}
+		}
+		clients = append(clients, spec)
+	}
+	var settings *keycloak.RealmSettings
+	if st := tenant.Keycloak.Settings; st != nil {
+		settings = &keycloak.RealmSettings{
+			AccessTokenLifespan:  st.AccessTokenLifespan,
+			RefreshTokenRotation: st.RefreshTokenRotation,
+			SSOSessionIdle:       st.SSOSessionIdle,
+		}
+	}
+	return keycloak.RealmSpec{
+		Realm:       tenantRealm(tenant),
+		DisplayName: tenant.DisplayName,
+		Settings:    settings,
+		Groups:      tenant.KeycloakGroups(),
+		AdminGroup:  "admin",
+		Clients:     clients,
+		LoginTheme:  themeName(id),
+		SMTP:        smtp,
+	}
 }
 
 // reconcileConfigd ensures the broker's signing key, Headscale API key, and
